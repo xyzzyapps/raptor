@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Raptor Language Logo" width="160" />
+  <img src="assets/logo_wt.png" alt="Raptor Language Logo" width="160" />
 </p>
 
 # Raptor - High-Performance Language Runtime for MoarVM & Native Systems

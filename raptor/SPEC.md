@@ -205,7 +205,7 @@ Raptor compiles directly to WebAssembly (`GOOS=js GOARCH=wasm`) with zero extern
 ## 12. RaptorHP Embedded Template Server (`bin/raptorhp.exe`)
 
 - **Tags**: Supports PHP-style embedded template tags (`<?raptor ... ?>`, `<?rp ... ?>`, `<?php ... ?>`, `<?= $expr ?>`, and `<? ... ?>`).
-- **CLI & Web Server (`cmd/raptor-php/main.go`)**:
+- **CLI & Web Server (`cmd/raptorhp/main.go`)**:
   - `raptorhp <file.phtml|file.html>`: Direct template rendering to standard output.
   - `raptorhp -r "<code>"`: Direct template expression evaluation.
   - `raptorhp -S localhost:8000`: Built-in development HTTP server executing `.phtml`, `.rhtml`, `.rp`, `.php` scripts dynamically, populating `%_GET` / `$_GET`, `%_POST` / `$_POST`, and `%_SERVER` / `$_SERVER` superglobals.
@@ -231,5 +231,47 @@ Raptor compiles directly to WebAssembly (`GOOS=js GOARCH=wasm`) with zero extern
 | **Virtual Machine & JIT** | Opcode tree interpreter walk (`OP*` tree) without core JIT | MoarVM 64-bit register VM with type-specializing JIT compiler | **Hardware native code execution** on hot code paths |
 | **Dynamic Invariant Validation** | Manual `die unless ...` or heavy module wrappers | Native `subset` refinement types and multi-sub Predicate Dispatch | **Built-in syntax-level contract checks** with zero boilerplate |
 | **Tight Arithmetic Loops** | ~0.8s - 1.2s per 1,000,000 loop ops | ~1.0s tree-walk / sub-millisecond MoarVM JIT execution | **Comparable or superior execution speed** with static Flyweight value reuse |
+
+---
+
+## 15. Building From Source & Binary Artifacts
+
+### 15.1 Build Prerequisites
+
+- **Go 1.22+** (verified with Go 1.26 on Windows/amd64).
+- **MSYS2 UCRT64 toolchain** (`C:\msys64\ucrt64\bin`) — only required to rebuild `bin/moar.dll` from the MoarVM C source tree.
+- **Perl** — only required to rebuild `bin/moar.dll` (drives MoarVM `Configure.pl`).
+- No external Go modules: `go.mod` pins the local `moarvm-go` module via `replace moarvm-go => ../moarvm-go` (sibling directory of `raptor/`).
+
+### 15.2 Binary Artifacts
+
+| Artifact | Produced By | Build Command |
+| :--- | :--- | :--- |
+| `bin/raptor.exe` | `cmd/raptor` | `go build -o bin/raptor.exe ./cmd/raptor` |
+| `bin/raptorhp.exe` | `cmd/raptorhp` | `go build -o bin/raptorhp.exe ./cmd/raptorhp` |
+| `web/raptor.wasm` | `cmd/wasm` (`//go:build js && wasm`) | `GOOS=js GOARCH=wasm go build -o web/raptor.wasm ./cmd/wasm` |
+| `bin/demo_app.exe` | `raptor pack` of `examples/demo_showcase.rp` | `raptor pack examples\demo_showcase.rp -o bin\demo_app.exe` |
+| `bin/raylib_game.exe` | `raptor pack` of `examples/raylib_game.rp` | `raptor pack examples\raylib_game.rp -o bin\raylib_game.exe` |
+
+`raptor pack` generates a temporary Go module that embeds the Raptor script and the full runtime, then compiles it into a self-contained executable.
+
+### 15.3 Bundled Runtime DLLs (external, not built by this repo)
+
+| DLL | Origin | Purpose |
+| :--- | :--- | :--- |
+| `bin/moar.dll` | Built from `../moarvm-go/vendor/MoarVM` (helper: `../moarvm-go/vendor/apply_patches_msys.sh`) | MoarVM 64-bit JIT engine; loaded by `runtime/compiler.go` / `moarvm-go/engine` for compiled bytecode execution |
+| `bin/libraylib.dll` | MSYS2 UCRT64 `C:\msys64\ucrt64\bin\libraylib.dll` (Raylib 5.5) | Raylib desktop graphics FFI (`lib/Raylib.rp`) |
+| `bin/sqlite3.dll` | MSYS2 UCRT64 `C:\msys64\ucrt64\bin\libsqlite3-0.dll` | Native SQLite FFI (`runtime/sqlite.go`) |
+
+`ffi_load` (in `runtime/ffi.go`) resolves libraries by searching the given path, `bin/`, the executable directory, and the system `PATH`.
+
+### 15.4 Verification Commands
+
+```powershell
+go test ./...                  # Go unit test suites (58 suites in runtime/)
+.\bin\raptor.exe test t\       # Raptor TAP harness (6 files, 47 assertions)
+.\bin\raptor.exe -e 'say 42'
+.\bin\raptorhp.exe -r '<b><?= 6 * 7 ?></b>'
+```
 
 

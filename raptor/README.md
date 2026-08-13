@@ -26,12 +26,97 @@ Licensed under the **Artistic License 2.0**.
 
 ---
 
-## Standalone Executables (`raptor/bin/`)
+## Binaries & Build Artifacts
 
-| Executable | Description |
-| :--- | :--- |
-| **`bin/raptor.exe`** | Unified CLI runner, interactive REPL, MoarVM compiler, TAP test harness (`raptor test`), terminal documentation reader (`raptor doc`), and standalone binary packager (`raptor pack`) |
-| **`bin/demo_app.exe`** | Standalone packaged executable containing embedded Raptor application and runtime |
+Pre-built executables and bundled runtime libraries ship in `raptor/bin/`; the WebAssembly target lives at `web/raptor.wasm`.
+
+### Compiled from Go source
+
+| Binary | Source | Description |
+| :--- | :--- | :--- |
+| **`bin/raptor.exe`** | `cmd/raptor/main.go` | Unified CLI: script runner, interactive REPL, MoarVM bytecode compiler (`raptor compile`), TAP test harness (`raptor test`), terminal manual reader (`raptor doc`), PodLit weave/tangle/stitch, package manager (`raptor init`/`get`/`install`), WebAssembly playground server (`raptor serve`), and standalone packager (`raptor pack`) |
+| **`bin/raptorhp.exe`** | `cmd/raptorhp/main.go` | RaptorHP PHP-style embedded template engine & development web server: `raptorhp <file.phtml>`, `raptorhp -r "<code>"`, `raptorhp -S localhost:8000` |
+| **`web/raptor.wasm`** | `cmd/wasm/main.go` | WebAssembly browser runtime exporting `raptorEval`, `raptorWeave`, `raptorTangle`, `raptorStitch`, and `raptorVersion`; served by `raptor serve` |
+
+### Packaged applications (`raptor pack`)
+
+`raptor pack <script.rp> -o <app.exe>` embeds a Raptor script plus the full runtime into a self-contained executable:
+
+| Binary | Packed script | Description |
+| :--- | :--- | :--- |
+| **`bin/demo_app.exe`** | `examples/demo_showcase.rp` | Feature showcase: operator suite, C-structs, TUI styling, sockets, PortAudio synthesis, concurrency, environment globals |
+| **`bin/raylib_game.exe`** | `examples/raylib_game.rp` | Interactive 60 FPS Raylib 5.5 desktop game window |
+
+### Bundled runtime libraries (not built by this repository)
+
+These DLLs are copied into `bin/` so every executable is zero-dependency. At runtime `ffi_load` searches `bin/`, the executable directory, and the system `PATH` (see `runtime/ffi.go`).
+
+| Library | Origin | Used for |
+| :--- | :--- | :--- |
+| **`bin/moar.dll`** | Built from the MoarVM C source tree in `../moarvm-go/vendor/MoarVM` (see "Building from Source" below) | MoarVM 64-bit JIT / 6model engine executing `raptor compile` bytecode |
+| **`bin/libraylib.dll`** | Raylib 5.5 from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin\libraylib.dll`) | Raylib desktop graphics engine (`lib/Raylib.rp`, `examples/raylib_game.rp`) |
+| **`bin/sqlite3.dll`** | SQLite from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin\libsqlite3-0.dll`) | Native SQLite database (`sqlite_open`, `sqlite_query`, `sqlite_close`) |
+
+---
+
+## Building from Source
+
+### Prerequisites
+
+- **Go 1.22+** (project developed and verified with Go 1.26 on Windows/amd64)
+- **MSYS2 UCRT64 toolchain** (`C:\msys64\ucrt64\bin`) — required only to rebuild `moar.dll` from MoarVM source
+- **Perl** — required only to rebuild `moar.dll` (runs MoarVM's `Configure.pl`)
+- **No external Go module downloads** — `go.mod` declares a single dependency on the local `moarvm-go` module via `replace moarvm-go => ../moarvm-go`, so `moarvm-go/` must sit next to `raptor/`.
+
+### 1. Compile the Go binaries
+
+```powershell
+cd raptor
+
+# Unified CLI
+go build -o bin/raptor.exe ./cmd/raptor
+
+# RaptorHP template engine & server
+go build -o bin/raptorhp.exe ./cmd/raptorhp
+
+# WebAssembly in-browser runtime
+$env:GOOS = "js"; $env:GOARCH = "wasm"
+go build -o web/raptor.wasm ./cmd/wasm
+Remove-Item Env:GOOS, Env:GOARCH
+```
+
+### 2. Package standalone applications
+
+```powershell
+.\bin\raptor.exe pack examples\demo_showcase.rp -o bin\demo_app.exe
+.\bin\raptor.exe pack examples\raylib_game.rp -o bin\raylib_game.exe
+```
+
+### 3. Bundle the runtime DLLs
+
+The three DLLs in `bin/` are not produced by the Go build; they are bundled from external sources:
+
+```powershell
+# moar.dll — build the vendored MoarVM C source (see ../moarvm-go/vendor/apply_patches_msys.sh):
+#   perl Configure.pl --os=mingw32 --compiler=gcc --prefix=<build>
+#   make -j8 && make install
+Copy-Item ..\moarvm-go\build\moarvm\bin\moar.dll bin\
+
+# Raylib 5.5 + SQLite3 — MSYS2 UCRT64 packages
+# (mingw-w64-ucrt-x86_64-raylib, mingw-w64-ucrt-x86_64-sqlite3)
+Copy-Item C:\msys64\ucrt64\bin\libraylib.dll   bin\libraylib.dll
+Copy-Item C:\msys64\ucrt64\bin\libsqlite3-0.dll bin\sqlite3.dll
+```
+
+### 4. Verify the build
+
+```powershell
+go test ./...                      # Go unit test suites (runtime/)
+.\bin\raptor.exe test t\           # Raptor TAP test harness (6 suites, 47 assertions)
+.\bin\raptor.exe -e 'say "Hello, Raptor!"'
+.\bin\raptorhp.exe -r '<b><?= 6 * 7 ?></b>'
+.\bin\raptorhp.exe -S localhost:8000   # development template server
+```
 
 ---
 

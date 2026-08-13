@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const version = "1.0.0 (Raptor PHP-Style Template Engine)"
+const version = "1.0.0 (RaptorHP PHP-Style Template Engine)"
 
 func main() {
 	evalFlag := flag.String("r", "", "Run PHP-style template/code inline without tags")
@@ -20,7 +20,7 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("Raptor-PHP Version %s\n", version)
+		fmt.Printf("RaptorHP Version %s\n", version)
 		return
 	}
 
@@ -44,12 +44,12 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Printf("Raptor-PHP Template Engine & Server (Version %s)\n\n", version)
+	fmt.Printf("RaptorHP Template Engine & Server (Version %s)\n\n", version)
 	fmt.Println("Usage:")
-	fmt.Println("  raptor-php <file.phtml|file.html|file.rp>  Execute template file and render HTML to stdout")
-	fmt.Println("  raptor-php -r '<h1><?= \"Hello\" ?></h1>'  Render inline template string")
-	fmt.Println("  raptor-php -S localhost:8000               Start built-in development HTTP template server")
-	fmt.Println("  raptor-php -v                              Show version information")
+	fmt.Println("  raptorhp <file.phtml|file.html|file.rp>  Execute template file and render HTML to stdout")
+	fmt.Println("  raptorhp -r '<h1><?= \"Hello\" ?></h1>'  Render inline template string")
+	fmt.Println("  raptorhp -S localhost:8000               Start built-in development HTTP template server")
+	fmt.Println("  raptorhp -v                              Show version information")
 }
 
 func runInlineCode(templateSource string) {
@@ -79,7 +79,7 @@ func runTemplateFile(path string) {
 }
 
 func runDevServer(addr string) {
-	fmt.Printf("=== Raptor-PHP Development Web Server ===\n")
+	fmt.Printf("=== RaptorHP Development Web Server ===\n")
 	fmt.Printf("Listening on http://%s/\n", addr)
 	fmt.Printf("Document Root is: %s\n", getCurrentDir())
 	fmt.Printf("Press Ctrl+C to stop server.\n\n")
@@ -140,12 +140,12 @@ func runDevServer(addr string) {
 			if err != nil {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "<h3>Raptor-PHP Template Error</h3><pre>%v</pre>", err)
+				fmt.Fprintf(w, "<h3>RaptorHP Template Error</h3><pre>%v</pre>", err)
 				return
 			}
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("X-Powered-By", "Raptor-PHP 1.0")
+			w.Header().Set("X-Powered-By", "RaptorHP 1.0")
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, rendered)
 		} else {

@@ -196,3 +196,10 @@ go test ./...                      # Go unit test suites (runtime/)
 go test -v ./...
 ```
 
+## Notes
+
+The language was mostly written by Anti Gravity - Gemini 3.6. Library bindings, podlit are written by Gemini 3.7.
+
+Built on windows. It should work on Linux. Expect bugs, memory leaks and probably some wrong semantics. Future versions will make it closer to Raku.
+
+

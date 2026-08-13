@@ -1,0 +1,26 @@
+# ==============================================================================
+# PortAudio V19 Native Audio Synthesizer Library for Raptor (.rp)
+# ==============================================================================
+
+# Initialize Audio System
+sub init_audio() {
+    return pa_init();
+}
+
+# Terminate Audio System
+sub close_audio() {
+    return pa_terminate();
+}
+
+# Synthesize Procedural Waveform
+sub synth_sine($freq, $duration, $sample_rate = 44100, $volume = 0.5) {
+    return pa_sine_wave($freq, $duration, $sample_rate, $volume);
+}
+
+sub synth_square($freq, $duration, $sample_rate = 44100, $volume = 0.5) {
+    return pa_square_wave($freq, $duration, $sample_rate, $volume);
+}
+
+sub synth_sawtooth($freq, $duration, $sample_rate = 44100, $volume = 0.5) {
+    return pa_sawtooth_wave($freq, $duration, $sample_rate, $volume);
+}

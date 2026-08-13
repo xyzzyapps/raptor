@@ -1,0 +1,54 @@
+The Artistic License 2.0
+
+Copyright (c) 2026 Raptor Project Contributors.
+
+Everyone is permitted to copy and distribute verbatim copies of this license document, but changing it is not allowed.
+
+Preamble
+
+This license establishes the terms under which a given free software Package may be copied, modified, distributed, and/or redistributed. The intent is that the Copyright Holder maintains some artistic control over the development of that Package while still keeping the Package open source and free software.
+
+You are always permitted to make any use of this Package that would be considered "fair use" under the law in any jurisdiction, including making private modifications that you do not distribute. Any other use will be governed by the terms of this license.
+
+Definitions
+
+"Package" refers to the collection of files distributed by the Copyright Holder, and derivatives of that collection of files created through textual modification.
+
+"Standard Version" refers to such a Package if it has not been modified, or has been modified only in ways explicitly requested by the Copyright Holder.
+
+"Modified Version" means any form of the Package that has been made by someone other than the Copyright Holder, through additions, deletions, or substitutions of the code or other files of the Package.
+
+"Copyright Holder" means the person(s) or entity listed in the copyright notice of the Package.
+
+"You" means the licensee, or any person, company, or other entity acting on behalf of the licensee.
+
+"Distribute" means to make available to others whether by offering copies for download, distributing physical media, transmitting through a network, or any other method.
+
+Permission for Use and Modification Without Distribution
+
+(1) You are permitted to use the Standard Version and create and use Modified Versions for any purpose without restriction, provided that you do not Distribute the Modified Version.
+
+Permissions for Redistribution of the Standard Version
+
+(2) You may Distribute verbatim copies of the Source form of the Standard Version of this Package in any medium without restriction, either gratis or for a Distributor Fee, provided that you duplicate all of the original copyright notices and associated disclaimers. At your discretion, such verbatim copies may or may not include a Compiled form of the Package.
+
+(3) You may apply any bug fixes, portability fixes and other modifications made available from the Copyright Holder. The resulting Package will still be considered the Standard Version, and as such will be subject to the original license terms.
+
+Distribution of Modified Versions of the Package as Source
+
+(4) You may Distribute your Modified Version as Source (either gratis or for a Distributor Fee, and with or without a Compiled form of the Modified Version) provided that you clearly document how it differs from the Standard Version, including, but not limited to, documenting any non-standard features, executables, or modules, and provide prominent notice in each changed file stating how, when, and where you changed that file; and at least ONE of the following:
+
+(a) make the Modified Version available under the Artistic License 2.0 itself to anyone who receives it; or
+(b) make the Modified Version available under the GNU General Public License (GPL) or the GNU Lesser General Public License (LGPL); or
+(c) make the Modified Version freely available to the public in Source form under any terms that permit free redistribution and modification; or
+(d) make other distribution arrangements with the Copyright Holder.
+
+Distribution of Compiled Forms of the Standard Version or Modified Versions without the Source
+
+(5) You may Distribute Compiled forms of the Standard Version or Modified Versions without the Source, provided that you include complete instructions on how to get the Source of the Package. Such instructions must be valid at the time of distribution.
+
+(6) You may charge a Distributor Fee for distributing copies of any form of this Package, and for any associated services you choose to provide.
+
+Disclaimer of Warranty
+
+THE PACKAGE IS PROVIDED BY THE COPYRIGHT HOLDER AND CONTRIBUTORS "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES. THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT ARE DISCLAIMED TO THE EXTENT PERMITTED BY YOUR LOCAL LAW. UNLESS REQUIRED BY LAW, NO COPYRIGHT HOLDER OR CONTRIBUTOR WILL BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THE PACKAGE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

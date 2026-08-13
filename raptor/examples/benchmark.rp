@@ -1,0 +1,56 @@
+# ==============================================================================
+# Raptor Language Performance Benchmark (.rp)
+# ==============================================================================
+
+say "==================================================";
+say "       Raptor Language Performance Benchmark      ";
+say "==================================================";
+
+# 1. Tight Integer Calculation Loop (1,000,000 operations)
+say "\n[1] Running Tight Integer Arithmetic Loop (1,000,000 iterations)...";
+my $t0 = time();
+my $sum = 0;
+my $i = 0;
+while $i < 1000000 {
+    $sum = $sum + $i;
+    $i = $i + 1;
+}
+my $t1 = time();
+say "    Result Sum : " ~ $sum;
+say "    Elapsed    : " ~ ($t1 - $t0) ~ "s";
+
+# 2. C-ABI Struct Field Mutation (500,000 ops)
+say "\n[2] Running C-ABI Struct Field Access & Mutation (500,000 operations)...";
+struct Point {
+    int64 $x;
+    int64 $y;
+}
+
+my $p = Point.new();
+my $st0 = time();
+my $k = 0;
+while $k < 500000 {
+    $p.x = $k;
+    $p.y = $p.x * 2;
+    $k = $k + 1;
+}
+my $st1 = time();
+say "    Point Final: (" ~ $p.x ~ ", " ~ $p.y ~ ")";
+say "    Elapsed    : " ~ ($st1 - $st0) ~ "s";
+
+# 3. Recursive Fibonacci Function Dispatch (fib(24))
+say "\n[3] Running Recursive Subroutine Dispatch (fib(24))...";
+sub fib($n) {
+    if $n <= 1 { return $n; }
+    return fib($n - 1) + fib($n - 2);
+}
+
+my $ft0 = time();
+my $res = fib(24);
+my $ft1 = time();
+say "    fib(24)    : " ~ $res;
+say "    Elapsed    : " ~ ($ft1 - $ft0) ~ "s";
+
+say "\n==================================================";
+say "         Benchmark Completed Successfully         ";
+say "==================================================";

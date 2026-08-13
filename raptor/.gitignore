@@ -1,0 +1,25 @@
+# Temporary, scratch, and log files
+scratch/
+*.tmp
+*.log
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Build intermediate objects
+*.o
+*.obj
+*.a
+
+# Explicitly allow DLLs and EXEs for now
+!*.dll
+!*.exe
+!bin/*.dll
+!bin/*.exe

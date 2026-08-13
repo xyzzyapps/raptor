@@ -1,0 +1,18 @@
+# Lexical Closures in Raku4
+
+sub make_counter($start, $step) {
+    my $count = $start;
+    return sub {
+        $count = $count + $step;
+        return $count;
+    };
+}
+
+my $by_tens = make_counter(100, 10);
+my $by_ones = make_counter(0, 1);
+
+say "Counter 1: " ~ $by_tens();
+say "Counter 1: " ~ $by_tens();
+say "Counter 2: " ~ $by_ones();
+say "Counter 2: " ~ $by_ones();
+say "Counter 1: " ~ $by_tens();

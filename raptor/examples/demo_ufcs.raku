@@ -1,0 +1,27 @@
+# Demonstration of Uniform Function Call Syntax (UFCS) in Raku5
+
+# 1. UFCS with Built-in Functions
+my Str $greeting = "hello world";
+say "Upper: " ~ $greeting.uc();
+say "Length: " ~ [1, 2, 3, 4, 5].elems();
+say "Substr: " ~ $greeting.substr(0, 5);
+
+# 2. UFCS with Custom Multiple Dispatch Subroutines
+multi sub format_output(Int $val) {
+    return "Numeric ID: " ~ $val;
+}
+
+multi sub format_output(Str $val) {
+    return "String Name: \"" ~ $val ~ "\"";
+}
+
+say 1001.format_output();
+say "Antigravity".format_output();
+
+# 3. Method Chaining via UFCS
+multi sub tag(Str $content, Str $t) {
+    return "<" ~ $t ~ ">" ~ $content ~ "</" ~ $t ~ ">";
+}
+
+my $html = "welcome to raku5".uc().tag("h1");
+say "Generated HTML: " ~ $html;

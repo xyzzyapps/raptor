@@ -1,0 +1,161 @@
+# ==============================================================================
+# Raptor + Raylib 5.5 Interactive Demo: Real-Time Particle & Game Canvas
+# ==============================================================================
+
+struct Color {
+    uint8 $r;
+    uint8 $g;
+    uint8 $b;
+    uint8 $a;
+}
+
+struct Vec2 {
+    num64 $x;
+    num64 $y;
+}
+
+# Operator Overloading on Vec2
+multi sub infix:<+>(Vec2 $a, Vec2 $b) {
+    my $res = Vec2.new();
+    $res.x = $a.x + $b.x;
+    $res.y = $a.y + $b.y;
+    return $res;
+}
+
+# Raylib NativeCall Bindings
+sub InitWindow(int32 $width, int32 $height, Str $title) returns void is native('libraylib.dll') { * }
+sub WindowShouldClose() returns bool is native('libraylib.dll') { * }
+sub CloseWindow() returns void is native('libraylib.dll') { * }
+sub SetTargetFPS(int32 $fps) returns void is native('libraylib.dll') { * }
+sub GetFPS() returns int32 is native('libraylib.dll') { * }
+sub GetFrameTime() returns num64 is native('libraylib.dll') { * }
+
+sub BeginDrawing() returns void is native('libraylib.dll') { * }
+sub EndDrawing() returns void is native('libraylib.dll') { * }
+sub ClearBackground(Color $color) returns void is native('libraylib.dll') { * }
+
+sub DrawCircle(int32 $centerX, int32 $centerY, num64 $radius, Color $color) returns void is native('libraylib.dll') { * }
+sub DrawRectangle(int32 $posX, int32 $posY, int32 $width, int32 $height, Color $color) returns void is native('libraylib.dll') { * }
+sub DrawText(Str $text, int32 $posX, int32 $posY, int32 $fontSize, Color $color) returns void is native('libraylib.dll') { * }
+sub DrawFPS(int32 $posX, int32 $posY) returns void is native('libraylib.dll') { * }
+
+sub IsKeyDown(int32 $key) returns bool is native('libraylib.dll') { * }
+sub GetMouseX() returns int32 is native('libraylib.dll') { * }
+sub GetMouseY() returns int32 is native('libraylib.dll') { * }
+
+# Theme Colors
+my $bg = Color.new();
+$bg.r = 15; $bg.g = 23; $bg.b = 42; $bg.a = 255;
+
+my $cyan = Color.new();
+$cyan.r = 56; $cyan.g = 189; $cyan.b = 248; $cyan.a = 255;
+
+my $magenta = Color.new();
+$magenta.r = 244; $magenta.g = 63; $magenta.b = 94; $magenta.a = 255;
+
+my $white = Color.new();
+$white.r = 248; $white.g = 250; $white.b = 252; $white.a = 255;
+
+my $yellow = Color.new();
+$yellow.r = 250; $yellow.g = 204; $yellow.b = 21; $yellow.a = 255;
+
+my $green = Color.new();
+$green.r = 74; $green.g = 222; $green.b = 128; $green.a = 255;
+
+# Initialize 60 FPS full interactive window
+my $screenWidth = 900;
+my $screenHeight = 650;
+InitWindow($screenWidth, $screenHeight, "Raptor Language + Raylib 5.5 (Interactive 60 FPS)");
+SetTargetFPS(60);
+
+# Ball State using Vec2 struct
+my $ballPos = Vec2.new();
+$ballPos.x = 450.0;
+$ballPos.y = 325.0;
+
+my $ballVel = Vec2.new();
+$ballVel.x = 280.0;
+$ballVel.y = 220.0;
+my $radius = 16.0;
+
+# Paddle State
+my $paddleWidth = 140.0;
+my $paddleHeight = 18.0;
+my $paddleX = 380.0;
+my $score = 0;
+
+say "Interactive Raptor + Raylib Window initialized (60 FPS). Use Mouse or Left/Right arrows to control paddle!";
+
+my $frame = 0;
+while !WindowShouldClose() {
+    my $dt = GetFrameTime();
+    if $dt <= 0.0 || $dt > 0.1 {
+        $dt = 0.0166;
+    }
+
+    # Mouse or Arrow Key paddle control
+    my $mouseX = GetMouseX();
+    if $mouseX > 0 && $mouseX < $screenWidth {
+        $paddleX = $mouseX - ($paddleWidth / 2.0);
+    }
+    # Key 263 = Left, Key 262 = Right
+    if IsKeyDown(263) {
+        $paddleX = $paddleX - (450.0 * $dt);
+    }
+    if IsKeyDown(262) {
+        $paddleX = $paddleX + (450.0 * $dt);
+    }
+
+    # Clamp paddle
+    if $paddleX < 10.0 { $paddleX = 10.0; }
+    if $paddleX > ($screenWidth - $paddleWidth - 10.0) {
+        $paddleX = $screenWidth - $paddleWidth - 10.0;
+    }
+
+    # Physics update with operator overloading: $ballPos = $ballPos + $step
+    my $step = Vec2.new();
+    $step.x = $ballVel.x * $dt;
+    $step.y = $ballVel.y * $dt;
+    $ballPos = $ballPos + $step;
+
+    # Bounce against wall boundaries
+    if $ballPos.x <= $radius || $ballPos.x >= ($screenWidth - $radius) {
+        $ballVel.x = 0 - $ballVel.x;
+    }
+    if $ballPos.y <= $radius {
+        $ballVel.y = 0 - $ballVel.y;
+    }
+
+    # Bounce on paddle
+    if $ballPos.y >= ($screenHeight - 50.0) && $ballPos.y <= ($screenHeight - 30.0) && $ballPos.x >= $paddleX && $ballPos.x <= ($paddleX + $paddleWidth) {
+        $ballVel.y = 0 - abs($ballVel.y);
+        $score = $score + 10;
+    }
+
+    # Bottom reset
+    if $ballPos.y > $screenHeight {
+        $ballPos.x = 450.0;
+        $ballPos.y = 200.0;
+        $ballVel.y = 220.0;
+    }
+
+    # Render frame
+    BeginDrawing();
+    ClearBackground($bg);
+
+    DrawText("Raptor + Raylib 5.5 Real-Time Desktop Engine", 24, 20, 26, $cyan);
+    DrawText("Zero-overhead C FFI • Vector math overloading • 60 FPS", 24, 54, 16, $white);
+    DrawText("Score: " ~ $score, $screenWidth - 160, 20, 24, $yellow);
+
+    # Draw Ball & Paddle
+    DrawCircle(int($ballPos.x), int($ballPos.y), $radius, $magenta);
+    DrawRectangle(int($paddleX), $screenHeight - 36, int($paddleWidth), int($paddleHeight), $green);
+
+    DrawFPS(24, $screenHeight - 36);
+    EndDrawing();
+
+    $frame = $frame + 1;
+}
+
+CloseWindow();
+say "Interactive Game Loop terminated after $frame frames.";

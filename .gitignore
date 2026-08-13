@@ -1,0 +1,27 @@
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*~
+
+# Temporary / Log files
+*.log
+*.tmp
+scratch/
+
+# Build intermediates (objects & libraries)
+*.o
+*.obj
+*.a
+
+# Explicitly allow DLLs and EXEs for now
+!*.dll
+!*.exe
+!**/bin/*.dll
+!**/bin/*.exe
+!**/build/**/*.dll
+!**/build/**/*.exe

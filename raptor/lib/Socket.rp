@@ -1,0 +1,36 @@
+# ==============================================================================
+# Sockets, HTTP, and WebSocket Library for Raptor (.rp)
+# ==============================================================================
+
+# TCP Server Operations
+sub tcp_server($port, $host = "0.0.0.0") {
+    return tcp_listen($port, $host);
+}
+
+# TCP Client Operations
+sub tcp_client($host, $port) {
+    return tcp_connect($host, $port);
+}
+
+# UDP Operations
+sub udp_server($port, $host = "0.0.0.0") {
+    return udp_bind($port, $host);
+}
+
+# HTTP Helper Functions
+sub get($url, %headers = {}) {
+    return http_get($url, %headers);
+}
+
+sub post($url, $body, %headers = {}) {
+    return http_post($url, $body, %headers);
+}
+
+# WebSocket Helpers
+sub ws_text($text) {
+    return ws_frame_text($text);
+}
+
+sub ws_parse($frame) {
+    return ws_parse_frame($frame);
+}

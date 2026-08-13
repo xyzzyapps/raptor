@@ -1,0 +1,87 @@
+# ==============================================================================
+# Raptor Language (.rp) Comprehensive Feature Showcase
+# ==============================================================================
+
+say "=== Raptor Feature Showcase (.rp) ===";
+
+# [1] Perl5 & Raku Operators Suite
+say "\n[1] Operators Suite:";
+my $defaultVal = $nil // "Default Value";
+say "  Defined-or: " ~ $defaultVal;
+
+my $condition = 10 > 5 ?? "10 is greater" !! "5 is greater";
+say "  Ternary: " ~ $condition;
+
+my $pow = 2 ** 8;
+say "  Power 2**8: " ~ $pow;
+
+my $bitOr = 0x0F +| 0xF0;
+my $bitAnd = $bitOr +& 0xFF;
+say "  Bitwise (0x0F +| 0xF0) +& 0xFF: " ~ $bitAnd;
+
+my $rep = "Raptor " x 3;
+say "  Repetition: " ~ $rep;
+
+my @listRep = [1, 2] xx 2;
+say "  List rep count: " ~ @listRep.elems;
+
+my $divisible = 100 %% 2;
+say "  Divisibility 100 %% 2: " ~ $divisible;
+
+my $minVal = 15 min 42;
+say "  Min (15 min 42): " ~ $minVal;
+
+my $regexMatch = "raptor-runtime" =~ /raptor/;
+say "  Regex match: " ~ $regexMatch;
+
+# [2] Native SQLite & Fast JSON Serialization
+say "\n[2] SQLite & JSON Support:";
+my $db = sqlite_open(":memory:");
+sqlite_exec($db, "CREATE TABLE inventory (id INTEGER PRIMARY KEY, name TEXT, price REAL)");
+sqlite_exec($db, "INSERT INTO inventory (name, price) VALUES ('Quantum Core', 99.5)");
+sqlite_exec($db, "INSERT INTO inventory (name, price) VALUES ('Plasma Relay', 45.0)");
+
+my @rows = sqlite_query($db, "SELECT * FROM inventory");
+my %payload = {:items => @rows, :count => @rows.elems};
+my $jsonStr = to_json(%payload);
+say "  JSON payload from SQLite: " ~ $jsonStr;
+sqlite_close($db);
+
+# [3] Procedural TCP Sockets & HTTP Parsing
+say "\n[3] TCP Sockets & HTTP:";
+my $httpRaw = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"healthy\"}";
+my %parsedHttp = http_parse_request($httpRaw);
+say "  HTTP over TCP response: " ~ substr($httpRaw, 0, 50) ~ "...";
+
+# [4] PortAudio Real-Time Waveform Synthesizer
+say "\n[4] PortAudio Audio Engine:";
+pa_init();
+say "  PortAudio Version: " ~ pa_version_text();
+say "  Audio Devices Found: " ~ pa_device_count();
+my @sineSamples = pa_sine_wave(440.0, 0.05, 44100, 0.5);
+say "  Synthesized Sine Wave Samples: " ~ @sineSamples.elems;
+pa_terminate();
+
+# [5] Advanced Concurrency & Reactive Streams
+say "\n[5] Advanced Concurrency:";
+my @nums = [1, 2, 3, 4, 5, 6];
+my @squares = parallel_map(@nums, sub ($x) { return $x * $x; }, 2);
+say "  Parallel Map (x*x): " ~ @squares;
+
+my $supply = supply_create();
+my $supplySum = 0;
+supply_tap($supply, sub ($v) { $supplySum = $supplySum + $v; });
+supply_emit($supply, 100);
+supply_emit($supply, 200);
+supply_done($supply);
+say "  Reactive Supply Sum: " ~ $supplySum;
+
+# [6] Predefined Environment Globals
+say "\n[6] Environment & Globals:";
+say "  PID: " ~ $*PID;
+say "  OS: " ~ $*OS;
+say "  Executable: " ~ $*EXECUTABLE;
+say "  Program Name: " ~ $*PROGRAM;
+say "  Time (epoch): " ~ time();
+
+say "\n=== All Demonstrations Completed Successfully ===";

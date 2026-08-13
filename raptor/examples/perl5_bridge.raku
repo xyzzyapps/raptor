@@ -1,0 +1,9 @@
+# Perl 5 Module Bridge Demo in Raku4
+
+say "Evaluating Perl 5 expression:";
+my $math_result = eval_perl5("sqrt(144) + 10");
+say "Perl 5 sqrt(144) + 10 = " ~ $math_result;
+
+say "Calling POSIX::ceil from Perl 5 standard library:";
+my $ceil_val = call_perl5("POSIX::ceil", 8.2);
+say "POSIX::ceil(8.2) = " ~ $ceil_val;

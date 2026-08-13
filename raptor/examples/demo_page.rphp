@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title><?= "Raku5 on MoarVM" ?></title>
+</head>
+<body>
+    <h1><?= "Welcome to Raku5 PHP-like Templates" ?></h1>
+
+    <?raku
+    my $version = "5.0.0";
+    my $engine = "MoarVM JIT";
+    ?>
+
+    <p>Version: <?= $version ?></p>
+    <p>Engine: <?= $engine ?></p>
+
+    <h2>Features</h2>
+    <ul>
+        <li>Typed Signatures (Int, Str, Num)</li>
+        <li>Multiple Dispatch (multi sub)</li>
+        <li>UFCS (Uniform Function Call Syntax)</li>
+        <li>PHP-like Template Mode</li>
+    </ul>
+
+    <footer>
+        <p>Rendered by <?= "Raku" ~ "5" ?></p>
+    </footer>
+</body>
+</html>

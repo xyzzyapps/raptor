@@ -110,7 +110,6 @@ func resolveDLL(flagPath string) string {
 		"build/moarvm/bin/moar.dll",
 		"../build/moarvm/bin/moar.dll",
 		"../../build/moarvm/bin/moar.dll",
-		"C:/Users/manic/Documents/PRODUCTION/LIBS/gperl/build/moarvm/bin/moar.dll",
 	}
 	for _, c := range candidates {
 		if abs, err := filepath.Abs(c); err == nil {

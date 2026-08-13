@@ -1,0 +1,3 @@
+[submodule "moarvm-go/vendor/MoarVM"]
+	path = moarvm-go/vendor/MoarVM
+	url = https://github.com/MoarVM/MoarVM

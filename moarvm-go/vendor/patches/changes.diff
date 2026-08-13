@@ -1,0 +1,141 @@
+diff --git a/Configure.pl b/Configure.pl
+index 0c10171..29eee17 100755
+--- a/Configure.pl
++++ b/Configure.pl
+@@ -133,15 +133,18 @@ if (open(my $fh, '<', 'VERSION')) {
+ }
+ # .git is a file and not a directory in submodule
+ if (-e '.git' && open(my $GIT, '-|', 'git describe --tags "--match=20*"')) {
+-    $VERSION = <$GIT>;
++    my $git_ver = <$GIT>;
++    $VERSION = $git_ver if defined $git_ver && length $git_ver;
+     close($GIT);
+ }
+-chomp $VERSION;
++$VERSION = '2026.05' unless defined $VERSION && length $VERSION;
++$VERSION =~ s/\r?\n$//;
+ $config{version}      = $VERSION;
+-$config{versionmajor} = $VERSION =~ /^(\d+)/ ? $1 : 0;
+-$config{versionminor} = $VERSION =~ /^\d+\.(\d+)/ ? $1 : 0;
++$config{versionmajor} = $VERSION =~ /^(\d+)/ ? $1 : 2026;
++$config{versionminor} = $VERSION =~ /^\d+\.(\d+)/ ? $1 : 5;
+ $config{versionpatch} = $VERSION =~ /^\d+\.\d+\-(\d+)/ ? $1 : 0;
+ 
++
+ # misc defaults
+ $config{exe}                      = '' unless defined $config{exe};
+ $config{defs}                     = [] unless defined $config{defs};
+diff --git a/build/probe.pm b/build/probe.pm
+index 25ee571..428d0b7 100644
+--- a/build/probe.pm
++++ b/build/probe.pm
+@@ -938,10 +938,12 @@ EOT
+     die "Unable to run probe, so something is badly wrong"
+         unless defined $size;
+     chomp $size;
++    $size =~ s/\r//g;
+     die "Probe gave nonsensical answer '$size', so something is badly wrong"
+         unless $size =~ /\A[0-9]+\z/;
+     print "$size\n";
+     $config->{ptr_size} = $size;
++
+ }
+ 
+ sub computed_goto {
+diff --git a/src/core/interp.c b/src/core/interp.c
+index 95f9244..090652a 100644
+--- a/src/core/interp.c
++++ b/src/core/interp.c
+@@ -774,7 +774,7 @@ void MVM_interp_run(MVMThreadContext *tc, void (*initial_invoke)(MVMThreadContex
+                  * we must use __builtin_ctzll instead of __builtin_ctz.
+                  */
+ 
+-                MVMuint64 u = labs(GET_REG(cur_op, 2).i64), v = labs(GET_REG(cur_op, 4).i64), ret;
++                MVMuint64 u = llabs(GET_REG(cur_op, 2).i64), v = llabs(GET_REG(cur_op, 4).i64), ret;
+ 
+                 MVMint64 shift, uz, vz;
+                 if (u == 0) {
+@@ -784,7 +784,7 @@ void MVM_interp_run(MVMThreadContext *tc, void (*initial_invoke)(MVMThreadContex
+                     ret = u;
+                 }
+                 else {
+-#ifdef _WIN32
++#if defined(_MSC_VER)
+                     uz = _tzcnt_u64(u);
+                     vz = _tzcnt_u64(v);
+ #else
+@@ -797,18 +797,19 @@ void MVM_interp_run(MVMThreadContext *tc, void (*initial_invoke)(MVMThreadContex
+                         v >>= vz;
+                         MVMint64 diff = v;
+                         diff -= u;
+-#ifdef _WIN32
++#if defined(_MSC_VER)
+                         vz = _tzcnt_u64(diff);
+ #else
+                         vz = __builtin_ctzll(diff);
+ #endif
+                         if (diff == 0) break;
+                         if (v < u) u = v;
+-                        v = labs(diff);
++                        v = llabs(diff);
+                     } while (1);
+                     ret = u << shift;
+                 }
+ 
++
+                 GET_REG(cur_op, 0).i64 = ret;
+                 cur_op += 6;
+                 goto NEXT;
+diff --git a/src/math/bigintops.c b/src/math/bigintops.c
+index d65479e..26c3565 100644
+--- a/src/math/bigintops.c
++++ b/src/math/bigintops.c
+@@ -472,7 +472,7 @@ MVMObject *MVM_bigint_gcd(MVMThreadContext *tc, MVMObject *result_type, MVMObjec
+                 ret = u;
+             }
+             else {
+-#ifdef _WIN32
++#if defined(_MSC_VER)
+                 uz = _tzcnt_u32(u);
+                 vz = _tzcnt_u32(v);
+ #else
+@@ -485,7 +485,7 @@ MVMObject *MVM_bigint_gcd(MVMThreadContext *tc, MVMObject *result_type, MVMObjec
+                     v >>= vz;
+                     MVMint32 diff = v;
+                     diff -= u;
+-#ifdef _WIN32
++#if defined(_MSC_VER)
+                     vz = _tzcnt_u32(diff);
+ #else
+                     vz = __builtin_ctz(diff);
+@@ -497,6 +497,7 @@ MVMObject *MVM_bigint_gcd(MVMThreadContext *tc, MVMObject *result_type, MVMObjec
+                 ret = u << shift;
+             }
+ 
++
+             store_int64_result(tc, bc, ret);
+         }
+     }
+diff --git a/src/platform/random.c b/src/platform/random.c
+index 95a5ef9..06a3496 100644
+--- a/src/platform/random.c
++++ b/src/platform/random.c
+@@ -129,8 +129,8 @@
+         HINSTANCE hAdvAPI32 = GetModuleHandle("advapi32.dll");
+         if (hAdvAPI32) {
+             CRYPTACQUIRECONTEXTA pCryptAcquireContext =
+-                              GetProcAddress(hAdvAPI32, "CryptAcquireContextA");
+-            pCryptGenRandom = GetProcAddress(hAdvAPI32, "CryptGenRandom");
++                              (CRYPTACQUIRECONTEXTA)GetProcAddress(hAdvAPI32, "CryptAcquireContextA");
++            pCryptGenRandom = (CRYPTGENRANDOM)GetProcAddress(hAdvAPI32, "CryptGenRandom");
+             /* Check the pointers to the CryptoAPI functions. These shouldn't fail
+              * but makes sure we won't have problems getting the context or getting
+              * random. If those aren't NULL then get the pCrypt context */
+@@ -138,6 +138,7 @@
+                 pCryptAcquireContext(&hCryptContext, NULL, NULL, PROV_RSA_FULL,
+                 CRYPT_VERIFYCONTEXT) ? 1 : 0;
+         }
++
+         return 0;
+     }
+     MVMint32 MVM_getrandom (MVMThreadContext *tc, void *out, size_t size) {

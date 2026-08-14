@@ -5,18 +5,21 @@ description: Guide for AI agents to write, weave, tangle, mangle, and stitch lit
 
 # PodLit Literate Programming Guide for AI Agents
 
-## 1. Overview & Core Philosophy
+[![Entangled badge](https://img.shields.io/badge/entangled-Use%20the%20source!-%2300aeff)](https://entangled.github.io/)
 
-**PodLit** is Raptor's built-in Literate Programming subsystem, based on an extended dialect of Plain Old Documentation (POD).
+## 1. Overview & Academic Foundations
 
-Pioneered by Donald Knuth, Literate Programming treats software as an explanatory work of literature directed to humans, from which executable code is assembled.
+**PodLit** is Raptor's built-in Literate Programming subsystem, combining Knuth's classical literate programming with modern bi-directional synchronization:
 
-PodLit provides four primary workflows:
-1. **Weave**: Generates GitHub-Flavored Markdown (`.md`) formatted for humans from narrative prose and code chunks.
-2. **Tangle**: Extracts source code files (`.rp`, `.raptor`, `.c`) by recursively assembling named code chunks (`<<chunk-name>>`).
+- **Donald E. Knuth (1984)**: *Literate Programming*, The Computer Journal. Established the paradigm of decomposing software into named macros and explanatory prose (`weave` and `tangle`).
+- **Johan Hidding (2023)**: *Entangled, a Bidirectional System for Sustainable Literate Programming*, IEEE e-Science 2023 ([DOI: 10.1109/e-Science58273.2023.10254816](https://doi.org/10.1109/e-Science58273.2023.10254816)). Formulated the grammar for bidirectional round-trip literate programming, providing the theoretical basis for Raptor's `pod_stitch` / `raptor stitch` engine.
+
+PodLit provides five primary workflows:
+1. **Weave**: Generates GitHub-Flavored Markdown (`.md`) formatted for humans from narrative prose and code chunks (`raptor weave`).
+2. **Tangle**: Extracts source code files (`.rp`, `.raptor`, `.c`) by recursively assembling named code chunks (`<<chunk-name>>`) (`raptor tangle`).
 3. **Mangle**: Applies macro transformation filters (`:mangle(...)`) during assembly.
-4. **Stitch**: Synchronizes external source code edits back into the `.pod` document without disturbing narrative prose.
-5. **Direct Execution**: Directly executes `.pod` literate documents in memory without writing intermediate files to disk.
+4. **Stitch**: Synchronizes external source code edits back into the `.pod` document without disturbing narrative prose (`raptor stitch`).
+5. **Direct Execution**: Directly executes `.pod` literate documents in memory without writing intermediate files to disk (`raptor run <file.pod>`).
 
 ## 2. PodLit Directives & Syntax
 

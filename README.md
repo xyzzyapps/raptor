@@ -1,5 +1,8 @@
 # Raptor
 
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](raptor/t/)
+[![License: Artistic-2.0](https://img.shields.io/badge/License-Artistic_2.0-0298c3.svg)](https://opensource.org/licenses/Artistic-2.0)
+
 Raptor is engineered specifically for the Post-LLM paradigm:
 
 1. **High Token Density & Brief Syntax**: By adopting the concise syntax of Perl 5 and modern Raku (variables using `$` `@` `%` sigils, canonical `Nil`, built-in operators) while completely omitting `class`, `has`, and `is` boilerplate, Raptor maximizes LLM context window efficiency and reduces model hallucinations.
@@ -11,11 +14,12 @@ Raptor is engineered specifically for the Post-LLM paradigm:
 
 ## Academic & Theoretical Foundations
 
-Raptor's predicate type and continuous contract system is grounded in seminal computer science research:
+Raptor's predicate type, continuous contract, and literate programming systems are grounded in seminal computer science research:
 
 - **Robert Bruce Findler (PhD Thesis, Rice University, 2002)**: *Behavioral Software Contracts* (supervised by Matthias Felleisen). Established the mathematical and runtime foundations of higher-order dynamic contracts, continuous invariant monitoring on mutable reference cells, and assignment-level contract enforcement.
 - **Michael D. Ernst (PhD Thesis, University of Washington, 2000) & ECOOP 1998 / ACM TOPLAS 2002**: *Dynamically Discovering Likely Program Invariants to Support Program Evolution* (The Daikon System) and *Predicate Dispatching: A Unified Theory of Dispatch* (with Craig Kaplan & Craig Chambers). Introduced the formal model for evaluating arbitrary user-defined boolean predicates over variables and parameter values to drive runtime dispatch and enforce state invariants.
 - **Patrick Maxim Rondon (PhD Thesis, UC San Diego, 2012)**: *Liquid Types* (supervised by Ranjit Jhala, built on Frank Pfenning's 1991 *Refinement Types for ML*). Refinement types via predicate subtyping where standard base types are enriched with logical predicates evaluated against values and assignments.
+- **Johan Hidding (Netherlands eScience Center, 2023)**: *Entangled, a Bidirectional System for Sustainable Literate Programming*, 2023 IEEE 19th International Conference on e-Science (e-Science), pp. 1-10, [DOI: 10.1109/e-Science58273.2023.10254816](https://doi.org/10.1109/e-Science58273.2023.10254816). Formulated the model and grammar for bidirectional, round-trip literate programming where external code modifications are synchronized and reverse-stitched back into literate narrative documents without disturbing narrative prose.
 
 ## Core Subprojects
 

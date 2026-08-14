@@ -81,6 +81,7 @@ func NewInterp() *Interp {
 	in.registerPodLitBuiltins()
 	in.registerWebBuiltins()
 	in.registerMoarVMModuleBuiltins()
+	in.registerEmbeddedBuiltins()
 
 	// Predefine mathematical constants
 	in.GlobalEnv.Define("$pi", FloatValue(math.Pi))

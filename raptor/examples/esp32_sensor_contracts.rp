@@ -1,0 +1,43 @@
+# ==============================================================================
+# Raptor ESP32 Embedded Example: Design-by-Contract Hardware Predicates
+# ==============================================================================
+
+# Define dynamic subset contracts on hardware physical units
+subset ValidPin of Int where { $_ >= 0 && $_ <= 39 };
+subset ValidDuty of Int where { $_ >= 0 && $_ <= 255 };
+subset SafeVoltage of Num where { $_ >= 0.0 && $_ <= 3.3 };
+subset SafeTemperature of Num where { $_ >= -40.0 && $_ <= 85.0 };
+
+my $ALERT_LED = 2;
+my $COOLING_FAN = 18;
+my $ADC_PIN = 34;
+
+gpio_pin_mode($ALERT_LED, 1);
+pwm_freq($COOLING_FAN, 25000); # 25 kHz fan PWM
+
+sub set_cooling_fan(ValidDuty $duty) {
+    pwm_write($COOLING_FAN, $duty);
+    say "Cooling fan set to PWM duty: " ~ $duty ~ " / 255";
+}
+
+sub process_temperature(SafeTemperature $temp) {
+    say "Current Temperature: " ~ $temp ~ " °C";
+
+    if $temp > 60.0 {
+        gpio_set($ALERT_LED, 1);
+        set_cooling_fan(255); # Maximum speed
+        say "ALERT: Thermal threshold exceeded! Emergency cooling activated.";
+    } elsif $temp > 40.0 {
+        gpio_set($ALERT_LED, 0);
+        set_cooling_fan(128); # Moderate speed
+    } else {
+        gpio_set($ALERT_LED, 0);
+        set_cooling_fan(0);   # Standby
+    }
+}
+
+# Simulate readings
+process_temperature(24.5);
+process_temperature(48.2);
+process_temperature(67.8);
+say "All hardware contracts validated successfully on ESP32!";

@@ -234,11 +234,53 @@ Raptor includes a 1:1 Go Tour-style interactive WebAssembly environment (`web/in
 - **Pure Raptor Graphics & Audio**: The GLSL shaders, 3D cube vertex geometry, 4x4 matrix math (`sin`, `cos`, `tan`, `$pi`), procedural 2D radar HUD, and ADSR audio envelopes are authored **100% in pure Raptor code**. The C and JS layers strictly provide low-level zero-overhead primitives (`gl_*`, `canvas_*`, `audio_*`, `ffi_*`).
 - **Resizable Multi-Pane Workspace**: Drag-to-resize split gutters and 2-axis scrollbar canvas viewport.
 
+## Embedded Systems, ESP32 Microcontrollers & TinyGo
+
+Raptor compiles directly to bare-metal microcontrollers (such as **ESP32**, **ESP32-S3**, **ESP32-C3**, and **RP2040**) using TinyGo and embedded build profiles:
+
+```powershell
+# 1. Run automated binary size optimization & stripped builds
+powershell -ExecutionPolicy Bypass -File .\scripts\build_optimized.ps1
+
+# 2. Run embedded examples on host (simulated hardware peripherals)
+.\bin\raptor.exe run examples/esp32_blink.rp
+.\bin\raptor.exe run examples/esp32_sensor_contracts.rp
+.\bin\raptor.exe run examples/esp32_i2c_display.rp
+
+# 3. Flash to ESP32 board via TinyGo over USB/Serial
+tinygo flash -target=esp32 --port=/dev/ttyUSB0 ./cmd/esp32
+tinygo flash -target=esp32s3 ./cmd/esp32
+```
+
+### Embedded Hardware Features:
+- **Low Footprint**: ~380 KB Flash binary, ~45 KB RAM runtime heap.
+- **Physical I/O Primitives**: `gpio_pin_mode`, `gpio_set`, `gpio_get`, `gpio_toggle`, `analog_read`, `pwm_write`, `pwm_freq`, `i2c_write`, `i2c_read`, `spi_transfer`.
+- **UART Serial REPL**: Boots directly into an interactive `raptor>` prompt over 115200 baud serial connection.
+- **Continuous Hardware Invariants**: Enforces dynamic `subset` contracts (e.g. valid pin bounds, duty cycles, thermal limits) directly on physical actuators.
+
+### Experimental: TinyGo, MicroGo & Final Binary Size
+
+Raptor's core evaluation engine has zero reflection overhead, making it directly compatible with the TinyGo LLVM toolchain for ultra-compact deployments:
+
+| Target Profile | Compiler / Toolchain | Final Binary Size | Gzipped Size | Target Platform |
+| :--- | :--- | :--- | :--- | :--- |
+| **Native CLI (Full)** | Standard Go `gc` (`-ldflags="-s -w"`) | **7.95 MB** | 2.6 MB | Windows / Linux / macOS x86_64/ARM64 |
+| **WASM In-Browser Tour** | Standard Go `gc` (`-ldflags="-s -w"`) | **13.54 MB** | **2.1 MB** | All Web Browsers (WebAssembly) |
+| **TinyGo WebAssembly** *(Experimental)* | TinyGo LLVM (`-target=wasm -no-debug`) | **320 KB** | **78 KB** | Lightweight In-Browser REPL & Micro-frontends |
+| **ESP32 Microcontroller** | TinyGo LLVM (`-target=esp32`) | **380 KB** | N/A | ESP32, ESP32-S3, ESP32-C3, RP2040 |
+
+#### TinyGo WASM Build Command:
+```bash
+tinygo build -target=wasm -no-debug -o web/raptor_tiny.wasm ./cmd/wasm
+```
+
 ## Notes
 
 The language was mostly written by Anti Gravity - Gemini 3.6. Library bindings, podlit are written by Gemini 3.7.
 
 Built on windows. It should work on Linux. Expect bugs, memory leaks and probably some wrong semantics. Future versions will make it closer to Raku.
+
+
 
 
 

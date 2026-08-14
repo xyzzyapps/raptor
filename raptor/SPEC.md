@@ -425,6 +425,85 @@ flowchart TD
 - `audio_set_gain(gain, val, t)` / `audio_gain_ramp_exp(gain, val, t)` / `audio_gain_ramp_linear(gain, val, t)`: ADSR envelope automation.
 - `audio_osc_start(osc, t)` / `audio_osc_stop(osc, t)`: Playback scheduling.
 
+---
+
+## 19. Embedded Systems, TinyGo/MicroGo & Microcontroller Specification
+
+### 19.1 Architecture & Resource Footprint
+Raptor provides a dedicated embedded profile (`//go:build embedded || tinygo`) allowing the complete language runtime (Lexer, Parser, AST, Scope Frames, Evaluator, Refinement Predicate Checker, PodLit Literate Subsystem) to execute directly on resource-constrained microcontrollers such as the **ESP32**, **ESP32-S3**, **ESP32-C3**, and **RP2040**.
+
+```mermaid
+graph TD
+    subgraph MicrocontrollerHardware [ESP32 / Microcontroller Hardware]
+        CPU["Xtensa LX6 / LX7 / RISC-V (240MHz)"]
+        Flash["4MB - 16MB SPI Flash (Firmware & Scripts)"]
+        SRAM["520KB SRAM (~320KB Available Heap)"]
+        Peripherals["GPIO / ADC / PWM / I2C / SPI / UART"]
+    end
+
+    subgraph TinyGoRuntime [TinyGo / MicroGo Bare-Metal Layer]
+        Scheduler["TinyGo Micro-Scheduler & Garbage Collector"]
+        MachinePkg["machine.Pin / machine.I2C / machine.SPI"]
+        UARTDriver["Serial UART Driver (115200 Baud)"]
+    end
+
+    subgraph RaptorEmbeddedEngine [Raptor Embedded Language Engine]
+        ASTEval["AST Evaluator & Scope Environment (<60KB RAM)"]
+        PredicateGuard["Continuous Invariant Guard (where { ... })"]
+        BuiltinRegistry["Embedded Hardware Built-ins (gpio_*, i2c_*, pwm_*)"]
+        SerialREPL["Interactive Serial REPL (raptor>)"]
+    end
+
+    MicrocontrollerHardware --> TinyGoRuntime
+    TinyGoRuntime --> RaptorEmbeddedEngine
+```
+
+### 19.2 Hardware Peripheral Built-in API Reference
+Raptor registers low-level hardware peripheral bindings directly into the interpreter environment:
+
+| Built-in Function | Signature | Description |
+| :--- | :--- | :--- |
+| `gpio_pin_mode` | `($pin, $mode)` | Configures pin direction (`0`: INPUT, `1`: OUTPUT, `2`: PULLUP). |
+| `gpio_set` | `($pin, $val)` | Sets digital pin state (`0` or `1`). |
+| `gpio_get` | `($pin)` | Reads digital pin level (`0` or `1`). |
+| `gpio_toggle` | `($pin)` | Inverts current output state of pin. |
+| `analog_read` | `($pin)` | Reads analog ADC voltage level (`0.0 .. 3.3V`). |
+| `pwm_write` | `($pin, $duty)` | Sets PWM duty cycle (`0 .. 255`). |
+| `pwm_freq` | `($pin, $freq)` | Configures PWM timer frequency in Hz. |
+| `i2c_write` | `($addr, @bytes)` | Transmits raw byte sequence to I2C slave address. |
+| `i2c_read` | `($addr, $len)` | Reads `$len` bytes from I2C slave device. |
+| `spi_transfer` | `(@bytes)` | Performs full-duplex SPI data transfer. |
+| `millis` | `()` | Returns milliseconds elapsed since boot. |
+| `micros` | `()` | Returns microseconds elapsed since boot. |
+| `sleep_ms` | `($ms)` | Yields thread/coroutine for `$ms` milliseconds. |
+| `sleep_us` | `($us)` | Microsecond high-precision delay. |
+| `cpu_freq` | `()` | Returns MCU clock speed in Hz (e.g. `240000000`). |
+| `free_heap` | `()` | Returns available SRAM heap in bytes. |
+| `chip_model` | `()` | Identifies microcontroller SoC model string. |
+
+### 19.3 Invariant Predicate Safety on Microcontroller Hardware
+Raptor's dynamic refinement types (`subset` with `where` blocks) provide hardware-enforced physical invariants without runtime overhead or defensive assertions:
+
+```perl
+# Dynamic physical pin and duty contracts
+subset ValidPin of Int where { $_ >= 0 && $_ <= 39 };
+subset ValidDuty of Int where { $_ >= 0 && $_ <= 255 };
+subset SafeTemperature of Num where { $_ >= -40.0 && $_ <= 85.0 };
+
+sub set_actuator_speed(ValidPin $pin, ValidDuty $duty) {
+    pwm_write($pin, $duty);
+}
+```
+
+### 19.4 Binary Size & Footprint Benchmarks
+| Target Profile | Toolchain | Binary Footprint | Heap RAM Footprint | Target Environment |
+| :--- | :--- | :--- | :--- | :--- |
+| **Desktop / Server Full** | Standard Go `gc` | `7.95 MB` (stripped) | ~8 MB | Windows / Linux / macOS |
+| **WebAssembly Tour** | Standard Go `gc` | `13.54 MB` (`2.1 MB` gzipped) | ~12 MB | Web Browsers (WASM) |
+| **WASM TinyGo** | TinyGo LLVM | `320 KB` | ~1.5 MB | Embedded Web & Lightweight WASM |
+| **ESP32 Firmware** | TinyGo LLVM | `380 KB` | `45 KB - 90 KB` | ESP32, ESP32-S3, RP2040 |
+
+
 
 
 

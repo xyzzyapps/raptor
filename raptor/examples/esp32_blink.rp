@@ -1,0 +1,22 @@
+# ==============================================================================
+# Raptor ESP32 Embedded Example: Hardware LED Blink & Pulse Timer
+# ==============================================================================
+
+# GPIO2 is the standard built-in blue LED on ESP32 development boards
+my $LED_PIN = 2;
+
+say "Configuring GPIO" ~ $LED_PIN ~ " as OUTPUT...";
+gpio_pin_mode($LED_PIN, 1);
+
+say "Starting LED Blink cycle...";
+for 1..5 -> $i {
+    gpio_set($LED_PIN, 1);
+    say "Cycle " ~ $i ~ ": LED ON | Timestamp: " ~ millis() ~ " ms";
+    sleep_ms(150);
+
+    gpio_set($LED_PIN, 0);
+    say "Cycle " ~ $i ~ ": LED OFF | Timestamp: " ~ millis() ~ " ms";
+    sleep_ms(150);
+}
+
+say "Blink sequence complete!";

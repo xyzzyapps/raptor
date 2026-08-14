@@ -199,3 +199,4 @@ Licensed under the **Artistic License 2.0**.
 ## Agent Skills (`.agents/skills/`)
 - **[moarvm-language-development](.agents/skills/moarvm-language-development/SKILL.md)**: Guide for agents on building new compiled languages targeting MoarVM.
 - **[raptor-language-guide](.agents/skills/raptor-language-guide/SKILL.md)**: Comprehensive guide for agents on the Raptor runtime, C FFI, Wasm, RaptorHP, and PodLit.
+- **[podlit-literate-programming](.agents/skills/podlit-literate-programming/SKILL.md)**: Guide for agents on writing, weaving, tangling, mangling, and reverse-stitching literate programs in PodLit.

@@ -499,7 +499,8 @@ sub set_actuator_speed(ValidPin $pin, ValidDuty $duty) {
 | Target Profile | Toolchain & Profile | Raw Unstripped Size | Optimized Build Size | Over-The-Wire (Gzip / Brotli) | Target Environment |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Desktop / Server Full** | Standard Go `gc` (`-ldflags="-s -w"`) | **11.78 MB** | **7.95 MB** | **2.60 MB** | Windows / Linux / macOS (x86_64/ARM64) |
-| **WebAssembly Tour (TinyGo)** | TinyGo LLVM (`-target=wasm -no-debug`) | **1.37 MB** | **1.37 MB** | **340 KB** (Brotli: ~280 KB) | Modern Web Browsers (WebAssembly) |
+| **WebAssembly Tour (TinyGo)** | TinyGo LLVM (`-target=wasm -no-debug`) | **1.38 MB** | **1.38 MB** | **468 KB** (Brotli: ~380 KB) | Modern Web Browsers (WebAssembly) |
+| **WebAssembly Standard (`gc`)** | Tree-Shaken Go `gc` (`-ldflags="-s -w"`) | **14.20 MB** | **6.05 MB** | **1.21 MB** (Brotli: ~980 KB) | Web Browsers & Node.js WASM |
 | **ESP32 Firmware** | TinyGo LLVM (`-target=esp32`) | **850 KB** | **380 KB** | N/A (Direct Flash) | ESP32, ESP32-S3, ESP32-C3, RP2040 |
 
 ---

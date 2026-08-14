@@ -27,6 +27,9 @@ release_staging/
 !**/web/*.wasm
 !raptor/web/*.wasm
 *.zip
+*.tar.gz
+dist/
+release/
 
 # Build Output Directories & Binaries
 build/

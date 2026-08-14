@@ -220,14 +220,25 @@ go test ./...                      # Go unit test suites
 .\bin\raptorhp.exe -r '<h1><?= "Hello from RaptorHP" ?></h1>'
 .\bin\raptorhp.exe -S localhost:8000
 
-# 12. Run full Go test suite across all subsystems
+# 12. Run the Interactive WebAssembly Playground & 13-Lesson Go Tour
+.\bin\raptor.exe serve 8085
+
+# 13. Run full Go test suite across all subsystems
 go test -v ./...
 ```
+
+## Interactive WebAssembly Tour & In-Browser Execution
+
+Raptor includes a 1:1 Go Tour-style interactive WebAssembly environment (`web/index.html`):
+- **13 Interactive Chapters**: Covering basic operators, dynamic subsets, C-structs, UFCS pipelines, autothreading quantum junctions, destructuring, generators, verification contracts, PodLit literate programming, HTML5 Canvas 2D, WebGL 3D, and WebAudio.
+- **Pure Raptor Graphics & Audio**: The GLSL shaders, 3D cube vertex geometry, 4x4 matrix math (`sin`, `cos`, `tan`, `$pi`), procedural 2D radar HUD, and ADSR audio envelopes are authored **100% in pure Raptor code**. The C and JS layers strictly provide low-level zero-overhead primitives (`gl_*`, `canvas_*`, `audio_*`, `ffi_*`).
+- **Resizable Multi-Pane Workspace**: Drag-to-resize split gutters and 2-axis scrollbar canvas viewport.
 
 ## Notes
 
 The language was mostly written by Anti Gravity - Gemini 3.6. Library bindings, podlit are written by Gemini 3.7.
 
 Built on windows. It should work on Linux. Expect bugs, memory leaks and probably some wrong semantics. Future versions will make it closer to Raku.
+
 
 

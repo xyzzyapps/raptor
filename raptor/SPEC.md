@@ -358,14 +358,73 @@ sub tui_style(Str $txt, %opts = {}) { return "\e[38;2;255;255;255m$txt\e[0m"; }
 sub tui_box(Str $title, Str $content, %opts = {}) { return "[$title]\n$content"; }
 sub tui_table(@headers, @rows) { return @headers.join(" | ") ~ "\n" ~ @rows.map(*.join(" | ")).join("\n"); }
 sub tui_progress(Real $val, %opts = {}) { return "{($val * 100).Int}%"; }
-sub pre(&cond) { True }
-sub post(&cond) { True }
-sub property(Str $desc, &fn) {
-    for 1..100 { my $a = (1..1000).pick; my $b = (1..1000).pick; die unless &fn($a, $b); }
-    ok(True, "Property \"$desc\" holds for 100 randomized trials");
-}
-'
+---
+
+## 18. Architectural Principle: Low-Level C & JS Bindings vs Pure Raptor Execution
+
+### 18.1 Core Architectural Rule
+The external language boundary (whether C FFI via NativeCall on desktop or JavaScript WebAssembly bindings in the browser) must remain a **strictly low-level, zero-overhead primitive layer**.
+
+All business logic, mathematics, vector transformations, shader programs, ADSR envelopes, UI state machines, and high-level algorithms are authored and executed **100% in pure Raptor source code**.
+
+```mermaid
+flowchart TD
+    subgraph PureRaptorLayer [Pure Raptor High-Level Application Logic]
+        Shaders["GLSL Shader Strings & Compilation Calls"]
+        Math3D["4x4 Perspective & Euler Rotation Matrices (sin/cos/tan/$pi)"]
+        CubeGeo["3D Cube Vertex, Color & Index Buffers"]
+        RadarHUD["Canvas 2D Procedural HUD & Trigonometric Blips"]
+        SynthADSR["WebAudio Polyphonic Sequencer & ADSR Envelopes"]
+        Invariants["Dynamic Subsets, Contracts & Predicate Dispatch"]
+    end
+
+    subgraph LowLevelBridge [Low-Level Zero-Overhead Bridge Layer]
+        GLBridge["gl_* (gl_init, gl_create_shader, gl_buffer_data, gl_draw_elements)"]
+        CanvasBridge["canvas_* (canvas_get_context, canvas_fill_rect, canvas_arc)"]
+        AudioBridge["audio_* (audio_context_create, audio_create_oscillator, audio_gain_ramp)"]
+        FFIBridge["ffi_* (ffi_load, ffi_symbol, ffi_call, ffi_read_pointer)"]
+    end
+
+    subgraph TargetHardware [Target Subsystems & Hardware]
+        GPU["GPU WebGL / OpenGL Hardware Pipeline"]
+        DSP["WebAudio DSP Engine & PortAudio DAC"]
+        DOMCanvas["HTML5 Canvas 2D & DOM Tree"]
+        OS_C["Native C Shared Libraries (.dll, .so, .dylib)"]
+    end
+
+    PureRaptorLayer --> LowLevelBridge
+    LowLevelBridge --> TargetHardware
 ```
+
+### 18.2 Low-Level WebGL 3D GPU Primitives
+- `gl_init(canvasId, width, height)`: Attaches WebGL context to canvas.
+- `gl_clear_color(r, g, b, a)` / `gl_clear()`: Clears color and depth buffers.
+- `gl_enable_depth_test()`: Enables GPU depth testing.
+- `gl_create_shader(type)` / `gl_shader_source(id, src)` / `gl_compile_shader(id)`: Compiles GLSL shaders.
+- `gl_create_program()` / `gl_attach_shader(p, s)` / `gl_link_program(p)` / `gl_use_program(p)`: Program pipeline.
+- `gl_get_attrib_location(p, name)` / `gl_get_uniform_location(p, name)`: Attribute and uniform binding.
+- `gl_create_buffer()` / `gl_bind_buffer(target, id)` / `gl_buffer_data(target, data)`: Uploads geometry buffers.
+- `gl_uniform_matrix4fv(loc, matrix16)`: Uploads 16-element Float32 transformation matrices.
+- `gl_draw_elements(count)`: Executes indexed triangle GPU draw calls.
+- `gl_animate()`: Triggers 60fps hardware render loop.
+
+### 18.3 Low-Level HTML5 Canvas 2D Primitives
+- `canvas_get_context(canvasId, w, h)`: Retrieves 2D canvas context handle.
+- `canvas_set_fill_style(ctx, color)` / `canvas_set_stroke_style(ctx, color)` / `canvas_set_line_width(ctx, lw)`: Style state.
+- `canvas_fill_rect(ctx, x, y, w, h)` / `canvas_stroke_rect(ctx, x, y, w, h)` / `canvas_clear_rect(ctx, x, y, w, h)`: Rectangles.
+- `canvas_begin_path(ctx)` / `canvas_close_path(ctx)` / `canvas_move_to(ctx, x, y)` / `canvas_line_to(ctx, x, y)`: Path builder.
+- `canvas_arc(ctx, x, y, r, sAngle, eAngle)`: Circular arcs and rings.
+- `canvas_stroke(ctx)` / `canvas_fill(ctx)`: Path rendering.
+- `canvas_fill_text(ctx, text, x, y)` / `canvas_set_font(ctx, font)`: Typography.
+
+### 18.4 Low-Level WebAudio DSP Primitives
+- `audio_context_create()` / `audio_get_current_time(ctx)`: Audio hardware clock.
+- `audio_create_oscillator(ctx)` / `audio_create_gain(ctx)` / `audio_create_biquad_filter(ctx, type)`: DSP nodes.
+- `audio_connect(src, dst)` / `audio_connect_destination(src, ctx)`: Audio graph routing.
+- `audio_set_osc_type(osc, type)` / `audio_set_frequency(osc, freq, t)`: Oscillator parameters.
+- `audio_set_gain(gain, val, t)` / `audio_gain_ramp_exp(gain, val, t)` / `audio_gain_ramp_linear(gain, val, t)`: ADSR envelope automation.
+- `audio_osc_start(osc, t)` / `audio_osc_stop(osc, t)`: Playback scheduling.
+
 
 
 

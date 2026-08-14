@@ -15,6 +15,7 @@ func main() {
 	c := make(chan struct{}, 0)
 
 	js.Global().Set("raptorEval", js.FuncOf(evalHandler))
+	js.Global().Set("evalRaptor", js.FuncOf(evalHandler))
 	js.Global().Set("raptorWeave", js.FuncOf(weaveHandler))
 	js.Global().Set("raptorTangle", js.FuncOf(tangleHandler))
 	js.Global().Set("raptorStitch", js.FuncOf(stitchHandler))
@@ -30,7 +31,8 @@ func versionHandler(this js.Value, args []js.Value) any {
 
 func evalHandler(this js.Value, args []js.Value) any {
 	if len(args) == 0 {
-		return map[string]any{"error": "no code provided"}
+		jsonBytes, _ := json.Marshal(map[string]any{"error": "no code provided"})
+		return string(jsonBytes)
 	}
 	code := args[0].String()
 	startTime := time.Now()
@@ -46,6 +48,7 @@ func evalHandler(this js.Value, args []js.Value) any {
 
 	res := map[string]any{
 		"output":     output,
+		"stdout":     output,
 		"durationMs": duration,
 	}
 
@@ -57,7 +60,8 @@ func evalHandler(this js.Value, args []js.Value) any {
 		res["result"] = "Nil"
 	}
 
-	return js.ValueOf(res)
+	jsonBytes, _ := json.Marshal(res)
+	return string(jsonBytes)
 }
 
 func weaveHandler(this js.Value, args []js.Value) any {

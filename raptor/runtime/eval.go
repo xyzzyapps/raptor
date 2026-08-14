@@ -81,6 +81,19 @@ func NewInterp() *Interp {
 	in.registerPodLitBuiltins()
 	in.registerWebBuiltins()
 	in.registerMoarVMModuleBuiltins()
+
+	// Predefine mathematical constants
+	in.GlobalEnv.Define("$pi", FloatValue(math.Pi))
+	in.GlobalEnv.Define("$e", FloatValue(math.E))
+	in.GlobalEnv.Define("$PI", FloatValue(math.Pi))
+	in.GlobalEnv.Define("$E", FloatValue(math.E))
+	in.Builtins["pi"] = func(in *Interp, args []*Value) (*Value, error) {
+		return FloatValue(math.Pi), nil
+	}
+	in.Builtins["e"] = func(in *Interp, args []*Value) (*Value, error) {
+		return FloatValue(math.E), nil
+	}
+
 	return in
 }
 
@@ -658,7 +671,7 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 		if err != nil {
 			return nil, err
 		}
-		idx := int(idxVal.IntVal)
+		idx := int(in.toInt(idxVal))
 		if idx < 0 {
 			idx = len(arrVal.ArrayVal) + idx
 		}
@@ -884,7 +897,7 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		if arrVal.Type != ValArray {
 			return NilValue(), nil
 		}
-		idx := int(idxVal.IntVal)
+		idx := int(in.toInt(idxVal))
 		if idx < 0 {
 			idx = len(arrVal.ArrayVal) + idx
 		}

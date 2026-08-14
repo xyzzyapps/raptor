@@ -561,21 +561,134 @@ body {
   color: #111827;
 }
 
-/* Canvas Stage */
+/* Gutter Resizers (Split-Pane Drag Dividers) */
+.gutter-resizer-h {
+  width: 6px;
+  background-color: var(--go-bar-bg);
+  border-left: 1px solid var(--go-bar-border);
+  border-right: 1px solid var(--go-bar-border);
+  cursor: col-resize;
+  user-select: none;
+  z-index: 10;
+  transition: background-color 0.15s ease;
+  position: relative;
+}
+
+.gutter-resizer-h:hover,
+.gutter-resizer-h.resizing {
+  background-color: var(--go-teal-primary);
+}
+
+.gutter-resizer-v {
+  height: 6px;
+  background-color: var(--go-bar-bg);
+  border-top: 1px solid var(--go-bar-border);
+  border-bottom: 1px solid var(--go-bar-border);
+  cursor: row-resize;
+  user-select: none;
+  z-index: 10;
+  transition: background-color 0.15s ease;
+  position: relative;
+}
+
+.gutter-resizer-v:hover,
+.gutter-resizer-v.resizing {
+  background-color: var(--go-teal-primary);
+}
+
+/* Canvas Toolbar & Controls */
+.canvas-control-strip {
+  padding: 0.35rem 0.75rem;
+  background: var(--go-bar-bg);
+  border-bottom: 1px solid var(--go-bar-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-dark);
+}
+
+.canvas-size-btn-group {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.canvas-size-btn {
+  background: var(--go-btn-gray);
+  border: 1px solid var(--go-btn-gray-border);
+  color: var(--text-dark);
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.canvas-size-btn:hover,
+.canvas-size-btn.active {
+  background: var(--go-btn-blue);
+  border-color: var(--go-btn-blue);
+  color: #ffffff;
+}
+
+.canvas-dim-indicator {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+/* Canvas Stage with Custom 2-Axis Scrollbars */
 .canvas-center-wrapper {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f8fafc;
-  padding: 1rem;
+  background: #f1f5f9;
+  padding: 1.5rem;
+  overflow: auto;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.canvas-center-wrapper::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.canvas-center-wrapper::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+
+.canvas-center-wrapper::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 5px;
+  border: 2px solid #e2e8f0;
+}
+
+.canvas-center-wrapper::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
 }
 
 #wasmCanvas {
   background: #ffffff;
-  border: 1px solid #cddbe8;
+  border: 1px solid #cbd5e1;
   border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+}
+
+#wasmWebGLCanvas {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+  cursor: grab;
+}
+
+#wasmWebGLCanvas:active {
+  cursor: grabbing;
 }
 
 /* DOM Viewport */
@@ -617,3 +730,4 @@ body {
   margin: 0.5rem 0;
   border: 1px solid #e2e8f0;
 }
+

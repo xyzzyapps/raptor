@@ -194,6 +194,33 @@ my %updates = { "add-implementation" => "sub add($a, $b) { return $a + $b; }" };
 my $updatedPod = pod_stitch($podSource, %updates);
 ```
 
+## Building & Testing from Source
+
+### Linux (WSL / Native)
+```bash
+# 1. Install prerequisites (Alpine example: apk add go gcc musl-dev sqlite-dev portaudio-dev git make)
+# Debian/Ubuntu: sudo apt install -y golang gcc libsqlite3-dev libportaudio2 portaudio19-dev git make
+
+# 2. Build binaries
+cd raptor
+go build -o bin/raptor ./cmd/raptor
+go build -o bin/raptorhp ./cmd/raptorhp
+
+# 3. Run unit tests & TAP test harness
+go test -v ./...
+./bin/raptor test t/
+./bin/raptor run examples/demo_showcase.rp
+```
+
+### Windows (PowerShell)
+```powershell
+cd raptor
+go build -o bin/raptor.exe ./cmd/raptor
+go build -o bin/raptorhp.exe ./cmd/raptorhp
+go test ./...
+.\bin\raptor.exe test t\
+```
+
 ## License
 
 Licensed under the **Artistic License 2.0**.

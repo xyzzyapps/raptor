@@ -54,60 +54,93 @@ These DLLs are copied into `bin/` so every executable is zero-dependency. At run
 | **`bin/libraylib.dll`** | Raylib 5.5 from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin\libraylib.dll`) | Raylib desktop graphics engine (`lib/Raylib.rp`, `examples/raylib_game.rp`) |
 | **`bin/sqlite3.dll`** | SQLite from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin\libsqlite3-0.dll`) | Native SQLite database (`sqlite_open`, `sqlite_query`, `sqlite_close`) |
 
-## Building from Source
+## Building & Testing from Source
 
 ### Prerequisites
 
-- **Go 1.22+** (project developed and verified with Go 1.26 on Windows/amd64)
-- **MSYS2 UCRT64 toolchain** (`C:\msys64\ucrt64\bin`) — required only to rebuild `moar.dll` from MoarVM source
-- **Perl** — required only to rebuild `moar.dll` (runs MoarVM's `Configure.pl`)
-- **No external Go module downloads** — `go.mod` declares a single dependency on the local `moarvm-go` module via `replace moarvm-go => ../moarvm-go`, so `moarvm-go/` must sit next to `raptor/`.
+- **Go 1.22+** (developed and verified on Go 1.22–1.26 across Windows and Linux/WSL)
+- **Local Module Link**: `go.mod` declares `replace moarvm-go => ../moarvm-go`, so `moarvm-go/` must reside adjacent to `raptor/`.
 
-### 1. Compile the Go binaries
+#### Package Dependencies by Operating System:
+- **Alpine Linux / WSL**:
+  ```sh
+  apk add go gcc musl-dev sqlite-dev portaudio-dev git make perl
+  ```
+- **Debian / Ubuntu / WSL**:
+  ```sh
+  sudo apt update && sudo apt install -y golang gcc libsqlite3-dev libportaudio2 portaudio19-dev git make perl
+  ```
+- **Fedora / RHEL**:
+  ```sh
+  sudo dnf install -y golang gcc sqlite-devel portaudio-devel git make perl
+  ```
+- **Arch Linux**:
+  ```sh
+  sudo pacman -S go gcc sqlite portaudio git make perl
+  ```
+- **Windows**:
+  - MSYS2 UCRT64 toolchain (`C:\msys64\ucrt64\bin`) with `gcc`, `raylib`, `sqlite3`.
+
+---
+
+### 1. Compile on Linux (WSL / Native)
+
+```bash
+cd raptor
+
+# 1. Build Raptor unified CLI executable
+go build -o bin/raptor ./cmd/raptor
+
+# 2. Build RaptorHP template engine & web server
+go build -o bin/raptorhp ./cmd/raptorhp
+
+# 3. Build WebAssembly browser runtime (optional)
+GOOS=js GOARCH=wasm go build -o web/raptor.wasm ./cmd/wasm
+```
+
+#### Run Tests & Verification on Linux:
+```bash
+# Run all Go unit test suites
+go test -v ./...
+
+# Run the complete TAP test harness (6 test files, 47 assertions)
+./bin/raptor test t/
+
+# Run the comprehensive feature showcase
+./bin/raptor run examples/demo_showcase.rp
+
+# Execute a one-liner
+./bin/raptor -e 'say "Hello from Raptor on Linux!"; my @arr = [10, 20, 30]; say "Elements: " ~ @arr.elems();'
+
+# Start the RaptorHP template server
+./bin/raptorhp -S localhost:8000
+```
+
+---
+
+### 2. Compile on Windows (PowerShell)
 
 ```powershell
 cd raptor
 
-# Unified CLI
+# 1. Build executables
 go build -o bin/raptor.exe ./cmd/raptor
-
-# RaptorHP template engine & server
 go build -o bin/raptorhp.exe ./cmd/raptorhp
 
-# WebAssembly in-browser runtime
+# 2. Build WebAssembly browser runtime
 $env:GOOS = "js"; $env:GOARCH = "wasm"
 go build -o web/raptor.wasm ./cmd/wasm
 Remove-Item Env:GOOS, Env:GOARCH
-```
 
-### 2. Package standalone applications
-
-```powershell
+# 3. Package standalone applications (optional)
 .\bin\raptor.exe pack examples\demo_showcase.rp -o bin\demo_app.exe
 .\bin\raptor.exe pack examples\raylib_game.rp -o bin\raylib_game.exe
 ```
 
-### 3. Bundle the runtime DLLs
-
-The three DLLs in `bin/` are not produced by the Go build; they are bundled from external sources:
-
+#### Run Tests & Verification on Windows:
 ```powershell
-# moar.dll — build the vendored MoarVM C source (see ../moarvm-go/vendor/apply_patches_msys.sh):
-#   perl Configure.pl --os=mingw32 --compiler=gcc --prefix=<build>
-#   make -j8 && make install
-Copy-Item ..\moarvm-go\build\moarvm\bin\moar.dll bin\
-
-# Raylib 5.5 + SQLite3 — MSYS2 UCRT64 packages
-# (mingw-w64-ucrt-x86_64-raylib, mingw-w64-ucrt-x86_64-sqlite3)
-Copy-Item C:\msys64\ucrt64\bin\libraylib.dll   bin\libraylib.dll
-Copy-Item C:\msys64\ucrt64\bin\libsqlite3-0.dll bin\sqlite3.dll
-```
-
-### 4. Verify the build
-
-```powershell
-go test ./...                      # Go unit test suites (runtime/)
-.\bin\raptor.exe test t\           # Raptor TAP test harness (6 suites, 47 assertions)
+go test ./...                      # Go unit test suites
+.\bin\raptor.exe test t\           # Raptor TAP test harness (6 files, 47 assertions)
 .\bin\raptor.exe -e 'say "Hello, Raptor!"'
 .\bin\raptorhp.exe -r '<b><?= 6 * 7 ?></b>'
 .\bin\raptorhp.exe -S localhost:8000   # development template server

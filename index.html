@@ -127,15 +127,20 @@
             <option value="0">1. Language Basics &amp; Operators</option>
             <option value="1">2. Dynamic Subsets &amp; Predicates</option>
             <option value="2">3. C-ABI Structs &amp; Overloading</option>
-            <option value="3">4. Autothreading Quantum Junctions</option>
-            <option value="4">5. Signature Destructuring &amp; JSON</option>
-            <option value="5">6. HTML5 Canvas 2D Graphics</option>
-            <option value="6">7. WebAudio Sound Synthesizer</option>
-            <option value="7">8. Full-Stack: DOM + Canvas + Audio</option>
+            <option value="3">4. Uniform Function Call Syntax (UFCS)</option>
+            <option value="4">5. Autothreading Quantum Junctions</option>
+            <option value="5">6. Signature Destructuring &amp; JSON</option>
+            <option value="6">7. Gather / Take Generators &amp; Lazy Lists</option>
+            <option value="7">8. Design-by-Contract &amp; Verification</option>
+            <option value="8">9. PodLit Literate Programming</option>
+            <option value="9">10. HTML5 Canvas 2D Graphics</option>
+            <option value="10">11. WebGL 3D Hardware Graphics</option>
+            <option value="11">12. WebAudio Sound Synthesizer</option>
+            <option value="12">13. Full-Stack In-Browser App</option>
           </select>
         </div>
         <button id="btnNextLesson" class="header-stepper-btn" title="Next Page (&rarr;)">&gt;</button>
-        <span id="pageIndicator" class="page-counter-label">1 / 8</span>
+        <span id="pageIndicator" class="page-counter-label">1 / 13</span>
       </div>
 
       <!-- Top Right Icons -->
@@ -145,79 +150,65 @@
             <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
           </svg>
         </a>
-        <button class="header-icon-btn" title="Settings">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-        </button>
-        <button class="header-icon-btn" title="Table of Contents">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
-        </button>
       </div>
     </div>
   </header>
 
-  <!-- 2. Tour Main 50/50 Split View -->
-  <main class="tour-main-container">
+  <!-- 2. Tour Main Resizable Split View -->
+  <main class="tour-main-container" id="tourMainContainer">
     
-    <!-- LEFT PANE (50%): Tutorial Reading Material -->
-    <section class="tour-narrative-pane">
+    <!-- LEFT PANE: Tutorial Reading Material -->
+    <section class="tour-narrative-pane" id="narrativePane">
       <div class="narrative-content-scroll">
         <h1 id="lessonTitle" class="tour-heading">Language Basics &amp; Operators</h1>
         
         <div id="lessonDesc" class="tour-body-text">
           <p>Welcome to a tour of the Raptor programming language.</p>
-          <p>Raptor is a high-performance procedural execution platform and dynamic language (Perl 5 subset of Raku without OO overhead). Variables use standard sigils (<code>$</code>, <code>@</code>, <code>%</code>).</p>
-          <p>The tour is divided into a list of modules that you can access by selecting from the menu on the top right.</p>
-          <p>Throughout the tour you will find a series of slides and exercises for you to complete.</p>
-          <p>You can navigate through them using:</p>
-          <p class="tour-indent-p">
-            <span class="tour-blue-link" id="linkPrev">&quot;previous&quot;</span> to go to the previous page,<br>
-            <span class="tour-blue-link" id="linkNext">&quot;next&quot;</span> to go to the next page.
-          </p>
-          <p>The tour is interactive. Click the <strong>Run</strong> button now (or press <kbd>Shift + Enter</kbd>) to compile and run the program in WebAssembly. The result is displayed below the code.</p>
         </div>
       </div>
     </section>
 
-    <!-- RIGHT PANE (50%): Interactive Editor & Viewport -->
-    <section class="tour-interactive-pane">
+    <!-- HORIZONTAL GUTTER RESIZER (Drag left/right) -->
+    <div id="resizerH" class="gutter-resizer-h" title="Drag to resize narrative and editor panes"></div>
+
+    <!-- RIGHT PANE: Interactive Editor & Viewport -->
+    <section class="tour-interactive-pane" id="interactivePane">
       
       <!-- Top File & Option Bar (#e0ebf5) -->
       <div class="editor-top-bar">
         <div class="editor-tab-active">
           <span>main.rp</span>
         </div>
-
-        <div class="editor-top-options">
-          <button id="btnSyntaxToggle" class="editor-option-pill">Syntax on</button>
-        </div>
       </div>
 
       <!-- Editor Textarea Area (#ffffea) with Line Numbers -->
-      <div class="editor-middle-area">
+      <div class="editor-middle-area" id="editorArea">
         <div class="line-numbers-gutter" id="lineNumbers">
           1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12<br>13<br>14<br>15<br>16<br>17<br>18<br>19<br>20<br>21<br>22
         </div>
         <textarea id="codeEditor" class="tour-editor-input" spellcheck="false" placeholder="# Enter Raptor source code here..."></textarea>
       </div>
 
-      <!-- Bottom Action Bar (#e0ebf5) with Reset, Format, Run -->
+      <!-- VERTICAL GUTTER RESIZER (Drag up/down) -->
+      <div id="resizerV" class="gutter-resizer-v" title="Drag to resize editor and output viewports"></div>
+
+      <!-- Bottom Action Bar (#e0ebf5) with Reset and Run -->
       <div class="editor-bottom-bar">
         <div class="output-tab-links">
           <button id="tabConsole" class="view-switch-btn active">Output</button>
           <button id="tabCanvas" class="view-switch-btn">Canvas 2D</button>
+          <button id="tabWebGL" class="view-switch-btn">WebGL 3D</button>
           <button id="tabDom" class="view-switch-btn">Live DOM</button>
-          <button id="tabPod" class="view-switch-btn">PodLit</button>
         </div>
 
         <div class="editor-action-buttons">
           <button id="btnResetCode" class="action-btn-gray">Reset</button>
-          <button id="btnFormatCode" class="action-btn-gray">Format</button>
           <button id="btnRun" class="action-btn-blue">Run</button>
         </div>
       </div>
 
       <!-- Output Viewports Area -->
-      <div class="tour-output-area">
+      <div class="tour-output-area" id="outputArea">
         
         <!-- Viewport 1: Terminal Console -->
         <div id="consoleView" class="output-view-pane active">
@@ -229,30 +220,26 @@
           </div>
         </div>
 
-        <!-- Viewport 2: Canvas 2D Stage -->
+        <!-- Viewport 2: Canvas 2D Stage (640x320) -->
         <div id="canvasView" class="output-view-pane">
           <div class="canvas-center-wrapper">
-            <canvas id="wasmCanvas" width="640" height="380"></canvas>
+            <canvas id="wasmCanvas" width="640" height="320"></canvas>
           </div>
         </div>
 
-        <!-- Viewport 3: Live DOM Inspector -->
+        <!-- Viewport 3: WebGL 3D Hardware Stage (640x320) -->
+        <div id="webglView" class="output-view-pane">
+          <div class="canvas-center-wrapper">
+            <canvas id="wasmWebGLCanvas" width="640" height="320"></canvas>
+          </div>
+        </div>
+
+        <!-- Viewport 4: Live DOM Inspector -->
         <div id="domView" class="output-view-pane">
           <div class="dom-preview-wrapper">
             <div id="wasmDomContainer">
               <p class="dom-hint-text">DOM output from <code>dom_set_html()</code> will be rendered here dynamically.</p>
             </div>
-          </div>
-        </div>
-
-        <!-- Viewport 4: PodLit View -->
-        <div id="podView" class="output-view-pane">
-          <div class="pod-action-strip">
-            <button id="btnWeave" class="action-btn-gray">Weave Markdown</button>
-            <button id="btnTangle" class="action-btn-gray">Tangle Source</button>
-          </div>
-          <div id="podPreview" class="pod-output-surface">
-            <p class="text-muted">PodLit documentation will appear here.</p>
           </div>
         </div>
 

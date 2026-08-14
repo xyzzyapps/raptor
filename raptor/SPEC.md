@@ -499,9 +499,48 @@ sub set_actuator_speed(ValidPin $pin, ValidDuty $duty) {
 | Target Profile | Toolchain & Profile | Raw Unstripped Size | Optimized Build Size | Over-The-Wire (Gzip / Brotli) | Target Environment |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Desktop / Server Full** | Standard Go `gc` (`-ldflags="-s -w"`) | **11.78 MB** | **7.95 MB** | **2.60 MB** | Windows / Linux / macOS (x86_64/ARM64) |
-| **WebAssembly Tour** | Tree-Shaken Go `gc` (`-ldflags="-s -w"`) | **14.20 MB** | **6.04 MB** | **1.21 MB** (Brotli: ~980 KB) | Modern Web Browsers (WebAssembly) |
-| **WASM TinyGo** *(Experimental)* | TinyGo LLVM (`-target=wasm -no-debug`) | **1.20 MB** | **320 KB** | **78 KB** | Embedded Web & Lightweight In-Browser REPL |
+| **WebAssembly Tour (TinyGo)** | TinyGo LLVM (`-target=wasm -no-debug`) | **1.37 MB** | **1.37 MB** | **340 KB** (Brotli: ~280 KB) | Modern Web Browsers (WebAssembly) |
 | **ESP32 Firmware** | TinyGo LLVM (`-target=esp32`) | **850 KB** | **380 KB** | N/A (Direct Flash) | ESP32, ESP32-S3, ESP32-C3, RP2040 |
+
+---
+
+## 20. Comprehensive Control Flow & Decision Operators Specification
+
+Raptor provides a complete suite of procedural, Raku-style, and short-circuit control flow constructs:
+
+### 20.1 Conditional Branching
+- `if <cond> { ... } elsif <cond> { ... } else { ... }`: Standard truthiness branching.
+- `unless <cond> { ... }`: Inverted conditional (executes block when condition evaluates to false).
+- `given <topic> { when <pattern> { ... } default { ... } }`: Topical pattern matching with smartmatching against types, values, lists, ranges (`10..20`), regexes, and junctions.
+
+### 20.2 Looping & Iteration
+- `for <iterable> -> $elem { ... }`: Pointy-block iterator over arrays, lists, sequences, and ranges (`0..10`).
+- `while <cond> { ... }`: Standard conditional loop.
+- `until <cond> { ... }`: Inverted conditional loop (executes while condition evaluates to false).
+- `loop (my $i = 0; $i < N; $i += 1) { ... }`: C-style 3-part iteration loop.
+- `loop { ... }`: Infinite loop construct.
+
+### 20.3 Loop Control & Function Jumps
+- `last;`: Immediately breaks out of the innermost enclosing loop (`for`, `while`, `until`, `loop`).
+- `next;`: Immediately skips to the next iteration of the innermost enclosing loop.
+- `return <expr>;`: Exits the current subroutine or closure with a return value.
+
+### 20.4 Generator Expressions
+- `gather { ... take <value>; ... }`: Lazy sequence and coroutine generator that collects dynamic emissions into an evaluated array.
+
+### 20.5 Short-Circuit & Conditional Operators
+- `$cond ?? $then !! $else`: Raku-style conditional ternary expression.
+- `$cond ? $then : $else`: C/Perl-style conditional ternary expression.
+- `$val // $default`: Defined-or defaulting operator (evaluates `$default` only if `$val` is `Nil`).
+- `$val //= $default`: Defined-or assignment operator.
+- `&&`, `and`: Short-circuit logical conjunction.
+- `||`, `or`: Short-circuit logical disjunction.
+- `!`, `not`: Logical negation.
+
+### 20.6 Multi-Way Chaining & Quantum Junctions
+- `0 <= $x <= 100`, `$a < $b < $c`: Mathematical multi-comparison chaining without re-evaluating middle operands.
+- `$val ~~ $pattern`: Smartmatch operator against types, ranges, junctions, regexes, and lists.
+- `any(...)`, `all(...)`, `one(...)`, `none(...)`: Autothreading quantum superposition predicates in conditionals.
 
 
 

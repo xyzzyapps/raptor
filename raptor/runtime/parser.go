@@ -125,6 +125,16 @@ func (p *Parser) parseStatement() (Stmt, error) {
 	case TokBefore, TokAfter, TokAround:
 		return p.parseAdviceHook()
 
+	case TokLast:
+		p.advance()
+		p.match(TokSemicolon)
+		return &BreakStmt{}, nil
+
+	case TokNext:
+		p.advance()
+		p.match(TokSemicolon)
+		return &ContinueStmt{}, nil
+
 	case TokLBrace:
 		return p.parseBlock()
 

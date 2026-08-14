@@ -165,6 +165,18 @@ type ReturnStmt struct {
 func (r *ReturnStmt) node() {}
 func (r *ReturnStmt) stmt() {}
 
+// BreakStmt represents a 'last' loop termination statement.
+type BreakStmt struct{}
+
+func (b *BreakStmt) node() {}
+func (b *BreakStmt) stmt() {}
+
+// ContinueStmt represents a 'next' loop iteration jump statement.
+type ContinueStmt struct{}
+
+func (c *ContinueStmt) node() {}
+func (c *ContinueStmt) stmt() {}
+
 // UseStmt represents a module import (e.g. use Module:from<Perl5>).
 type UseStmt struct {
 	Module string

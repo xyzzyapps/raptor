@@ -494,6 +494,8 @@ func (l *Lexer) scanIdentOrKeyword() Token {
 		return Token{Type: TokEnum, Literal: lit, Line: curLine, Col: curCol}
 	case "last":
 		return Token{Type: TokLast, Literal: lit, Line: curLine, Col: curCol}
+	case "next":
+		return Token{Type: TokNext, Literal: lit, Line: curLine, Col: curCol}
 	case "subset":
 		return Token{Type: TokSubset, Literal: lit, Line: curLine, Col: curCol}
 	case "returns":

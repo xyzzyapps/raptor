@@ -502,6 +502,12 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		}
 		return nil, &ReturnSignal{Value: retVal}
 
+	case *BreakStmt:
+		return nil, &BreakSignal{}
+
+	case *ContinueStmt:
+		return nil, &ContinueSignal{}
+
 	case *BlockStmt:
 		return in.evalBlock(s, env.NewChild())
 

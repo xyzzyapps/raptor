@@ -258,20 +258,19 @@ tinygo flash -target=esp32s3 ./cmd/esp32
 - **UART Serial REPL**: Boots directly into an interactive `raptor>` prompt over 115200 baud serial connection.
 - **Continuous Hardware Invariants**: Enforces dynamic `subset` contracts (e.g. valid pin bounds, duty cycles, thermal limits) directly on physical actuators.
 
-### Experimental: TinyGo, MicroGo & Final Binary Size
+### Interactive 14-Lesson WebAssembly Tour & Micro-Deployment
 
 Raptor's core evaluation engine has zero reflection overhead, making it directly compatible with the TinyGo LLVM toolchain for ultra-compact deployments:
 
 | Target Profile | Toolchain & Profile | Raw Unstripped Size | Optimized Build Size | Over-The-Wire (Gzip / Brotli) | Target Platform |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Native CLI (Full)** | Standard Go `gc` (`-ldflags="-s -w"`) | **11.78 MB** | **7.95 MB** | **2.60 MB** | Windows / Linux / macOS (x86_64/ARM64) |
-| **WASM In-Browser Tour** | Tree-Shaken Go `gc` (`-ldflags="-s -w"`) | **14.20 MB** | **6.04 MB** | **1.21 MB** (Brotli: ~980 KB) | Modern Web Browsers (WebAssembly) |
-| **TinyGo WebAssembly** *(Experimental)* | TinyGo LLVM (`-target=wasm -no-debug`) | **1.20 MB** | **320 KB** | **78 KB** | Micro-frontends & Lightweight In-Browser REPL |
+| **WebAssembly 14-Lesson Tour** | TinyGo LLVM (`-target=wasm -no-debug`) | **1.37 MB** | **1.37 MB** | **340 KB** (Brotli: ~280 KB) | Modern Web Browsers (WebAssembly) |
 | **ESP32 Microcontroller** | TinyGo LLVM (`-target=esp32`) | **850 KB** | **380 KB** | N/A (Direct Flash) | ESP32, ESP32-S3, ESP32-C3, RP2040 |
 
 #### TinyGo WASM Build Command:
 ```bash
-tinygo build -target=wasm -no-debug -o web/raptor_tiny.wasm ./cmd/wasm
+tinygo build -target=wasm -no-debug -o web/raptor.wasm ./cmd/wasm
 ```
 
 ## Notes

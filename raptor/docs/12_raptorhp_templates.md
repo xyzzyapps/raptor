@@ -7,12 +7,10 @@ RaptorHP allows embedding dynamic Raptor code blocks inside HTML or markdown doc
 | Tag Syntax | Purpose | Example |
 | :--- | :--- | :--- |
 | `<?raptor ... ?>` | Code execution block | `<?raptor my $name = "Quantum"; ?>` |
-| `<?rp ... ?>` | Shorthand code execution | `<?rp for 1..5 -> $i { ?>...<?rp } ?>` |
+| `<?rp ... ?>` | Shorthand code execution | `<?rp for @items -> $i { ?>...<?rp } ?>` |
 | `<?php ... ?>` | PHP compatibility tag | `<?php my $total = 100; ?>` |
 | `<?= $expr ?>` | Output expression (echo shorthand) | `<h1>Welcome, <?= $user ?>!</h1>` |
 | `<? ... ?>` | Short open tag | `<? say "Inline script"; ?>` |
-
----
 
 ## 2. Example Template (`index.phtml`)
 
@@ -26,9 +24,9 @@ RaptorHP allows embedding dynamic Raptor code blocks inside HTML or markdown doc
     <?raptor
     my $title = "Real-Time Telemetry Dashboard";
     my @servers = [
-        { name => "US-East", status => "Online", ping => 14 },
-        { name => "EU-Central", status => "Online", ping => 22 },
-        { name => "AP-South", status => "Maintenance", ping => 88 }
+        { "name" => "US-East", "status" => "Online", "ping" => 14 },
+        { "name" => "EU-Central", "status" => "Online", "ping" => 22 },
+        { "name" => "AP-South", "status" => "Maintenance", "ping" => 88 }
     ];
     ?>
 
@@ -52,8 +50,6 @@ RaptorHP allows embedding dynamic Raptor code blocks inside HTML or markdown doc
 </html>
 ```
 
----
-
 ## 3. CLI Template Execution
 
 Render templates directly to standard output:
@@ -65,8 +61,6 @@ raptorhp index.phtml > output.html
 # 2. Evaluate inline template string
 raptorhp -r '<h1><?= "Hello " ~ "from RaptorHP!" ?></h1>'
 ```
-
----
 
 ## 4. Built-in Development Web Server
 

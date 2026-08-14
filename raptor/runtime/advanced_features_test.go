@@ -1,6 +1,7 @@
 package raptor
 
 import (
+	"runtime"
 	"testing"
 )
 
@@ -45,6 +46,9 @@ $v.as_int = 42;
 }
 
 func TestNativeCallSubAndStruct(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("skipping Windows-specific kernel32 FFI test on non-windows platform")
+	}
 	in := NewInterp()
 	code := `
 struct SYSTEMTIME {

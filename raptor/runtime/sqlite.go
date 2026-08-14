@@ -7,13 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"unsafe"
 )
 
 type sqliteEngine struct {
 	mu           sync.Mutex
-	dllHandle    syscall.Handle
+	dllHandle    uintptr
 	loaded       bool
 	pOpen        uintptr
 	pClose       uintptr
@@ -64,29 +63,31 @@ func (s *sqliteEngine) tryLoadDLL() error {
 		"sqlite3.dll",
 		"winsqlite3.dll",
 		"libsqlite3-0.dll",
+		"libsqlite3.so",
+		"libsqlite3.so.0",
 	}
 
 	for _, name := range dlls {
 		path := filepath.Clean(name)
-		h, err := syscall.LoadLibrary(path)
+		h, err := loadDynamicLibrary(path)
 		if err == nil && h != 0 {
 			s.dllHandle = h
 			s.loaded = true
-			s.pOpen, _ = syscall.GetProcAddress(h, "sqlite3_open")
-			s.pClose, _ = syscall.GetProcAddress(h, "sqlite3_close")
-			s.pExec, _ = syscall.GetProcAddress(h, "sqlite3_exec")
-			s.pPrepare, _ = syscall.GetProcAddress(h, "sqlite3_prepare_v2")
-			s.pStep, _ = syscall.GetProcAddress(h, "sqlite3_step")
-			s.pColCount, _ = syscall.GetProcAddress(h, "sqlite3_column_count")
-			s.pColName, _ = syscall.GetProcAddress(h, "sqlite3_column_name")
-			s.pColText, _ = syscall.GetProcAddress(h, "sqlite3_column_text")
-			s.pColInt64, _ = syscall.GetProcAddress(h, "sqlite3_column_int64")
-			s.pColDouble, _ = syscall.GetProcAddress(h, "sqlite3_column_double")
-			s.pColType, _ = syscall.GetProcAddress(h, "sqlite3_column_type")
-			s.pFinalize, _ = syscall.GetProcAddress(h, "sqlite3_finalize")
-			s.pLastRowID, _ = syscall.GetProcAddress(h, "sqlite3_last_insert_rowid")
-			s.pChanges, _ = syscall.GetProcAddress(h, "sqlite3_changes")
-			s.pErrMsg, _ = syscall.GetProcAddress(h, "sqlite3_errmsg")
+			s.pOpen, _ = getDynamicProcAddress(h, "sqlite3_open")
+			s.pClose, _ = getDynamicProcAddress(h, "sqlite3_close")
+			s.pExec, _ = getDynamicProcAddress(h, "sqlite3_exec")
+			s.pPrepare, _ = getDynamicProcAddress(h, "sqlite3_prepare_v2")
+			s.pStep, _ = getDynamicProcAddress(h, "sqlite3_step")
+			s.pColCount, _ = getDynamicProcAddress(h, "sqlite3_column_count")
+			s.pColName, _ = getDynamicProcAddress(h, "sqlite3_column_name")
+			s.pColText, _ = getDynamicProcAddress(h, "sqlite3_column_text")
+			s.pColInt64, _ = getDynamicProcAddress(h, "sqlite3_column_int64")
+			s.pColDouble, _ = getDynamicProcAddress(h, "sqlite3_column_double")
+			s.pColType, _ = getDynamicProcAddress(h, "sqlite3_column_type")
+			s.pFinalize, _ = getDynamicProcAddress(h, "sqlite3_finalize")
+			s.pLastRowID, _ = getDynamicProcAddress(h, "sqlite3_last_insert_rowid")
+			s.pChanges, _ = getDynamicProcAddress(h, "sqlite3_changes")
+			s.pErrMsg, _ = getDynamicProcAddress(h, "sqlite3_errmsg")
 			return nil
 		}
 	}
@@ -111,7 +112,7 @@ func (in *Interp) registerSQLiteBuiltins() {
 		if err == nil && sqEngine.pOpen != 0 {
 			var dbPtr uintptr
 			cPath := append([]byte(path), 0)
-			r1, _, _ := syscall.SyscallN(sqEngine.pOpen, uintptr(unsafe.Pointer(&cPath[0])), uintptr(unsafe.Pointer(&dbPtr)))
+			r1, _ := callDynamicProc(sqEngine.pOpen, uintptr(unsafe.Pointer(&cPath[0])), uintptr(unsafe.Pointer(&dbPtr)))
 			if int32(r1) == 0 && dbPtr != 0 {
 				sqEngine.mu.Lock()
 				sqEngine.databases[dbKey] = dbPtr
@@ -143,7 +144,7 @@ func (in *Interp) registerSQLiteBuiltins() {
 		if isNative && dbPtr != 0 && sqEngine.pExec != 0 {
 			cSQL := append([]byte(sql), 0)
 			var errMsgPtr uintptr
-			r1, _, _ := syscall.SyscallN(sqEngine.pExec, dbPtr, uintptr(unsafe.Pointer(&cSQL[0])), 0, 0, uintptr(unsafe.Pointer(&errMsgPtr)))
+			r1, _ := callDynamicProc(sqEngine.pExec, dbPtr, uintptr(unsafe.Pointer(&cSQL[0])), 0, 0, uintptr(unsafe.Pointer(&errMsgPtr)))
 			if int32(r1) != 0 {
 				errMsg := "sqlite error"
 				if errMsgPtr != 0 {
@@ -154,11 +155,11 @@ func (in *Interp) registerSQLiteBuiltins() {
 
 			var lastID, changes int64
 			if sqEngine.pLastRowID != 0 {
-				rID, _, _ := syscall.SyscallN(sqEngine.pLastRowID, dbPtr)
+				rID, _ := callDynamicProc(sqEngine.pLastRowID, dbPtr)
 				lastID = int64(rID)
 			}
 			if sqEngine.pChanges != 0 {
-				rCh, _, _ := syscall.SyscallN(sqEngine.pChanges, dbPtr)
+				rCh, _ := callDynamicProc(sqEngine.pChanges, dbPtr)
 				changes = int64(rCh)
 			}
 
@@ -191,11 +192,11 @@ func (in *Interp) registerSQLiteBuiltins() {
 		if isNative && dbPtr != 0 && sqEngine.pPrepare != 0 && sqEngine.pStep != 0 {
 			cSQL := append([]byte(sql), 0)
 			var stmtPtr uintptr
-			r1, _, _ := syscall.SyscallN(sqEngine.pPrepare, dbPtr, uintptr(unsafe.Pointer(&cSQL[0])), uintptr(len(cSQL)), uintptr(unsafe.Pointer(&stmtPtr)), 0)
+			r1, _ := callDynamicProc(sqEngine.pPrepare, dbPtr, uintptr(unsafe.Pointer(&cSQL[0])), uintptr(len(cSQL)), uintptr(unsafe.Pointer(&stmtPtr)), 0)
 			if int32(r1) != 0 || stmtPtr == 0 {
 				errMsg := "sqlite query prepare error"
 				if sqEngine.pErrMsg != 0 {
-					ePtr, _, _ := syscall.SyscallN(sqEngine.pErrMsg, dbPtr)
+					ePtr, _ := callDynamicProc(sqEngine.pErrMsg, dbPtr)
 					if ePtr != 0 {
 						errMsg = cStringToGo(ePtr)
 					}
@@ -204,21 +205,21 @@ func (in *Interp) registerSQLiteBuiltins() {
 			}
 			defer func() {
 				if sqEngine.pFinalize != 0 {
-					syscall.SyscallN(sqEngine.pFinalize, stmtPtr)
+					callDynamicProc(sqEngine.pFinalize, stmtPtr)
 				}
 			}()
 
 			var rows []*Value
 			colCount := 0
 			if sqEngine.pColCount != 0 {
-				rC, _, _ := syscall.SyscallN(sqEngine.pColCount, stmtPtr)
+				rC, _ := callDynamicProc(sqEngine.pColCount, stmtPtr)
 				colCount = int(rC)
 			}
 
 			colNames := make([]string, colCount)
 			for i := 0; i < colCount; i++ {
 				if sqEngine.pColName != 0 {
-					rN, _, _ := syscall.SyscallN(sqEngine.pColName, stmtPtr, uintptr(i))
+					rN, _ := callDynamicProc(sqEngine.pColName, stmtPtr, uintptr(i))
 					colNames[i] = cStringToGo(rN)
 				} else {
 					colNames[i] = fmt.Sprintf("col_%d", i)
@@ -227,7 +228,7 @@ func (in *Interp) registerSQLiteBuiltins() {
 
 			const SQLITE_ROW = 100
 			for {
-				rStep, _, _ := syscall.SyscallN(sqEngine.pStep, stmtPtr)
+				rStep, _ := callDynamicProc(sqEngine.pStep, stmtPtr)
 				if int32(rStep) != SQLITE_ROW {
 					break
 				}
@@ -236,21 +237,21 @@ func (in *Interp) registerSQLiteBuiltins() {
 				for i := 0; i < colCount; i++ {
 					colType := 3 // SQLITE_TEXT default
 					if sqEngine.pColType != 0 {
-						rT, _, _ := syscall.SyscallN(sqEngine.pColType, stmtPtr, uintptr(i))
+						rT, _ := callDynamicProc(sqEngine.pColType, stmtPtr, uintptr(i))
 						colType = int(rT)
 					}
 
 					switch colType {
 					case 1: // SQLITE_INTEGER
-						rInt, _, _ := syscall.SyscallN(sqEngine.pColInt64, stmtPtr, uintptr(i))
+						rInt, _ := callDynamicProc(sqEngine.pColInt64, stmtPtr, uintptr(i))
 						rowHash[colNames[i]] = IntValue(int64(rInt))
 					case 2: // SQLITE_FLOAT
-						rFloat, _, _ := syscall.SyscallN(sqEngine.pColDouble, stmtPtr, uintptr(i))
+						rFloat, _ := callDynamicProc(sqEngine.pColDouble, stmtPtr, uintptr(i))
 						rowHash[colNames[i]] = FloatValue(*(*float64)(unsafe.Pointer(&rFloat)))
 					case 5: // SQLITE_NULL
 						rowHash[colNames[i]] = NilValue()
 					default: // SQLITE_TEXT or BLOB
-						rTxt, _, _ := syscall.SyscallN(sqEngine.pColText, stmtPtr, uintptr(i))
+						rTxt, _ := callDynamicProc(sqEngine.pColText, stmtPtr, uintptr(i))
 						rowHash[colNames[i]] = StringValue(cStringToGo(rTxt))
 					}
 				}
@@ -295,7 +296,7 @@ func (in *Interp) registerSQLiteBuiltins() {
 		sqEngine.mu.Unlock()
 
 		if isNative && dbPtr != 0 && sqEngine.pClose != 0 {
-			syscall.SyscallN(sqEngine.pClose, dbPtr)
+			callDynamicProc(sqEngine.pClose, dbPtr)
 			return BoolValue(true), nil
 		}
 		return BoolValue(true), nil

@@ -2,8 +2,6 @@
 
 Raptor features a built-in verification framework supporting Perl5 `Test::More` TAP output, a `raptor test` harness (like `prove`), zero-overhead inline `TEST` blocks, Design-by-Contract (`pre`, `post`, `invariant`), and Property-Based QuickCheck fuzzing.
 
----
-
 ## 1. TAP (Test Anything Protocol) Testing
 
 Write test scripts with `.t` extension:
@@ -19,7 +17,7 @@ is(2 * 3, 6, "Multiplication produces 6");
 isnt("alpha", "beta", "Strings are different");
 
 # Deep structural equality
-is_deeply([1, 2, {:a => 10}], [1, 2, {:a => 10}], "Deep structure matches");
+is_deeply([1, 2, { "a" => 10 }], [1, 2, { "a" => 10 }], "Deep structure matches");
 
 # Pattern matching
 like("raptor_1.0.0", "^raptor_", "Prefix matches");
@@ -32,8 +30,6 @@ Run test suites using the `raptor test` CLI runner:
 ```powershell
 raptor test t/
 ```
-
----
 
 ## 2. Zero-Overhead Inline Tests (`TEST`)
 
@@ -51,24 +47,20 @@ TEST "calculate_tax calculations", sub () {
 };
 ```
 
----
-
 ## 3. Design-by-Contract (`pre`, `post`, `invariant`)
 
 Enforce preconditions and postconditions dynamically:
 
 ```perl
 sub deposit($account, $amount) {
-    pre($amount > 0, "Deposit amount must be positive");
+    pre({ $amount > 0 });
     
-    $account<balance> = $account<balance> + $amount;
+    $account{"balance"} = $account{"balance"} + $amount;
     
-    post($account<balance> >= $amount, "Balance must reflect deposit");
-    return $account<balance>;
+    post({ $_ >= $amount });
+    return $account{"balance"};
 }
 ```
-
----
 
 ## 4. Property-Based QuickCheck Fuzzing
 

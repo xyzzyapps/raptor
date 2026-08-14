@@ -5,17 +5,13 @@ package raptor
 import (
 	"fmt"
 	"moarvm-go/engine"
-	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"unsafe"
 )
 
-
-
 type ffiLib struct {
-	handle syscall.Handle
+	handle uintptr
 	funcs  map[string]uintptr
 }
 
@@ -42,39 +38,9 @@ func (in *Interp) registerFFI() {
 			return StringValue(key), nil
 		}
 
-		dir := filepath.Dir(path)
-		if dir != "." && dir != "" {
-			k32, err := syscall.LoadLibrary("kernel32.dll")
-			if err == nil {
-				setDllDir, err := syscall.GetProcAddress(k32, "SetDllDirectoryW")
-				if err == nil {
-					dirPtr, err := syscall.UTF16PtrFromString(dir)
-					if err == nil {
-						_, _, _ = syscall.SyscallN(setDllDir, uintptr(unsafe.Pointer(dirPtr)))
-					}
-				}
-			}
-		}
-
-		handle, err := syscall.LoadLibrary(path)
+		handle, err := loadDynamicLibrary(path)
 		if err != nil {
-			// Check local bin/ folder and executable directory
-			baseName := filepath.Base(path)
-			candidates := []string{
-				filepath.Join("bin", baseName),
-				filepath.Join(filepath.Dir(os.Args[0]), baseName),
-				baseName,
-			}
-			for _, cand := range candidates {
-				if h, e := syscall.LoadLibrary(cand); e == nil {
-					handle = h
-					err = nil
-					break
-				}
-			}
-			if err != nil {
-				return nil, fmt.Errorf("failed loading library %q: %w", path, err)
-			}
+			return nil, err
 		}
 
 		libKey := fmt.Sprintf("lib_%d", st.nextID)
@@ -86,7 +52,6 @@ func (in *Interp) registerFFI() {
 		st.loadedPaths[path] = libKey
 		return StringValue(libKey), nil
 	}
-
 
 	in.Builtins["ffi_call"] = func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) < 3 {
@@ -103,7 +68,7 @@ func (in *Interp) registerFFI() {
 
 		procAddr, ok := lib.funcs[funcName]
 		if !ok {
-			addr, err := syscall.GetProcAddress(lib.handle, funcName)
+			addr, err := getDynamicProcAddress(lib.handle, funcName)
 			if err != nil {
 				return nil, fmt.Errorf("symbol %q not found in library %q: %w", funcName, libKey, err)
 			}
@@ -153,7 +118,7 @@ func (in *Interp) registerFFI() {
 					}
 				case ValClosure, ValMultiSub:
 					closureVal := a
-					cb := syscall.NewCallback(func(a1, a2, a3, a4 uintptr) uintptr {
+					cb := createDynamicCallback(func(a1, a2, a3, a4 uintptr) uintptr {
 						res, err := in.InvokeCallable(closureVal, []*Value{
 							NativePtrValue(a1),
 							NativePtrValue(a2),
@@ -172,7 +137,7 @@ func (in *Interp) registerFFI() {
 			}
 		}
 
-		r1, _, err := syscall.SyscallN(procAddr, callArgs...)
+		r1, err := callDynamicProc(procAddr, callArgs...)
 		_ = err
 		_ = pinnedByteSlices // keep alive
 
@@ -245,7 +210,7 @@ func (in *Interp) registerFFI() {
 		if !ok {
 			return nil, fmt.Errorf("unknown library handle %q", libKey)
 		}
-		syscall.FreeLibrary(lib.handle)
+		_ = freeDynamicLibrary(lib.handle)
 		delete(st.libs, libKey)
 		return BoolValue(true), nil
 	}
@@ -468,7 +433,7 @@ func (in *Interp) registerFFI() {
 			return nil, fmt.Errorf("ffi_callback requires a closure")
 		}
 		closureVal := args[0]
-		cb := syscall.NewCallback(func(a1, a2, a3, a4 uintptr) uintptr {
+		cb := createDynamicCallback(func(a1, a2, a3, a4 uintptr) uintptr {
 			res, err := in.InvokeCallable(closureVal, []*Value{
 				NativePtrValue(a1),
 				NativePtrValue(a2),

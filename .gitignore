@@ -26,6 +26,10 @@ release_staging/
 *.wasm
 *.zip
 
-# Build Output Directories
+# Build Output Directories & Binaries
 build/
 **/build/
+bin/*
+**/bin/*
+!bin/.keep
+!**/bin/.keep

@@ -40,30 +40,32 @@ A high-performance Go host and FFI binding for **MoarVM** (64-bit 6Model JIT vir
 ## Quickstart Feature Tutorial
 
 ### 1. Readability, Brief Syntax & Canonical `Nil`
-Raptor combines the concise syntax of Perl 5 with Raku's modern semantics. Variables use standard sigils (`$`, `@`, `%`) and canonical `Nil`:
+Raptor combines the concise syntax of Perl 5 with Raku's modern semantics. Variables use standard sigils (`$`, `@`, `%`) with pure dynamic typing and canonical `Nil`:
 
 ```raku
 # Variables and canonical Nil
-my Str $name = "Raptor";
+my $name = "Raptor";
 my @primes = [2, 3, 5, 7, 11];
 my %config = { "host" => "localhost", "port" => 8080 };
 
 my $default_val = Nil // "Fallback Value";
-say "Server: $name running on " ~ %config{"host"} ~ ":" ~ %config{"port"};
-say "Defined-or check: $default_val";
+say "Server: " ~ $name ~ " running on " ~ %config{"host"} ~ ":" ~ %config{"port"};
+say "Defined-or check: " ~ $default_val;
 ```
 
 ### 2. Uniform Function Call Syntax (UFCS)
 Any subroutine or multiple-dispatch candidate can be chained using method syntax on its first argument without boilerplate wrapper classes:
 
 ```raku
-multi sub format_id(Int $n) { return "ID-#" ~ $n; }
-multi sub tag(Str $text, Str $t) { return "<" ~ $t ~ ">" ~ $text ~ "</" ~ $t ~ ">"; }
+sub format_id($n) { return "ID-#" ~ $n; }
+sub tag($text, $t) { return "<" ~ $t ~ ">" ~ $text ~ "</" ~ $t ~ ">"; }
 
 # Method chaining via UFCS
 say 1001.format_id();                           # ID-#1001
 say "welcome".uc().tag("h1");                  # <h1>WELCOME</h1>
-say [10, 20, 30].elems();                      # 3
+
+my @items = [10, 20, 30];
+say @items.elems();                             # 3
 ```
 
 ### 3. Predicate Types & Continuous Invariant Enforcement
@@ -71,23 +73,23 @@ Drawing from the formal foundations of **Predicate Subtyping, Refinement Types (
 
 ```raku
 # Define dynamic refinement predicate types
-subset Positive of Int where { $_ > 0 };
-subset PortNum  of Int where { $_ >= 1 && $_ <= 65535 };
+subset Positive where { $_ > 0 };
+subset PortNum  where { $_ >= 1 && $_ <= 65535 };
 
 # Variable invariants evaluated on declaration AND every subsequent mutation
 my Positive $balance = 100;
 $balance = 250;      # OK
 # $balance = -10;    # Throws: type check failed: dynamic constraint violated for subset Positive
 
-my Int $port where { $_ >= 1 && $_ <= 65535 } = 8080;
+my $port where { $_ >= 1 && $_ <= 65535 } = 8080;
 $port = 9000;        # OK
 # $port = 99999;     # Throws: type check failed: where constraint violated for variable $port
 
 # Predicate-based Multiple Dispatch & Pattern Recursion
-multi sub fib(Int $n where { $_ <= 1 }) { return $n; }
-multi sub fib(Int $n)                   { return fib($n - 1) + fib($n - 2); }
+multi sub fib($n where { $n <= 1 }) { return $n; }
+multi sub fib($n)                   { return fib($n - 1) + fib($n - 2); }
 
-say "fib(8) = ", fib(8);
+say "fib(8) = " ~ fib(8);
 ```
 
 ### 4. C-ABI Contiguous Structs & Closure Fields
@@ -108,18 +110,18 @@ multi sub infix:<+>(Vector2 $a, Vector2 $b) {
 }
 
 struct Button {
-    Str $label;
-    Any $onClick;
+    int32 $id;
+    ptr $onClick;
 }
 
 my $v1 = Vector2.new(); $v1.x = 10.0; $v1.y = 20.0;
 my $v2 = Vector2.new(); $v2.x = 5.0;  $v2.y = 15.0;
 my $sum = $v1 + $v2;
-say "Vector Sum: (", $sum.x, ", ", $sum.y, ")";
+say "Vector Sum: (" ~ $sum.x ~ ", " ~ $sum.y ~ ")";
 
 my $btn = Button.new();
-$btn.label = "Deploy";
-$btn.onClick = sub ($env) { say "Button [", $btn.label, "] clicked for: ", $env; };
+$btn.id = 42;
+$btn.onClick = sub ($env) { say "Button [ID:" ~ $btn.id ~ "] clicked for: " ~ $env; };
 $btn.onClick("Production");
 ```
 
@@ -127,22 +129,22 @@ $btn.onClick("Production");
 Raptor integrates formal verification directly into the language with pre-conditions, post-conditions, invariants, and randomized property-based quickcheck fuzzing:
 
 ```raku
-sub safe_divide(Int $a, Int $b) {
+sub safe_divide($a, $b) {
     pre({ $b != 0 });
     post({ $_ >= 0 });
     return $a div $b;
 }
 
 # Inline subtest verification
-subtest "Arithmetic invariants", {
+subtest "Arithmetic invariants", sub () {
     plan(2);
     is(safe_divide(10, 2), 5, "valid division");
     is(10 + 20, 30, "sum invariant");
 };
 
 # Randomized property-based testing (100 trials)
-property "addition commutativity", -> $x, $y { $x + $y == $y + $x };
-property "multiplication by zero", -> $x, $y { $x * 0 == 0 };
+property "addition commutativity", sub ($x, $y) { return ($x + $y) == ($y + $x); };
+property "multiplication by zero", sub ($x, $y) { return ($x * 0) == 0; };
 ```
 
 ### 6. Charmbracelet TUI & Terminal Styling Engine
@@ -150,10 +152,10 @@ Build sophisticated terminal user interfaces using built-in Lip Gloss TrueColor 
 
 ```raku
 # Lip Gloss 24-bit TrueColor ANSI styling
-my $title = tui_style("RAPTOR MONITOR", { fg => "#00ADD8", bold => True });
+my $title = tui_style("RAPTOR MONITOR", {:fg => "#00ADD8", :bold => True});
 
 # Framed viewports & status boxes
-my $box = tui_box($title, "Status: Active\nUptime: 99.99%", { border => "rounded" });
+my $box = tui_box("Status: Active\nUptime: 99.99%", {:title => "RAPTOR MONITOR", :border => "rounded"});
 say $box;
 
 # Dynamic data tables
@@ -165,7 +167,7 @@ my @rows = [
 say tui_table(@headers, @rows);
 
 # Progress indicators
-say tui_progress(0.75, { width => 30 });
+say tui_progress(0.75, {:width => 30});
 ```
 
 ### 7. Literate Programming with PodLit

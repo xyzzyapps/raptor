@@ -11,7 +11,7 @@ A `subset` defines a named invariant validated at runtime using a `where` predic
 subset Positive where { $_ > 0 };
 subset Even where { $_ % 2 == 0 };
 subset PortNumber where { $_ >= 1 && $_ <= 65535 };
-subset NonEmptyStr where { $_.chars > 0 };
+subset NonEmptyStr where { $_.chars() > 0 };
 ```
 
 

@@ -1,10 +1,14 @@
 package raptor
 
 import (
+	"runtime"
 	"testing"
 )
 
 func TestFFIStructGetSystemTime(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("skipping Windows-specific kernel32 FFI test on non-windows platform")
+	}
 	in := NewInterp()
 	code := `
 my $k32 = ffi_load("kernel32.dll");

@@ -13,8 +13,6 @@ Raptor is a high-performance, strictly non-OO procedural execution platform and 
 - **Dynamic Refinements (`subset`)**: Refine dynamic types using `where` boolean predicates without static type annotations.
 - **File Extensions**: Primary extensions are `.rp` and `.raptor` (with `.pod` for literate documents and `.phtml` for templates).
 
----
-
 ## 2. Syntax & Data Structures
 
 ### 2.1 Variables & Sigils
@@ -22,7 +20,7 @@ Raptor is a high-performance, strictly non-OO procedural execution platform and 
 ```perl
 my $scalar = "Dynamic String";
 my @array  = [10, 20, 30, 40];
-my %hash   = {:name => "Ada", :role => "Admin"};
+my %hash   = { "name" => "Ada", "role" => "Admin" };
 ```
 
 ### 2.2 C-ABI Structs & Function Pointers
@@ -45,28 +43,28 @@ multi sub infix:<+>(Vector2 $a, Vector2 $b) {
 
 # Struct closures / method syntax
 struct Button {
-    Str $label;
-    Any $onClick;
+    int32 $id;
+    ptr $onClick;
 }
 
 my $btn = Button.new();
-$btn.label = "Submit";
-$btn.onClick = sub ($val) { say "Clicked with: $val"; };
-$btn.onClick(42); # Invokes closure via method syntax
+$btn.id = 42;
+$btn.onClick = sub ($val) { say "Button " ~ $btn.id ~ " clicked with: " ~ $val; };
+$btn.onClick("OK"); # Invokes closure via method syntax
 ```
 
 ### 2.3 Subsets & Predicate Multiple Dispatch
 
 ```perl
-subset Positive of Int where { $_ > 0 };
-subset Even of Int where { $_ % 2 == 0 };
+subset Positive where { $_ > 0 };
+subset Even where { $_ % 2 == 0 };
 
 multi sub classify(Even $n) { say "$n is Even"; }
 multi sub classify(Positive $n) { say "$n is Positive"; }
 
 # Predicate Pattern Matching in Function Signatures
-multi sub fib(Int $n where { $n <= 1 }) { return $n; }
-multi sub fib(Int $n) { return fib($n - 1) + fib($n - 2); }
+multi sub fib($n where { $n <= 1 }) { return $n; }
+multi sub fib($n) { return fib($n - 1) + fib($n - 2); }
 ```
 
 ### 2.4 Quantum Autothreading Junctions
@@ -83,31 +81,18 @@ if all(@scores) > 70 {
 }
 ```
 
----
-
 ## 3. Foreign Function Interface (NativeCall) & Raylib Graphics
 
 ### 3.1 C FFI Calling Conventions
 
 ```perl
-# Load Windows API or C library
-sub GetSystemTime(OpaquePointer $lpSystemTime) is native("kernel32.dll") { * }
-
-# Call hardware Raylib graphics engine (60 FPS GUI)
-use lib::Raylib;
-InitWindow(800, 450, "Raptor Raylib Window");
-SetTargetFPS(60);
-
-while !WindowShouldClose() {
-    BeginDrawing();
-    ClearBackground(RAYWHITE);
-    DrawText("Hello from Raptor 60 FPS Raylib!", 190, 200, 20, LIGHTGRAY);
-    EndDrawing();
-}
-CloseWindow();
+# NativeCall bindings
+sub InitWindow(int32 $w, int32 $h, string $title) returns void is native('libraylib.dll') { * }
+sub WindowShouldClose() returns bool is native('libraylib.dll') { * }
+sub CloseWindow() returns void is native('libraylib.dll') { * }
+sub BeginDrawing() returns void is native('libraylib.dll') { * }
+sub EndDrawing() returns void is native('libraylib.dll') { * }
 ```
-
----
 
 ## 4. WebAssembly (Wasm) Browser Runtime
 
@@ -120,130 +105,19 @@ raptor serve --port 8080
 ### Web Built-ins:
 - **Canvas 2D**: `canvas_init`, `canvas_clear`, `canvas_draw_rect`, `canvas_draw_circle`, `canvas_draw_line`, `canvas_draw_text`.
 - **DOM Engine**: `dom_get`, `dom_set_text`, `dom_set_html`, `dom_create`.
-- **WebAudio API**: `audio_init`, `audio_play_tone(freq, dur, wave)`, `audio_play_melody(@freqs, @durs)`.
-- **JSON Serialization**: `to_json(%map)`, `from_json($str)`.
+- **WebAudio API**: `audio_init`, `audio_play_tone`, `audio_play_melody`.
 
----
-
-## 5. RaptorHP Embedded Template Server (`raptorhp.exe`)
-
-Render PHP-style templates or launch a development web server:
-
-```html
-<!-- index.phtml -->
-<h1><?= "Welcome to RaptorHP" ?></h1>
-<ul>
-<?rp for 1..5 -> $i { ?>
-    <li>Item <?= $i * 10 ?> (Client: <?= %_SERVER{"REMOTE_ADDR"} ?>)</li>
-<?rp } ?>
-</ul>
-```
-
-### Commands:
-```powershell
-# Render template to stdout
-raptorhp index.phtml
-
-# Evaluate inline template expression
-raptorhp -r '<h1><?= "Hello " ~ "World" ?></h1>'
-
-# Start development HTTP server
-raptorhp -S localhost:8000
-```
-
----
-
-## 6. PodLit Literate Programming Subsystem
-
-Knuth-style literate programming combining human prose with executable code chunks:
-
-```pod
-=pod
-=head1 Mathematical Engine
-
-=chunk add-func :file(lib/Math/Add.rp)
-sub add_numbers($a, $b) {
-    return $a + $b;
-}
-=end chunk
-
-=chunk main-calc :file(bin/calc.rp)
-<<add-func>>
-say "Sum: ", add_numbers(15, 30);
-=end chunk
-=cut
-```
-
-### Commands:
-```powershell
-# Weave human-readable Markdown documentation
-raptor weave doc.pod -o doc.md
-
-# Tangle executable source code files
-raptor tangle doc.pod -o src/
-
-# Stitch modified code back into POD document (round-trip)
-raptor stitch doc.pod src/lib/Math/Add.rp
-
-# Execute POD directly in-memory
-raptor doc.pod
-```
-
----
-
-## 7. TAP Testing & Formal Verification
-
-### 7.1 Test Anything Protocol (TAP)
+## 5. Verification: Contracts & QuickCheck Fuzzing
 
 ```perl
-use Test::More;
-plan(4);
-
-ok(1 + 1 == 2, "basic addition");
-is(2 ** 10, 1024, "exponentiation");
-is_deeply([1, 2, 3], [1, 2, 3], "array equality");
-like("Raptor 1.0", '/Raptor/', "regex pattern match");
-
-done_testing();
-```
-
-Run test suite via test harness:
-```powershell
-raptor test t/
-```
-
-### 7.2 Verification & Design-by-Contract
-
-```perl
-# Design-by-contract pre/post conditions
-sub safe_divide(num64 $a, num64 $b)
-    pre  { $b != 0 }
-    post { $_ * $b == $a }
-{
-    return $a / $b;
+sub safe_divide($a, $b) {
+    pre({ $b != 0 });
+    post({ $_ >= 0 });
+    return $a div $b;
 }
 
-# QuickCheck randomized property-based fuzzing
-property "addition commutativity", sub (Int $a, Int $b) {
-    return $a + $b == $b + $a;
+# Randomized Property-Based QuickCheck Testing (100 trials)
+property "addition commutativity", sub ($a, $b) {
+    return ($a + $b) == ($b + $a);
 };
 ```
-
----
-
-## 8. CLI Command Summary
-
-| Command | Action |
-| :--- | :--- |
-| `raptor run <script.rp>` | Execute Raptor script |
-| `raptor init [name]` | Initialize new `raptor.json` package |
-| `raptor get <repo>[@tag]` | Clone Git dependency into `./raptor_modules/` |
-| `raptor install` | Install dependencies from `raptor.json` |
-| `raptor serve [--port 8080]` | Start WebAssembly in-browser playground server |
-| `raptor test [t/]` | Run TAP test harness (like `prove`) |
-| `raptor doc <topic>` | Read terminal markdown manual (`operators`, `tui`, `structs`, etc.) |
-| `raptor pack <script.rp> -o <app.exe>` | Package script into standalone executable |
-| `raptor weave <file.pod>` | Generate woven Markdown documentation |
-| `raptor tangle <file.pod>` | Extract tangled source files |
-| `raptor stitch <file.pod> <source>` | Reverse-tangle edited code back into POD |
-| `raptorhp -S <host:port>` | Start PHP-style development HTTP server |

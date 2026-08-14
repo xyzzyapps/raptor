@@ -7,7 +7,6 @@ import (
 	"math"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 	"unsafe"
 )
@@ -35,7 +34,7 @@ type paStreamParameters struct {
 
 type portaudioEngine struct {
 	mu           sync.Mutex
-	dllHandle    syscall.Handle
+	dllHandle    uintptr
 	initialized  bool
 	loadedPath   string
 	paInit       uintptr
@@ -75,29 +74,31 @@ func (p *portaudioEngine) tryLoadDLL() error {
 		"libportaudio-2.dll",
 		"libportaudio.dll",
 		"portaudio.dll",
+		"libportaudio.so",
+		"libportaudio.so.2",
 	}
 
 	for _, name := range dllNames {
 		path := filepath.Clean(name)
-		h, err := syscall.LoadLibrary(path)
+		h, err := loadDynamicLibrary(path)
 		if err == nil && h != 0 {
 			p.dllHandle = h
 			p.loadedPath = path
-			p.paInit, _ = syscall.GetProcAddress(h, "Pa_Initialize")
-			p.paTerm, _ = syscall.GetProcAddress(h, "Pa_Terminate")
-			p.paGetVer, _ = syscall.GetProcAddress(h, "Pa_GetVersion")
-			p.paGetVerText, _ = syscall.GetProcAddress(h, "Pa_GetVersionText")
-			p.paGetDevCnt, _ = syscall.GetProcAddress(h, "Pa_GetDeviceCount")
-			p.paGetDevInfo, _ = syscall.GetProcAddress(h, "Pa_GetDeviceInfo")
-			p.paGetDefIn, _ = syscall.GetProcAddress(h, "Pa_GetDefaultInputDevice")
-			p.paGetDefOut, _ = syscall.GetProcAddress(h, "Pa_GetDefaultOutputDevice")
-			p.paOpenStream, _ = syscall.GetProcAddress(h, "Pa_OpenStream")
-			p.paStartStrm, _ = syscall.GetProcAddress(h, "Pa_StartStream")
-			p.paStopStrm, _ = syscall.GetProcAddress(h, "Pa_StopStream")
-			p.paCloseStrm, _ = syscall.GetProcAddress(h, "Pa_CloseStream")
-			p.paWriteStrm, _ = syscall.GetProcAddress(h, "Pa_WriteStream")
-			p.paReadStrm, _ = syscall.GetProcAddress(h, "Pa_ReadStream")
-			p.paSleep, _ = syscall.GetProcAddress(h, "Pa_Sleep")
+			p.paInit, _ = getDynamicProcAddress(h, "Pa_Initialize")
+			p.paTerm, _ = getDynamicProcAddress(h, "Pa_Terminate")
+			p.paGetVer, _ = getDynamicProcAddress(h, "Pa_GetVersion")
+			p.paGetVerText, _ = getDynamicProcAddress(h, "Pa_GetVersionText")
+			p.paGetDevCnt, _ = getDynamicProcAddress(h, "Pa_GetDeviceCount")
+			p.paGetDevInfo, _ = getDynamicProcAddress(h, "Pa_GetDeviceInfo")
+			p.paGetDefIn, _ = getDynamicProcAddress(h, "Pa_GetDefaultInputDevice")
+			p.paGetDefOut, _ = getDynamicProcAddress(h, "Pa_GetDefaultOutputDevice")
+			p.paOpenStream, _ = getDynamicProcAddress(h, "Pa_OpenStream")
+			p.paStartStrm, _ = getDynamicProcAddress(h, "Pa_StartStream")
+			p.paStopStrm, _ = getDynamicProcAddress(h, "Pa_StopStream")
+			p.paCloseStrm, _ = getDynamicProcAddress(h, "Pa_CloseStream")
+			p.paWriteStrm, _ = getDynamicProcAddress(h, "Pa_WriteStream")
+			p.paReadStrm, _ = getDynamicProcAddress(h, "Pa_ReadStream")
+			p.paSleep, _ = getDynamicProcAddress(h, "Pa_Sleep")
 			return nil
 		}
 	}
@@ -116,7 +117,7 @@ func (in *Interp) registerPortAudioBuiltins() {
 		}
 
 		if paEngine.paInit != 0 {
-			r1, _, _ := syscall.SyscallN(paEngine.paInit)
+			r1, _ := callDynamicProc(paEngine.paInit)
 			if int32(r1) == 0 {
 				paEngine.initialized = true
 				return BoolValue(true), nil
@@ -130,7 +131,7 @@ func (in *Interp) registerPortAudioBuiltins() {
 	// pa_terminate() -> bool
 	in.Builtins["pa_terminate"] = func(in *Interp, args []*Value) (*Value, error) {
 		if paEngine.dllHandle != 0 && paEngine.paTerm != 0 {
-			_, _, _ = syscall.SyscallN(paEngine.paTerm)
+			_, _ = callDynamicProc(paEngine.paTerm)
 		}
 		paEngine.initialized = false
 		return BoolValue(true), nil
@@ -139,7 +140,7 @@ func (in *Interp) registerPortAudioBuiltins() {
 	// pa_get_version() -> int
 	in.Builtins["pa_get_version"] = func(in *Interp, args []*Value) (*Value, error) {
 		if paEngine.dllHandle != 0 && paEngine.paGetVer != 0 {
-			r1, _, _ := syscall.SyscallN(paEngine.paGetVer)
+			r1, _ := callDynamicProc(paEngine.paGetVer)
 			return IntValue(int64(r1)), nil
 		}
 		return IntValue(1970), nil
@@ -148,7 +149,7 @@ func (in *Interp) registerPortAudioBuiltins() {
 	// pa_get_version_text() -> string
 	in.Builtins["pa_get_version_text"] = func(in *Interp, args []*Value) (*Value, error) {
 		if paEngine.dllHandle != 0 && paEngine.paGetVerText != 0 {
-			r1, _, _ := syscall.SyscallN(paEngine.paGetVerText)
+			r1, _ := callDynamicProc(paEngine.paGetVerText)
 			if r1 != 0 {
 				return StringValue(cStringToGo(r1)), nil
 			}
@@ -159,8 +160,11 @@ func (in *Interp) registerPortAudioBuiltins() {
 	// pa_device_count() -> int
 	in.Builtins["pa_device_count"] = func(in *Interp, args []*Value) (*Value, error) {
 		if paEngine.dllHandle != 0 && paEngine.paGetDevCnt != 0 {
-			r1, _, _ := syscall.SyscallN(paEngine.paGetDevCnt)
-			return IntValue(int64(int32(r1))), nil
+			r1, _ := callDynamicProc(paEngine.paGetDevCnt)
+			cnt := int64(int32(r1))
+			if cnt > 0 {
+				return IntValue(cnt), nil
+			}
 		}
 		return IntValue(1), nil // Default software audio device
 	}
@@ -173,7 +177,7 @@ func (in *Interp) registerPortAudioBuiltins() {
 		}
 
 		if paEngine.dllHandle != 0 && paEngine.paGetDevInfo != 0 {
-			r1, _, _ := syscall.SyscallN(paEngine.paGetDevInfo, uintptr(idx))
+			r1, _ := callDynamicProc(paEngine.paGetDevInfo, uintptr(idx))
 			if r1 != 0 {
 				dev := (*paDeviceInfo)(unsafe.Pointer(r1))
 				res := make(map[string]*Value)
@@ -199,7 +203,7 @@ func (in *Interp) registerPortAudioBuiltins() {
 	// pa_default_output_device() -> int
 	in.Builtins["pa_default_output_device"] = func(in *Interp, args []*Value) (*Value, error) {
 		if paEngine.dllHandle != 0 && paEngine.paGetDefOut != 0 {
-			r1, _, _ := syscall.SyscallN(paEngine.paGetDefOut)
+			r1, _ := callDynamicProc(paEngine.paGetDefOut)
 			return IntValue(int64(int32(r1))), nil
 		}
 		return IntValue(0), nil
@@ -208,7 +212,7 @@ func (in *Interp) registerPortAudioBuiltins() {
 	// pa_default_input_device() -> int
 	in.Builtins["pa_default_input_device"] = func(in *Interp, args []*Value) (*Value, error) {
 		if paEngine.dllHandle != 0 && paEngine.paGetDefIn != 0 {
-			r1, _, _ := syscall.SyscallN(paEngine.paGetDefIn)
+			r1, _ := callDynamicProc(paEngine.paGetDefIn)
 			return IntValue(int64(int32(r1))), nil
 		}
 		return IntValue(0), nil
@@ -274,7 +278,7 @@ func (in *Interp) registerPortAudioBuiltins() {
 				SampleFormat:     1, // paFloat32
 				SuggestedLatency: 0.05,
 			}
-			r1, _, _ := syscall.SyscallN(paEngine.paOpenStream,
+			r1, _ := callDynamicProc(paEngine.paOpenStream,
 				uintptr(unsafe.Pointer(&streamPtr)),
 				0, // no input
 				uintptr(unsafe.Pointer(&outParams)),
@@ -285,10 +289,10 @@ func (in *Interp) registerPortAudioBuiltins() {
 				0,   // no userData
 			)
 			if int32(r1) == 0 && streamPtr != 0 {
-				syscall.SyscallN(paEngine.paStartStrm, streamPtr)
-				syscall.SyscallN(paEngine.paWriteStrm, streamPtr, uintptr(unsafe.Pointer(&f32Samples[0])), uintptr(numSamples))
-				syscall.SyscallN(paEngine.paStopStrm, streamPtr)
-				syscall.SyscallN(paEngine.paCloseStrm, streamPtr)
+				callDynamicProc(paEngine.paStartStrm, streamPtr)
+				callDynamicProc(paEngine.paWriteStrm, streamPtr, uintptr(unsafe.Pointer(&f32Samples[0])), uintptr(numSamples))
+				callDynamicProc(paEngine.paStopStrm, streamPtr)
+				callDynamicProc(paEngine.paCloseStrm, streamPtr)
 				return BoolValue(true), nil
 			}
 		}
@@ -305,7 +309,7 @@ func (in *Interp) registerPortAudioBuiltins() {
 		}
 		ms := in.toInt(args[0])
 		if paEngine.dllHandle != 0 && paEngine.paSleep != 0 {
-			syscall.SyscallN(paEngine.paSleep, uintptr(ms))
+			callDynamicProc(paEngine.paSleep, uintptr(ms))
 		} else {
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}

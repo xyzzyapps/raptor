@@ -1,10 +1,14 @@
 package raptor
 
 import (
+	"runtime"
 	"testing"
 )
 
 func TestFFICallbackCreationAndDispatch(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("skipping Windows-specific syscall callback test on non-windows platform")
+	}
 	in := NewInterp()
 	code := `
 my $invoked = 0;

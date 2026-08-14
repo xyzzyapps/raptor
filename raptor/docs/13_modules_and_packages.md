@@ -6,8 +6,6 @@ Raptor is built on a strictly non-OO procedural paradigm. Code reuse and logical
 
 A module groups related functions, dynamic refinement types (`subset`), structs, and constants into a cohesive unit.
 
----
-
 ## 2. Defining a Module
 
 Modules are typically stored in the `./lib/` directory or in `./raptor_modules/` with a `.rp` or `.raptor` extension.
@@ -38,8 +36,6 @@ multi sub matrix_determinant(Matrix2x2 $m) {
 }
 ```
 
----
-
 ## 3. Importing Modules (`use` & `require`)
 
 ### 3.1 The `use` Statement
@@ -50,7 +46,7 @@ The `use` statement imports a module at compile/startup time:
 use Math::Matrix;
 
 my $mat = matrix_identity();
-say "Determinant: ", matrix_determinant($mat);
+say "Determinant: " ~ matrix_determinant($mat);
 ```
 
 ### 3.2 Dynamic Ingestion with `require`
@@ -62,8 +58,6 @@ require "lib/Config/Settings.rp";
 say "Loaded configuration successfully";
 ```
 
----
-
 ## 4. Module Search Path & Resolution Order
 
 When resolving a module name (e.g. `use String::Utils`), the Raptor interpreter searches the following locations in order:
@@ -72,8 +66,6 @@ When resolving a module name (e.g. `use String::Utils`), the Raptor interpreter 
 2. **Local Application Library (`./lib/`)**: Subdirectories under `lib/` (e.g. `lib/String/Utils.rp` or `lib/Utils.rp`).
 3. **Package Manager Dependencies (`./raptor_modules/`)**: Automatically scans all cloned Git repositories located within `raptor_modules/`.
 4. **Include Path Array (`@*INC` / `@INC`)**: Global module search directories configured in the runtime environment.
-
----
 
 ## 5. Raptor Package Manager (`raptor init`, `raptor get`, `raptor install`)
 
@@ -98,50 +90,9 @@ This generates `raptor.json`, `lib/`, and `raptor_modules/`:
 }
 ```
 
-### 5.2 Fetching Dependencies via Git
-
-Add third-party libraries directly from GitHub, GitLab, or any Git remote:
+### 5.2 Fetching Dependencies
 
 ```powershell
-# Clone repository into ./raptor_modules/
-raptor get github.com/user/vector-math
-
-# Clone specific version tag or branch
-raptor get github.com/user/vector-math@v1.2.0
-```
-
-This automatically:
-1. Clones the remote repository into `./raptor_modules/github.com/user/vector-math`.
-2. Updates `raptor.json` with the new dependency entry.
-3. Makes the library available immediately via `use Vector::Math;` in your scripts.
-
-### 5.3 Installing Project Dependencies
-
-To restore all dependencies on a new machine or in CI:
-
-```powershell
+raptor get https://github.com/xyzzyapps/raptor-charm
 raptor install
-```
-
----
-
-## 6. Recommended Package Directory Structure
-
-```text
-my-application/
-├── raptor.json          # Package manifest and dependency declarations
-├── bin/
-│   └── app.rp           # Main entry point executable script
-├── lib/
-│   └── MyLib/
-│       ├── Core.rp      # Reusable module code
-│       └── Helper.rp
-├── raptor_modules/      # Cloned third-party Git dependencies
-│   └── github.com/
-│       └── user/
-│           └── vector-math/
-├── t/
-│   ├── 01_core.t        # TAP unit test scripts
-│   └── 02_helpers.t
-└── README.md            # Project documentation
 ```

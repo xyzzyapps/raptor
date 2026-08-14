@@ -14,8 +14,6 @@ raptor serve --port 8080
 # Opens http://localhost:8080/
 ```
 
----
-
 ## 2. HTML5 Canvas 2D Engine
 
 Raptor provides native built-ins for fast 2D graphics, geometry, and text rendering:
@@ -28,16 +26,14 @@ canvas_init("wasmCanvas", 640, 380);
 canvas_clear("#090d16");
 
 # Draw shapes
-canvas_draw_rect(20, 20, 200, 100, "#10b981", true);          # Filled rectangle
-canvas_draw_rect(20, 20, 200, 100, "#06b6d4", false);         # Stroked border
-canvas_draw_circle(320, 190, 45, "#f59e0b", true);             # Filled circle
+canvas_draw_rect(20, 20, 200, 100, "#10b981", True);          # Filled rectangle
+canvas_draw_rect(20, 20, 200, 100, "#06b6d4", False);         # Stroked border
+canvas_draw_circle(320, 190, 45, "#f59e0b", True);             # Filled circle
 canvas_draw_line(50, 50, 400, 300, "#a855f7", 2.5);            # Radiant line
 
 # Render text
 canvas_draw_text("Raptor WebAssembly 2D", 30, 45, 18, "#ffffff");
 ```
-
----
 
 ## 3. Dynamic DOM Manipulation
 
@@ -54,8 +50,6 @@ dom_set_html("#output", "<strong>Status:</strong> All 10 nodes active");
 # Dynamically construct and append new DOM elements
 dom_create("#container", "div", "New telemetry record", "card-item");
 ```
-
----
 
 ## 4. WebAudio API Sound Synthesizer
 
@@ -77,8 +71,6 @@ my @durations   = [0.15, 0.15, 0.15, 0.30];
 audio_play_melody(@frequencies, @durations);
 ```
 
----
-
 ## 5. Fast JSON Interoperability
 
 Exchange complex structured data between the WebAssembly runtime and JavaScript:
@@ -87,8 +79,8 @@ Exchange complex structured data between the WebAssembly runtime and JavaScript:
 my %telemetry = {
     "engine"    => "Raptor WebAssembly",
     "timestamp" => time(),
-    "nodes"     => [ { id => 1, x => 100, y => 50 }, { id => 2, x => 200, y => 80 } ],
-    "active"    => true
+    "nodes"     => [ { "id" => 1, "x" => 100, "y" => 50 }, { "id" => 2, "x" => 200, "y" => 80 } ],
+    "active"    => True
 };
 
 # Serialize to JSON string
@@ -97,5 +89,5 @@ say $json_payload;
 
 # Deserialize back into native data structure
 my $parsed = from_json($json_payload);
-say "Parsed engine name: ", $parsed{"engine"};
+say "Parsed engine name: " ~ $parsed{"engine"};
 ```

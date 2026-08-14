@@ -24,6 +24,8 @@ release_staging/
 *.exe
 *.dll
 *.wasm
+!**/web/*.wasm
+!raptor/web/*.wasm
 *.zip
 
 # Build Output Directories & Binaries

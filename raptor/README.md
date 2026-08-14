@@ -4,21 +4,23 @@
 
 # Raptor 
 
-Raptor is a dynamic language - roughly a Perl5 subset of Raku targeting **MoarVM** in go. It supports go FFI, C FFI, refinement types, predicate types, multimethods, defensive programming, literate programming  and standalone binary packaging (`raptor pack`).
+Raptor is a dynamic language - roughly a Perl5 subset of Raku targeting **MoarVM** in go. It supports go FFI, C FFI, Uniform Function Call Syntax (UFCS), refinement types, predicate types, multimethods, defensive programming, literate programming and standalone binary packaging (`raptor pack`).
 
 It comes with a few sample libraries to aid in development and testing
 
-1. **Charmbracelet TUI & Terminal Styling Engine**:
+1. **Uniform Function Call Syntax (UFCS)**:
+   Invoke any subroutine or multi-sub candidate using method invocation syntax on the first argument (`$val.func()`, `20.double()`, `"raptor".uc()`, `@list.map(...)`).
+2. **Charmbracelet TUI & Terminal Styling Engine**:
    Lip Gloss ANSI 24-bit TrueColor styling (`tui_style`), framed boxes (`tui_box`), data tables (`tui_table`), progress bars (`tui_progress`), terminal markdown rendering (`tui_markdown`), and Bubble Tea state-machine event loops (`tui_app_run`).
-2. **PortAudio Sound Engine & Waveform Synthesizer**:
+3. **PortAudio Sound Engine & Waveform Synthesizer**:
     Real-time audio engine integration (`pa_init`, `pa_terminate`, `pa_device_count`, `pa_device_info`, `pa_sine_wave`).
-3. **Native SQLite Database & Fast JSON**:
+4. **Native SQLite Database & Fast JSON**:
     Embedded database support (`sqlite_open`, `sqlite_exec`, `sqlite_query`, `sqlite_close`) and JSON serialization (`to_json`, `from_json`).
-4. **Procedural Sockets Networking (TCP & UDP)**:
+5. **Procedural Sockets Networking (TCP & UDP)**:
    Fast, low-level socket primitives: `tcp_listen`, `tcp_accept`, `tcp_connect`, `tcp_send`, `tcp_recv`, `tcp_close`, `udp_bind`, `udp_send`, `udp_recv`, and `tcp_close`.
-5. **Sockets-Based HTTP/1.1 & RFC 6455 WebSockets**:
+6. **Sockets-Based HTTP/1.1 & RFC 6455 WebSockets**:
     Direct protocol implementation over sockets: `http_get`, `http_post`, `http_server_start`, `ws_frame_text`, `ws_parse_frame`.
-6. **Raylib 5.5 Hardware Graphics Engine Integration**:
+7. **Raylib 5.5 Hardware Graphics Engine Integration**:
     60 FPS desktop window rendering with Windows x64 ABI struct-by-value packing and UTF-8 string marshalling ([examples/raylib_game.rp](examples/raylib_game.rp)).
 
 Licensed under the **Artistic License 2.0**.
@@ -124,26 +126,30 @@ go test ./...                      # Go unit test suites (runtime/)
 
 1. **Pure Dynamic Typing & No-OO Architecture**:
    Built on dynamic variables (`$scalar`, `@array`, `%hash`), subroutines, modules, first-class functions, and C-structs without `class`, `has`, or `is` keyword overhead.
-2. **Perl5 TAP Testing Framework & Test Harness (`raptor test`)**:
+2. **Uniform Function Call Syntax (UFCS)**:
+   Invoke any subroutine or multi-sub candidate using method invocation syntax on the first argument (`$val.func()`, `20.double()`, `"raptor".uc()`, `@list.map(...)`), enabling clean functional pipelines and method chaining without OOP classes.
+3. **Perl5 TAP Testing Framework & Test Harness (`raptor test`)**:
    Standard Test Anything Protocol v13 producer (`plan`, `ok`, `is`, `isnt`, `is_deeply`, `like`, `unlike`, `cmp_ok`, `subtest`, `done_testing`) and test harness runner (like `prove`).
-3. **Verification-Friendly Architecture**:
+4. **Verification-Friendly Architecture**:
    Zero-overhead inline tests (`TEST "desc" { ... }`), Design-by-Contract (`pre`, `post`, `invariant`), and Property-Based QuickCheck fuzzing (`property "name", sub ($a, $b) { ... }`).
-4. **PodLit Literate Programming Subsystem (Weave, Tangle, Mangle & Stitch) & `raptor doc`**:
+5. **PodLit Literate Programming Subsystem (Weave, Tangle, Mangle & Stitch) & `raptor doc`**:
     Knuth-style literate programming via extended POD: weave Markdown docs (`raptor weave`), tangle executable source code with macro chunk expansion (`raptor tangle`), reverse-tangle modified code back into POD (`raptor stitch`), apply mangle filters, and directly execute `.pod` documents ([examples/literate_game.pod](examples/literate_game.pod)).
    Comprehensive manual documentation in `docs/` rendered directly in the terminal with ANSI colors: `raptor doc operators`, `raptor doc subsets`, `raptor doc tui`, `raptor doc structs`.
-5. **C-ABI Struct Records & Function Pointers**:
+6. **C-ABI Struct Records & Function Pointers**:
    C memory layout records (`struct Point { int32 $x; int32 $y; }`) with first-class function pointer / closure fields (`$btn.onClick = sub ($v) { ... }; $btn.onClick(42)`).
-6. **Dynamic Refinement Types (`subset`) & Predicate Dispatching**:
+7. **Dynamic Refinement Types (`subset`) & Predicate Dispatching**:
    Enforce dynamic value invariants using Raku-style `subset` and `where` predicates (`subset Positive where { $_ > 0 }`, `multi sub fib($n where { $n <= 1 })`).
-7. **Custom Operator Overloading on Structs**:
+8. **Custom Operator Overloading on Structs**:
    Seamless multi-dispatch overloading for structs (`multi sub infix:<+>(Vec2 $a, Vec2 $b)`, `multi sub prefix:<->(Vec2 $v)`).
-8. **Comprehensive Perl5 & Raku Operator Suite**:
+9. **Comprehensive Perl5 & Raku Operator Suite**:
     Defined-or (`//`, `//=`), Exponentiation (`**`), Ternary (`?? !!`, `? :`), Bitwise numeric (`+&`, `+|`, `+^`, `+<`, `+>`), Repetition (`x`, `xx`), Divisibility (`div`, `mod`, `%%`), Min/Max (`min`, `max`), File tests (`-e`, `-f`, `-d`, `-s`, `-r`, `-w`), and Regex (`=~`, `!~`).
-9. **Advanced Concurrency & Atomics**:
+10. **Advanced Concurrency & Atomics**:
     `Mutex`, `Semaphore`, `WaitGroup`, `parallel_map`, reactive `Supply` streams, `Promise` (`start { ... }`), `Channel`, and hardware atomic primitives.
-10. **Standalone Binary Packaging & Bundled DLLs**:
+11. **Raptor Package Manager (`raptor init`, `raptor get`, `raptor install`)**:
+    Git-based package management cloning dependencies directly into `./raptor_modules/` with automatic runtime module discovery.
+12. **Standalone Binary Packaging & Bundled DLLs**:
     Package any script into a self-contained `.exe` executable (`raptor pack`), with `moar.dll`, `libraylib.dll`, and `sqlite3.dll` residing directly in `bin/` for zero-dependency portability.
-11. **WebAssembly (Wasm) In-Browser IDE & REPL**:
+13. **WebAssembly (Wasm) In-Browser IDE & REPL**:
     Run 100% client-side in the browser via `web/raptor.wasm`, featuring interactive REPL prompt, code playground, presets, and live PodLit literate inspector (`raptor serve`).
 
 ---

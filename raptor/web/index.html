@@ -3,161 +3,169 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>A Tour of Raptor - CodePen & Interactive WebAssembly Playground</title>
+  <title>A Tour of Raptor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- Top Navigation Header: CodePen / Go Tour Bar -->
+  <!-- 1. Classic Tour of Go Deep Teal Header Bar -->
   <header class="tour-header">
-    <div class="brand-group">
-      <div class="logo-badge">RAPTOR</div>
-      <div class="brand-title">A Tour of Raptor</div>
-    </div>
-
-    <!-- Tour Navigation Controls -->
-    <div class="tour-nav-controls">
-      <button id="btnPrevLesson" class="btn btn-nav" title="Previous Lesson">&larr; Prev</button>
-      <select id="lessonSelect" class="lesson-select" aria-label="Select Tour Lesson">
-        <option value="0">1. Language Basics & Operators</option>
-        <option value="1">2. Dynamic Subsets & Predicates</option>
-        <option value="2">3. C-ABI Structs & Overloading</option>
-        <option value="3">4. Autothreading Quantum Junctions</option>
-        <option value="4">5. Signature Destructuring & JSON</option>
-        <option value="5">6. HTML5 Canvas 2D Graphics</option>
-        <option value="6">7. WebAudio API Sound Synthesizer</option>
-        <option value="7">8. Full-Stack: DOM + Canvas + Audio</option>
-      </select>
-      <button id="btnNextLesson" class="btn btn-nav" title="Next Lesson">Next &rarr;</button>
-      <button id="btnResetCode" class="btn" title="Reset to default lesson code">Reset</button>
-    </div>
-
-    <!-- Run & Status Actions -->
-    <div class="header-actions">
-      <div class="wasm-status">
-        <div id="statusDot" class="status-dot"></div>
-        <span id="statusText">Loading Wasm...</span>
+    <div class="header-left">
+      <div class="go-logo-cluster">
+        <span class="go-speed-lines">=</span>
+        <span class="go-logo-text">RAPTOR</span>
       </div>
-      <button id="btnRun" class="btn btn-run" title="Execute Code (Ctrl + Enter)">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-        Run
-      </button>
+      <span class="tour-app-title">A Tour of Raptor</span>
+    </div>
+
+    <div class="header-right">
+      <div class="header-status">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">Loading WebAssembly...</span>
+      </div>
+
+      <!-- Navigation Page Stepper -->
+      <div class="header-nav-stepper">
+        <button id="btnPrevLesson" class="header-stepper-btn" title="Previous Page (&larr;)">&lt;</button>
+        <div class="stepper-dropdown-container">
+          <select id="lessonSelect" class="header-lesson-select" aria-label="Table of Contents">
+            <option value="0">1. Language Basics &amp; Operators</option>
+            <option value="1">2. Dynamic Subsets &amp; Predicates</option>
+            <option value="2">3. C-ABI Structs &amp; Overloading</option>
+            <option value="3">4. Autothreading Quantum Junctions</option>
+            <option value="4">5. Signature Destructuring &amp; JSON</option>
+            <option value="5">6. HTML5 Canvas 2D Graphics</option>
+            <option value="6">7. WebAudio Sound Synthesizer</option>
+            <option value="7">8. Full-Stack: DOM + Canvas + Audio</option>
+          </select>
+        </div>
+        <button id="btnNextLesson" class="header-stepper-btn" title="Next Page (&rarr;)">&gt;</button>
+        <span id="pageIndicator" class="page-counter-label">1 / 8</span>
+      </div>
+
+      <!-- Top Right Icons -->
+      <div class="header-icons">
+        <button class="header-icon-btn" title="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        </button>
+        <button class="header-icon-btn" title="Table of Contents">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+        </button>
+      </div>
     </div>
   </header>
 
-  <!-- App Main Split View -->
-  <div class="app-container">
+  <!-- 2. Tour Main 50/50 Split View -->
+  <main class="tour-main-container">
     
-    <!-- Left Pane: Lesson Narrative & Code Editor (CodePen Style) -->
-    <div class="left-pane">
+    <!-- LEFT PANE (50%): Tutorial Reading Material -->
+    <section class="tour-narrative-pane">
+      <div class="narrative-content-scroll">
+        <h1 id="lessonTitle" class="tour-heading">Language Basics &amp; Operators</h1>
+        
+        <div id="lessonDesc" class="tour-body-text">
+          <p>Welcome to a tour of the Raptor programming language.</p>
+          <p>Raptor is a high-performance procedural execution platform and dynamic language (Perl 5 subset of Raku without OO overhead). Variables use standard sigils (<code>$</code>, <code>@</code>, <code>%</code>).</p>
+          <p>The tour is divided into a list of modules that you can access by selecting from the menu on the top right.</p>
+          <p>Throughout the tour you will find a series of slides and exercises for you to complete.</p>
+          <p>You can navigate through them using:</p>
+          <p class="tour-indent-p">
+            <span class="tour-blue-link" id="linkPrev">&quot;previous&quot;</span> to go to the previous page,<br>
+            <span class="tour-blue-link" id="linkNext">&quot;next&quot;</span> to go to the next page.
+          </p>
+          <p>The tour is interactive. Click the <strong>Run</strong> button now (or press <kbd>Shift + Enter</kbd>) to compile and run the program in WebAssembly. The result is displayed below the code.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT PANE (50%): Interactive Editor & Viewport -->
+    <section class="tour-interactive-pane">
       
-      <!-- Lesson Description Card -->
-      <div id="lessonCard" class="lesson-card">
-        <div class="lesson-badge-row">
-          <span id="lessonBadge" class="lesson-badge">LESSON 1 / 8</span>
-          <span id="lessonSubtitle" class="lesson-subtitle">Core Language Fundamentals</span>
-        </div>
-        <h2 id="lessonTitle" class="lesson-title">Language Basics & Operators</h2>
-        <div id="lessonDesc" class="lesson-description">
-          <p>Raptor is a high-performance, pure dynamic language runtime (Perl 5 subset of Raku without object-oriented overhead). Variables use standard sigils (<code>$</code> for scalars, <code>@</code> for arrays, <code>%</code> for hashes).</p>
-        </div>
-      </div>
-
-      <!-- Editor Panel Container -->
-      <div class="editor-container">
-        <div class="editor-header">
-          <div class="editor-file-tab">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
-            <span>main.rp</span>
-          </div>
-          <div class="editor-shortcuts">
-            <span>Ctrl + Enter to Run</span>
-          </div>
+      <!-- Top File & Option Bar (#e0ebf5) -->
+      <div class="editor-top-bar">
+        <div class="editor-tab-active">
+          <span>main.rp</span>
         </div>
 
-        <div class="editor-wrapper">
-          <textarea id="codeEditor" class="code-editor" spellcheck="false" placeholder="# Enter Raptor source code here..."></textarea>
+        <div class="editor-top-options">
+          <button id="btnSyntaxToggle" class="editor-option-pill">Syntax on</button>
         </div>
       </div>
 
-    </div>
-
-    <!-- Right Pane: Multi-Tab Live Previews & REPL Output -->
-    <div class="right-pane">
-      
-      <!-- Viewport Tabs Bar -->
-      <div class="preview-tabs-bar">
-        <button id="tabConsole" class="preview-tab active">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-          Console
-        </button>
-        <button id="tabCanvas" class="preview-tab">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-          Canvas 2D
-        </button>
-        <button id="tabDom" class="preview-tab">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
-          Live DOM
-        </button>
-        <button id="tabPod" class="preview-tab">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          PodLit
-        </button>
-        <div id="outputMetrics" class="output-metrics">Ready</div>
+      <!-- Editor Textarea Area (#ffffea) with Line Numbers -->
+      <div class="editor-middle-area">
+        <div class="line-numbers-gutter" id="lineNumbers">
+          1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11<br>12<br>13<br>14<br>15<br>16<br>17<br>18<br>19<br>20<br>21<br>22
+        </div>
+        <textarea id="codeEditor" class="tour-editor-input" spellcheck="false" placeholder="# Enter Raptor source code here..."></textarea>
       </div>
 
-      <!-- Tab 1: Terminal Console & REPL -->
-      <div id="consoleView" class="view-panel active">
-        <div id="consoleTerminal" class="console-terminal">
-          <div class="terminal-entry">
-            <div class="terminal-output-line" style="color: var(--accent-emerald);">=== A Tour of Raptor (WebAssembly 64-bit) ===</div>
-            <div class="terminal-output-line" style="color: var(--text-muted);">Select any lesson from the top bar or write code and click Run (Ctrl+Enter).</div>
+      <!-- Bottom Action Bar (#e0ebf5) with Reset, Format, Run -->
+      <div class="editor-bottom-bar">
+        <div class="output-tab-links">
+          <button id="tabConsole" class="view-switch-btn active">Output</button>
+          <button id="tabCanvas" class="view-switch-btn">Canvas 2D</button>
+          <button id="tabDom" class="view-switch-btn">Live DOM</button>
+          <button id="tabPod" class="view-switch-btn">PodLit</button>
+        </div>
+
+        <div class="editor-action-buttons">
+          <button id="btnResetCode" class="action-btn-gray">Reset</button>
+          <button id="btnFormatCode" class="action-btn-gray">Format</button>
+          <button id="btnRun" class="action-btn-blue">Run</button>
+        </div>
+      </div>
+
+      <!-- Output Viewports Area -->
+      <div class="tour-output-area">
+        
+        <!-- Viewport 1: Terminal Console -->
+        <div id="consoleView" class="output-view-pane active">
+          <div id="consoleTerminal" class="output-terminal-text"></div>
+          <div class="repl-bottom-bar">
+            <span class="repl-prompt-symbol">&gt;</span>
+            <input type="text" id="replInput" class="repl-inline-input" placeholder="Type inline Raptor code (e.g. 42.sqrt();) and press Enter..." autocomplete="off" spellcheck="false">
+            <button id="btnClearConsole" class="repl-clear-btn">Clear</button>
           </div>
         </div>
 
-        <div class="repl-input-container">
-          <span class="prompt-sigil">raptor&gt;</span>
-          <input type="text" id="replInput" class="repl-input" placeholder="my $x = 10; say $x ** 2;" autocomplete="off" spellcheck="false">
-          <button id="btnClearConsole" class="btn-clear-console" title="Clear console output">Clear</button>
+        <!-- Viewport 2: Canvas 2D Stage -->
+        <div id="canvasView" class="output-view-pane">
+          <div class="canvas-center-wrapper">
+            <canvas id="wasmCanvas" width="640" height="380"></canvas>
+          </div>
         </div>
+
+        <!-- Viewport 3: Live DOM Inspector -->
+        <div id="domView" class="output-view-pane">
+          <div class="dom-preview-wrapper">
+            <div id="wasmDomContainer">
+              <p class="dom-hint-text">DOM output from <code>dom_set_html()</code> will be rendered here dynamically.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Viewport 4: PodLit View -->
+        <div id="podView" class="output-view-pane">
+          <div class="pod-action-strip">
+            <button id="btnWeave" class="action-btn-gray">Weave Markdown</button>
+            <button id="btnTangle" class="action-btn-gray">Tangle Source</button>
+          </div>
+          <div id="podPreview" class="pod-output-surface">
+            <p class="text-muted">PodLit documentation will appear here.</p>
+          </div>
+        </div>
+
       </div>
 
-      <!-- Tab 2: HTML5 Canvas Viewport -->
-      <div id="canvasView" class="view-panel">
-        <div class="canvas-toolbar">
-          <span class="canvas-dim">Canvas Context: 640 &times; 380</span>
-          <span id="canvasFpsBadge" class="fps-badge">Active</span>
-        </div>
-        <div class="canvas-stage">
-          <canvas id="wasmCanvas" width="640" height="380"></canvas>
-        </div>
-      </div>
+    </section>
 
-      <!-- Tab 3: Live DOM Container View -->
-      <div id="domView" class="view-panel">
-        <div class="dom-toolbar">
-          <span>Target Container: <code>#wasmDomContainer</code></span>
-        </div>
-        <div id="wasmDomContainer" class="dom-render-container">
-          <div class="dom-placeholder">Dynamic DOM elements created via <code>dom_create</code> or <code>dom_set_html</code> appear here.</div>
-        </div>
-      </div>
+  </main>
 
-      <!-- Tab 4: PodLit Literate Inspector -->
-      <div id="podView" class="view-panel">
-        <div class="pod-view-tabs">
-          <button id="btnWeave" class="btn btn-nav">Weave Markdown</button>
-          <button id="btnTangle" class="btn btn-nav">Tangle Source</button>
-        </div>
-        <div id="podPreview" class="pod-preview-content">
-          <p style="color: var(--text-dim);">Inspect Knuth-style literate programming documents woven into Markdown or tangled to source files.</p>
-        </div>
-      </div>
-
-    </div>
-
-  </div>
-
+  <!-- Runtime Scripts -->
   <script src="wasm_exec.js"></script>
   <script src="app.js"></script>
 </body>

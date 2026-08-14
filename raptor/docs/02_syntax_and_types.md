@@ -72,3 +72,38 @@ sub authenticate(:{:$username, :$token}) {
 
 authenticate({:username => "admin", :token => "sec_123"});
 ```
+
+---
+
+## 4. Uniform Function Call Syntax (UFCS)
+
+Raptor provides Uniform Function Call Syntax (UFCS), allowing any standalone subroutine or multi-sub candidate to be called with method-call syntax on its first argument (`$invocant.subroutine(args...)`).
+
+### 4.1 Subroutine Method Calls
+```perl
+sub double($x) {
+    return $x * 2;
+}
+
+say 21.double(); # 42
+```
+
+### 4.2 Multiple Dispatch with UFCS
+```perl
+multi sub format_val(Int $n) { return "Number: $n"; }
+multi sub format_val(Str $s) { return "String: '$s'"; }
+
+say 42.format_val();      # "Number: 42"
+say "raptor".format_val(); # "String: 'raptor'"
+```
+
+### 4.3 Functional Pipelines & Chaining
+```perl
+my @nums = [1, 2, 3, 4, 5];
+my @doubled = @nums.map(sub ($x) { $x * 10 });
+say @doubled; # [10, 20, 30, 40, 50]
+
+# Method chaining on strings and lists
+my $formatted = "  raptor runtime  ".trim().uc();
+say $formatted; # "RAPTOR RUNTIME"
+```

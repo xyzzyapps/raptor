@@ -2,23 +2,26 @@
 .DS_Store
 Thumbs.db
 
+moarvm-go/build/moarvm/include
+moarvm-go/build/moarvm/share
+
 # IDE & Editor Files
 .vscode/
 .idea/
 *.swp
 *~
 
-# Temporary / Log files
+# Temporary, Scratch, and Log Files
 *.log
 *.tmp
 scratch/
 
-# Build intermediates (objects & libraries)
+# Build Intermediates (Objects & Static Archives)
 *.o
 *.obj
 *.a
 
-# Explicitly allow DLLs and EXEs for now
+# Explicitly Allow DLLs and EXEs in Bin & Build Folders
 !*.dll
 !*.exe
 !**/bin/*.dll

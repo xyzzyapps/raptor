@@ -236,6 +236,9 @@ property "addition commutativity", sub (Int $a, Int $b) {
 | Command | Action |
 | :--- | :--- |
 | `raptor run <script.rp>` | Execute Raptor script |
+| `raptor init [name]` | Initialize new `raptor.json` package |
+| `raptor get <repo>[@tag]` | Clone Git dependency into `./raptor_modules/` |
+| `raptor install` | Install dependencies from `raptor.json` |
 | `raptor serve [--port 8080]` | Start WebAssembly in-browser playground server |
 | `raptor test [t/]` | Run TAP test harness (like `prove`) |
 | `raptor doc <topic>` | Read terminal markdown manual (`operators`, `tui`, `structs`, etc.) |

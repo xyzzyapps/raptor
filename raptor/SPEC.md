@@ -221,7 +221,28 @@ Raptor compiles directly to WebAssembly (`GOOS=js GOARCH=wasm`) with zero extern
 
 ---
 
-## 14. Performance & Comparison to Perl 5
+## 14. Package Manager Subsystem (`raptor init`, `raptor get`, `raptor install`)
+
+- **Manifest Format (`raptor.json`)**:
+  ```json
+  {
+    "name": "my-app",
+    "version": "0.1.0",
+    "description": "Raptor application",
+    "dependencies": {
+      "github.com/user/lib": "v1.0.0"
+    }
+  }
+  ```
+- **CLI Commands**:
+  - `raptor init [package_name]`: Creates `raptor.json`, `lib/`, and `raptor_modules/`.
+  - `raptor get <repo-url>[@tag]`: Clones Git repositories into local `./raptor_modules/<path>` and updates `raptor.json`.
+  - `raptor install`: Clones all dependencies defined in `raptor.json` into `./raptor_modules/`.
+- **Runtime Resolution**: Auto-discovery of modules within `./raptor_modules/` across all recursive packages for `use ModuleName;` statements.
+
+---
+
+## 15. Performance & Comparison to Perl 5
 
 | Metric / Dimension | Perl 5 | Raptor (`.rp`) | Performance Advantage |
 | :--- | :--- | :--- | :--- |
@@ -234,16 +255,16 @@ Raptor compiles directly to WebAssembly (`GOOS=js GOARCH=wasm`) with zero extern
 
 ---
 
-## 15. Building From Source & Binary Artifacts
+## 16. Building From Source & Binary Artifacts
 
-### 15.1 Build Prerequisites
+### 16.1 Build Prerequisites
 
 - **Go 1.22+** (verified with Go 1.26 on Windows/amd64).
 - **MSYS2 UCRT64 toolchain** (`C:\msys64\ucrt64\bin`) — only required to rebuild `bin/moar.dll` from the MoarVM C source tree.
 - **Perl** — only required to rebuild `bin/moar.dll` (drives MoarVM `Configure.pl`).
 - No external Go modules: `go.mod` pins the local `moarvm-go` module via `replace moarvm-go => ../moarvm-go` (sibling directory of `raptor/`).
 
-### 15.2 Binary Artifacts
+### 16.2 Binary Artifacts
 
 | Artifact | Produced By | Build Command |
 | :--- | :--- | :--- |
@@ -255,7 +276,7 @@ Raptor compiles directly to WebAssembly (`GOOS=js GOARCH=wasm`) with zero extern
 
 `raptor pack` generates a temporary Go module that embeds the Raptor script and the full runtime, then compiles it into a self-contained executable.
 
-### 15.3 Bundled Runtime DLLs (external, not built by this repo)
+### 16.3 Bundled Runtime DLLs (external, not built by this repo)
 
 | DLL | Origin | Purpose |
 | :--- | :--- | :--- |
@@ -265,7 +286,7 @@ Raptor compiles directly to WebAssembly (`GOOS=js GOARCH=wasm`) with zero extern
 
 `ffi_load` (in `runtime/ffi.go`) resolves libraries by searching the given path, `bin/`, the executable directory, and the system `PATH`.
 
-### 15.4 Verification Commands
+### 16.4 Verification Commands
 
 ```powershell
 go test ./...                  # Go unit test suites (58 suites in runtime/)

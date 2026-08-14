@@ -148,7 +148,7 @@ say "2 ** 10 = ", $power;
 my $divisible = 100 %% 4;
 say "100 is divisible by 4? ", $divisible;
 
-my $fallback = nil // "Default Fallback Value";
+my $fallback = Nil // "Default Fallback Value";
 say "Defined-or check: ", $fallback;
 
 my $min_val = 24 min 42;

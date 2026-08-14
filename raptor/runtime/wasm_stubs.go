@@ -45,6 +45,46 @@ func (in *Interp) registerSQLiteBuiltins() {
 	}
 }
 
+func (in *Interp) registerHTTPBuiltins() {
+	in.Builtins["http_get"] = func(in *Interp, args []*Value) (*Value, error) {
+		return nil, fmt.Errorf("HTTP client/server sockets are not supported directly in WASM (use Fetch API)")
+	}
+	in.Builtins["http_listen"] = func(in *Interp, args []*Value) (*Value, error) {
+		return nil, fmt.Errorf("HTTP listener is not supported in browser WebAssembly")
+	}
+}
+
+func (in *Interp) registerWebSocketBuiltins() {
+	in.Builtins["ws_connect"] = func(in *Interp, args []*Value) (*Value, error) {
+		return nil, fmt.Errorf("Raw WebSockets not supported directly in WASM sandbox")
+	}
+	in.Builtins["ws_listen"] = func(in *Interp, args []*Value) (*Value, error) {
+		return nil, fmt.Errorf("WebSocket server not supported in browser WebAssembly")
+	}
+}
+
+func (in *Interp) registerSocketBuiltins() {
+	in.Builtins["socket_listen"] = func(in *Interp, args []*Value) (*Value, error) {
+		return nil, fmt.Errorf("TCP/UDP raw sockets are not available in WebAssembly sandbox")
+	}
+	in.Builtins["socket_connect"] = func(in *Interp, args []*Value) (*Value, error) {
+		return nil, fmt.Errorf("TCP/UDP raw sockets are not available in WebAssembly sandbox")
+	}
+}
+
+func (in *Interp) registerPerl5Bridge() {
+	in.Builtins["eval_perl5"] = func(in *Interp, args []*Value) (*Value, error) {
+		return nil, fmt.Errorf("Perl5 process bridge is not supported in WebAssembly sandbox")
+	}
+	in.Builtins["call_perl5"] = func(in *Interp, args []*Value) (*Value, error) {
+		return nil, fmt.Errorf("Perl5 process bridge is not supported in WebAssembly sandbox")
+	}
+}
+
+func (in *Interp) evalUse(u *UseStmt, env *Env) (*Value, error) {
+	return nil, fmt.Errorf("module 'use' with external Perl5 modules is not supported in WebAssembly environment")
+}
+
 func (in *Interp) registerWebBuiltins() {
 	// DOM Manipulation
 	in.Builtins["dom_get"] = func(in *Interp, args []*Value) (*Value, error) {

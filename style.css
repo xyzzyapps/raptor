@@ -79,6 +79,12 @@ body {
   letter-spacing: -0.02em;
 }
 
+.header-logo-img {
+  margin-right: 8px;
+  vertical-align: middle;
+  border-radius: 3px;
+}
+
 .go-speed-lines {
   font-family: monospace;
   font-size: 1.3rem;

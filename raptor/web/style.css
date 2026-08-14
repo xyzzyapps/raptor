@@ -189,6 +189,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  text-decoration: none;
   opacity: 0.9;
   padding: 4px;
   border-radius: 3px;

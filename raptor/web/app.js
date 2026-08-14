@@ -1460,44 +1460,61 @@ function setupCanvasDimensionControls() {
   });
 }
 
-// Initialize WebAssembly Runtime
-function initWasm() {
-  if (!WebAssembly.instantiateStreaming) {
-    WebAssembly.instantiateStreaming = async (resp, importObject) => {
-      const source = await (await resp).arrayBuffer();
-      return await WebAssembly.instantiate(source, importObject);
-    };
-  }
-
+// Initialize WebAssembly Runtime with robust fallback
+async function initWasm() {
   const go = new Go();
-  WebAssembly.instantiateStreaming(fetch('raptor.wasm'), go.importObject)
-    .then((result) => {
-      go.run(result.instance);
+  statusDot.className = 'status-dot';
+  statusText.textContent = 'Loading WebAssembly...';
 
-      // Check until Go runtime has fully registered exports
-      let retries = 0;
-      const checkReady = setInterval(() => {
-        retries++;
-        if (typeof window.raptorEval === 'function' || typeof window.evalRaptor === 'function') {
-          clearInterval(checkReady);
-          isWasmReady = true;
-          statusDot.className = 'status-dot ready';
-          statusText.textContent = 'WebAssembly Ready';
-          appendToConsole("Raptor WebAssembly Environment Initialized Successfully.", "output");
-        } else if (retries > 100) {
-          clearInterval(checkReady);
-          statusDot.className = 'status-dot error';
-          statusText.textContent = 'Init Timeout';
-          appendToConsole("Timeout waiting for WebAssembly exports.", "error");
-        }
-      }, 30);
-    })
-    .catch((err) => {
-      statusDot.className = 'status-dot error';
-      statusText.textContent = 'Wasm Load Error';
-      appendToConsole("Failed loading raptor.wasm: " + err.message, "error");
-    });
+  try {
+    const wasmUrl = 'raptor.wasm';
+    const response = await fetch(wasmUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} (${response.statusText || 'Not Found'}) loading ${wasmUrl}`);
+    }
+
+    let result;
+    const contentType = response.headers.get('Content-Type') || '';
+    if (WebAssembly.instantiateStreaming && contentType.includes('application/wasm')) {
+      try {
+        result = await WebAssembly.instantiateStreaming(response, go.importObject);
+      } catch (streamErr) {
+        console.warn("[WASM] instantiateStreaming failed, falling back to ArrayBuffer:", streamErr);
+        const source = await response.arrayBuffer();
+        result = await WebAssembly.instantiate(source, go.importObject);
+      }
+    } else {
+      const source = await response.arrayBuffer();
+      result = await WebAssembly.instantiate(source, go.importObject);
+    }
+
+    go.run(result.instance);
+
+    // Check until Go runtime has fully registered exports
+    let retries = 0;
+    const checkReady = setInterval(() => {
+      retries++;
+      if (typeof window.raptorEval === 'function' || typeof window.evalRaptor === 'function') {
+        clearInterval(checkReady);
+        isWasmReady = true;
+        statusDot.className = 'status-dot ready';
+        statusText.textContent = 'WebAssembly Ready';
+        appendToConsole("Raptor WebAssembly Environment Initialized Successfully.", "output");
+      } else if (retries > 100) {
+        clearInterval(checkReady);
+        statusDot.className = 'status-dot error';
+        statusText.textContent = 'Init Timeout';
+        appendToConsole("Timeout waiting for WebAssembly exports.", "error");
+      }
+    }, 30);
+  } catch (err) {
+    statusDot.className = 'status-dot error';
+    statusText.textContent = 'Wasm Load Error';
+    appendToConsole("Failed loading raptor.wasm: " + err.message, "error");
+    console.error("[WASM Loader Error]", err);
+  }
 }
 
 // Start Tour when DOM is ready
 document.addEventListener('DOMContentLoaded', initTour);
+

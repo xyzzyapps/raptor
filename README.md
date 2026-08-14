@@ -1,12 +1,4 @@
-# Raptor: A Post-LLM Programming Language & MoarVM Host
-
-Raptor is a high-performance, verification-first procedural execution platform and dynamic language targeting **MoarVM** in Go.
-
-Licensed under the **Artistic License 2.0**.
-
-## Why Raptor is a Post-LLM Language
-
-In the post-LLM era of software engineering, code is generated in high volume by autonomous AI agents and language models. Traditional languages force models into either verbose, ceremony-heavy OOP boilerplate (which inflates token consumption and obscures bugs) or dynamic scripts with zero runtime safety.
+# Raptor
 
 Raptor is engineered specifically for the Post-LLM paradigm:
 
@@ -199,6 +191,10 @@ my %files = pod_tangle($podSource);
 my %updates = { "add-implementation" => "sub add($a, $b) { return $a + $b; }" };
 my $updatedPod = pod_stitch($podSource, %updates);
 ```
+
+## License
+
+Licensed under the **Artistic License 2.0**.
 
 ## Agent Skills (`.agents/skills/`)
 - **[moarvm-language-development](.agents/skills/moarvm-language-development/SKILL.md)**: Guide for agents on building new compiled languages targeting MoarVM.

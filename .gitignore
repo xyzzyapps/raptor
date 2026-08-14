@@ -2,9 +2,6 @@
 .DS_Store
 Thumbs.db
 
-moarvm-go/build/moarvm/include
-moarvm-go/build/moarvm/share
-
 # IDE & Editor Files
 .vscode/
 .idea/
@@ -15,16 +12,20 @@ moarvm-go/build/moarvm/share
 *.log
 *.tmp
 scratch/
+release/
+release_staging/
 
-# Build Intermediates (Objects & Static Archives)
+# Build Intermediates, Objects & Static Archives
 *.o
 *.obj
 *.a
 
-# Explicitly Allow DLLs and EXEs in Bin & Build Folders
-!*.dll
-!*.exe
-!**/bin/*.dll
-!**/bin/*.exe
-!**/build/**/*.dll
-!**/build/**/*.exe
+# Executables, Dynamic Libraries & Release Archives
+*.exe
+*.dll
+*.wasm
+*.zip
+
+# Build Output Directories
+build/
+**/build/

@@ -1,10 +1,10 @@
-// A Tour of Raptor - CodePen & Interactive WebAssembly Engine
+// A Tour of Raptor - 1:1 Classic Tour of Go Interactive Engine
 
 let audioCtx = null;
 let canvasCtx = null;
 let activeCanvas = null;
 
-// Browser Bridge for WebAssembly builtins (DOM, Canvas, WebAudio)
+// Browser Bridge for WebAssembly builtins (Canvas, DOM, WebAudio)
 window.raptorBridge = {
   initCanvas: function(canvasId, width, height) {
     const canvas = document.getElementById(canvasId) || document.getElementById('wasmCanvas');
@@ -19,7 +19,7 @@ window.raptorBridge = {
   clearCanvas: function(color) {
     if (!canvasCtx || !activeCanvas) window.raptorBridge.initCanvas('wasmCanvas', 640, 380);
     if (!canvasCtx) return;
-    canvasCtx.fillStyle = color || '#0f172a';
+    canvasCtx.fillStyle = color || '#ffffff';
     canvasCtx.fillRect(0, 0, activeCanvas.width, activeCanvas.height);
   },
 
@@ -27,10 +27,10 @@ window.raptorBridge = {
     if (!canvasCtx) window.raptorBridge.initCanvas('wasmCanvas', 640, 380);
     if (!canvasCtx) return;
     if (fill) {
-      canvasCtx.fillStyle = color || '#10b981';
+      canvasCtx.fillStyle = color || '#375eab';
       canvasCtx.fillRect(x, y, w, h);
     } else {
-      canvasCtx.strokeStyle = color || '#10b981';
+      canvasCtx.strokeStyle = color || '#375eab';
       canvasCtx.lineWidth = 2;
       canvasCtx.strokeRect(x, y, w, h);
     }
@@ -42,10 +42,10 @@ window.raptorBridge = {
     canvasCtx.beginPath();
     canvasCtx.arc(x, y, r, 0, Math.PI * 2);
     if (fill) {
-      canvasCtx.fillStyle = color || '#06b6d4';
+      canvasCtx.fillStyle = color || '#00add8';
       canvasCtx.fill();
     } else {
-      canvasCtx.strokeStyle = color || '#06b6d4';
+      canvasCtx.strokeStyle = color || '#00add8';
       canvasCtx.lineWidth = 2;
       canvasCtx.stroke();
     }
@@ -65,7 +65,7 @@ window.raptorBridge = {
   drawText: function(text, x, y, size, color) {
     if (!canvasCtx) window.raptorBridge.initCanvas('wasmCanvas', 640, 380);
     if (!canvasCtx) return;
-    canvasCtx.font = `${size || 14}px 'JetBrains Mono', monospace`;
+    canvasCtx.font = `${size || 14}px 'Fira Code', monospace`;
     canvasCtx.fillStyle = color || '#ffffff';
     canvasCtx.fillText(text, x, y);
   },
@@ -115,13 +115,23 @@ window.raptorBridge = {
   }
 };
 
-// 8 Interactive Go Tour Lessons (Pure WebAssembly - Zero Native FFI)
+// 8 Pure-Wasm Tour Lessons
 const TOUR_LESSONS = [
   {
-    badge: "LESSON 1 / 8",
-    subtitle: "Core Language Fundamentals",
-    title: "Language Basics & Operator Suite",
-    desc: `Raptor is a high-performance procedural runtime combining Perl 5 sigils (<code>$</code>, <code>@</code>, <code>%</code>) with Raku operators. Enjoy defined-or (<code>//</code>), exponentiation (<code>**</code>), divisibility (<code>%%</code>), repetition (<code>x</code>, <code>xx</code>), and <code>min</code> / <code>max</code>.`,
+    title: "Hello, Raptor",
+    desc: `
+      <p>Welcome to a tour of the <strong>Raptor</strong> programming language.</p>
+      <p>Raptor is a high-performance procedural execution platform and dynamic language (Perl 5 subset of Raku without OO overhead). Variables use standard sigils (<code>$</code>, <code>@</code>, <code>%</code>).</p>
+      <p>The tour is divided into a list of modules that you can access by clicking on the dropdown on the top right.</p>
+      <p>Throughout the tour you will find a series of slides and exercises for you to complete.</p>
+      <p>You can navigate through them using:</p>
+      <p class="tour-indent-p">
+        <span class="tour-blue-link" id="linkPrev">&quot;previous&quot;</span> to go to the previous page,<br>
+        <span class="tour-blue-link" id="linkNext">&quot;next&quot;</span> to go to the next page.
+      </p>
+      <p>The tour is interactive. Click the <strong>Run</strong> button now (or press <kbd>Shift + Enter</kbd>) to compile and run the program in WebAssembly. The result is displayed below the code.</p>
+      <p>When you click on <strong>Format</strong> (shortcut: <kbd>Ctrl + Enter</kbd>), code indentation is aligned.</p>
+    `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
     code: `# 1. Dynamic Variables & Sigils
@@ -152,10 +162,12 @@ say "Repeat array:  ", [1, 2] xx 3;
   },
 
   {
-    badge: "LESSON 2 / 8",
-    subtitle: "Runtime Value Invariants",
-    title: "Dynamic Subsets & Predicate Dispatch",
-    desc: `Define named dynamic refinement types using <code>subset</code> and <code>where</code> boolean predicates. Function signatures can dispatch on runtime value conditions without static class hierarchies.`,
+    title: "Dynamic Subsets & Predicates",
+    desc: `
+      <p>In Raptor, you can define named dynamic refinement types using <code>subset</code> and <code>where</code> boolean predicates.</p>
+      <p>Subroutines can dispatch polymorphically based on runtime value predicates without static class hierarchies.</p>
+      <p>Notice how <code>classify()</code> dispatches between <code>Even</code> and <code>Odd</code>, and how <code>fib()</code> uses predicate pattern matching directly in its parameter signature.</p>
+    `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
     code: `# 1. Define Dynamic Refinement Types
@@ -193,10 +205,11 @@ say "fib(8) = ", fib(8);
   },
 
   {
-    badge: "LESSON 3 / 8",
-    subtitle: "C-ABI Data Records",
     title: "C-ABI Structs, Closures & Overloading",
-    desc: `Data records use contiguous <code>struct</code> memory layouts with $O(1)$ offset lookups. Structs support first-class function pointer fields (closures) and custom operator overloading via <code>multi sub infix:<+></code>.`,
+    desc: `
+      <p>Raptor features C-compatible contiguous memory <code>struct</code> records with O(1) field offsets.</p>
+      <p>Structs can store first-class function pointer fields (closures) and support custom operator overloading via <code>multi sub infix:&lt;+&gt;</code>.</p>
+    `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
     code: `# 1. C-ABI Compound Struct Record
@@ -238,10 +251,11 @@ $btn.onClick(1337);
   },
 
   {
-    badge: "LESSON 4 / 8",
-    subtitle: "Quantum Control Flow",
     title: "Autothreading Quantum Junctions",
-    desc: `Junctions combine multiple values into a single superposition (<code>any</code>, <code>all</code>, <code>one</code>, <code>none</code>). Conditions evaluate concurrently across all states with smartmatching.`,
+    desc: `
+      <p>Junctions combine multiple values into a single superposition state: <code>any</code>, <code>all</code>, <code>one</code>, or <code>none</code>.</p>
+      <p>When evaluated in boolean conditionals or <code>given / when</code> pattern matching, the condition checks across all quantum states concurrently.</p>
+    `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
     code: `# 1. Quantum Junction Conditionals
@@ -266,10 +280,11 @@ given $target {
   },
 
   {
-    badge: "LESSON 5 / 8",
-    subtitle: "Data Interop & Pattern Matching",
     title: "Signature Destructuring & Fast JSON",
-    desc: `Extract nested array heads/tails and named hash properties directly in subroutine signatures. Easily serialize and deserialize complex data structures with <code>to_json</code> and <code>from_json</code>.`,
+    desc: `
+      <p>Raptor allows deep parameter destructuring of lists (head & tail) and associative hashes directly in subroutine signatures.</p>
+      <p>JSON serialization and parsing are built into the core language via <code>to_json</code> and <code>from_json</code>.</p>
+    `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
     code: `# 1. Array Parameter Destructuring (Head & Tail)
@@ -305,19 +320,20 @@ say "Parsed system: ", $parsed{"system"};
   },
 
   {
-    badge: "LESSON 6 / 8",
-    subtitle: "Interactive 2D Graphics",
-    title: "HTML5 Canvas 2D Graphics & Particles",
-    desc: `Render hardware-accelerated 2D graphics directly onto the HTML5 Canvas from pure WebAssembly using native geometry and drawing built-ins. Switch to the <strong>Canvas 2D</strong> tab to view!`,
+    title: "HTML5 Canvas 2D Graphics",
+    desc: `
+      <p>Raptor scripts running in WebAssembly can render hardware-accelerated 2D graphics directly to the HTML5 Canvas viewport using <code>canvas_init</code>, <code>canvas_draw_rect</code>, <code>canvas_draw_circle</code>, and <code>canvas_draw_line</code>.</p>
+      <p>Click <strong>Run</strong> and observe the <strong>Canvas 2D</strong> tab.</p>
+    `,
     defaultTab: "tabCanvas",
     defaultView: "canvasView",
     code: `# 1. Initialize Canvas Viewport (640x380)
 canvas_init("wasmCanvas", 640, 380);
-canvas_clear("#090d16");
+canvas_clear("#ffffff");
 
 # 2. Draw Frame and Title
-canvas_draw_rect(10, 10, 620, 360, "#1e293b", false);
-canvas_draw_text("RAPTOR WebAssembly 2D Canvas Engine", 30, 45, 16, "#10b981");
+canvas_draw_rect(10, 10, 620, 360, "#d0dbe5", false);
+canvas_draw_text("RAPTOR WebAssembly 2D Canvas Engine", 30, 45, 16, "#007d9c");
 
 # 3. Particle Starfield Structure
 struct StarNode {
@@ -328,7 +344,7 @@ struct StarNode {
 }
 
 my @nodes = [];
-my @palette = ["#10b981", "#06b6d4", "#f59e0b", "#a855f7", "#ec4899", "#3b82f6"];
+my @palette = ["#007d9c", "#00add8", "#f59e0b", "#8b5cf6", "#e11d48", "#10b981"];
 
 for 1..10 -> $i {
     my $star = StarNode.new();
@@ -339,11 +355,11 @@ for 1..10 -> $i {
     @nodes.push($star);
 }
 
-# Connect nodes with geometric constellation lines
+# Connect nodes with constellation lines
 for 0..8 -> $idx {
     my $s1 = @nodes[$idx];
     my $s2 = @nodes[$idx + 1];
-    canvas_draw_line($s1.x, $s1.y, $s2.x, $s2.y, "#334155", 2.0);
+    canvas_draw_line($s1.x, $s1.y, $s2.x, $s2.y, "#cbd5e1", 2.0);
 }
 
 # Draw glowing nodes
@@ -357,10 +373,11 @@ say "Canvas rendered with 10 interactive particle nodes!";
   },
 
   {
-    badge: "LESSON 7 / 8",
-    subtitle: "Audio Synthesis in Browser",
     title: "WebAudio API Sound Synthesizer",
-    desc: `Generate pure audio tones, harmonies, chords, and musical arpeggios in real-time through the browser's WebAudio AudioContext. Listen to the generated melody!`,
+    desc: `
+      <p>Generate audio waveforms, musical arpeggios, and synthesizers in real-time through the browser's WebAudio API directly from WebAssembly.</p>
+      <p>Click <strong>Run</strong> to listen to the generated musical sequence.</p>
+    `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
     code: `# 1. Initialize WebAudio Context
@@ -380,19 +397,19 @@ say "WebAudio Arpeggio playing via browser WebAudio API!";
   },
 
   {
-    badge: "LESSON 8 / 8",
-    subtitle: "Full-Stack WebAssembly App",
-    title: "Full-Stack: DOM + Canvas 2D + WebAudio",
-    desc: `Combine HTML5 Canvas 2D graphics, WebAudio sound synthesis, live DOM manipulation, and JSON telemetry into a complete interactive application running 100% client-side.`,
+    title: "Full-Stack WebAssembly Application",
+    desc: `
+      <p>Combine HTML5 Canvas 2D graphics, WebAudio sound synthesis, live DOM manipulation, and JSON telemetry into a complete interactive application running 100% client-side in pure WebAssembly.</p>
+    `,
     defaultTab: "tabCanvas",
     defaultView: "canvasView",
     code: `# === Full-Stack Raptor WebAssembly Application ===
 
 # 1. Canvas 2D Graphics Viewport
 canvas_init("wasmCanvas", 640, 380);
-canvas_clear("#090d16");
-canvas_draw_rect(10, 10, 620, 360, "#1e293b", false);
-canvas_draw_text("RAPTOR Full-Stack Web App Engine", 30, 45, 16, "#10b981");
+canvas_clear("#ffffff");
+canvas_draw_rect(10, 10, 620, 360, "#d0dbe5", false);
+canvas_draw_text("RAPTOR Full-Stack Web App Engine", 30, 45, 16, "#007d9c");
 
 struct AppNode {
     num64 $x;
@@ -402,7 +419,7 @@ struct AppNode {
 }
 
 my @nodes = [];
-my @colors = ["#10b981", "#06b6d4", "#f59e0b", "#a855f7", "#ec4899", "#3b82f6"];
+my @colors = ["#007d9c", "#00add8", "#f59e0b", "#8b5cf6", "#e11d48", "#10b981"];
 
 for 1..10 -> $i {
     my $node = AppNode.new();
@@ -416,7 +433,7 @@ for 1..10 -> $i {
 for 0..8 -> $idx {
     my $n1 = @nodes[$idx];
     my $n2 = @nodes[$idx + 1];
-    canvas_draw_line($n1.x, $n1.y, $n2.x, $n2.y, "#334155", 2.0);
+    canvas_draw_line($n1.x, $n1.y, $n2.x, $n2.y, "#cbd5e1", 2.0);
 }
 
 for @nodes -> $n {
@@ -437,9 +454,9 @@ say $json_str;
 
 # 3. Dynamic DOM Manipulation
 dom_set_html("#wasmDomContainer", 
-    "<div style='color:#10b981; font-weight:bold; font-size:1.15rem; margin-bottom:0.5rem;'>Raptor Web Control Panel</div>" ~
-    "<p style='color:#94a3b8; font-size:0.9rem; margin-bottom:0.5rem;'>Simulated " ~ @nodes.elems() ~ " nodes in pure WebAssembly.</p>" ~
-    "<pre style='background:#0f172a; padding:0.75rem; border-radius:6px; font-family:monospace; color:#06b6d4; font-size:0.82rem;'>" ~ $json_str ~ "</pre>"
+    "<div style='color:#375eab; font-weight:bold; font-size:1.15rem; margin-bottom:0.5rem;'>Raptor Web Control Panel</div>" ~
+    "<p style='color:#666666; font-size:0.9rem; margin-bottom:0.5rem;'>Simulated " ~ @nodes.elems() ~ " nodes in pure WebAssembly.</p>" ~
+    "<pre style='background:#f1f5f9; padding:0.75rem; border-radius:4px; font-family:monospace; color:#007d9c; font-size:0.82rem; border:1px solid #e2e8f0;'>" ~ $json_str ~ "</pre>"
 );
 
 # 4. WebAudio Synthesis
@@ -457,17 +474,18 @@ let wasmReady = false;
 let replHistory = [];
 let historyIndex = -1;
 
-// DOM Elements
+// Elements
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const btnRun = document.getElementById('btnRun');
+const btnResetCode = document.getElementById('btnResetCode');
+const btnFormatCode = document.getElementById('btnFormatCode');
 const btnPrevLesson = document.getElementById('btnPrevLesson');
 const btnNextLesson = document.getElementById('btnNextLesson');
-const btnResetCode = document.getElementById('btnResetCode');
 const lessonSelect = document.getElementById('lessonSelect');
+const pageIndicator = document.getElementById('pageIndicator');
+const lineNumbers = document.getElementById('lineNumbers');
 
-const lessonBadge = document.getElementById('lessonBadge');
-const lessonSubtitle = document.getElementById('lessonSubtitle');
 const lessonTitle = document.getElementById('lessonTitle');
 const lessonDesc = document.getElementById('lessonDesc');
 const codeEditor = document.getElementById('codeEditor');
@@ -485,10 +503,22 @@ const podView = document.getElementById('podView');
 const consoleTerminal = document.getElementById('consoleTerminal');
 const replInput = document.getElementById('replInput');
 const btnClearConsole = document.getElementById('btnClearConsole');
-const outputMetrics = document.getElementById('outputMetrics');
 const podPreview = document.getElementById('podPreview');
 const btnWeave = document.getElementById('btnWeave');
 const btnTangle = document.getElementById('btnTangle');
+
+// Update line numbers gutter
+function updateLineNumbers() {
+  if (!codeEditor || !lineNumbers) return;
+  const lines = codeEditor.value.split('\n').length;
+  let nums = '';
+  for (let i = 1; i <= Math.max(lines, 20); i++) {
+    nums += i + '<br>';
+  }
+  lineNumbers.innerHTML = nums;
+}
+
+codeEditor.addEventListener('input', updateLineNumbers);
 
 // Tab Switching
 function switchToTab(tabId, viewId) {
@@ -516,14 +546,20 @@ function loadLesson(index) {
 
   currentLessonIndex = index;
   lessonSelect.value = index;
+  pageIndicator.textContent = `${index + 1} / ${TOUR_LESSONS.length}`;
 
   const lesson = TOUR_LESSONS[index];
-  lessonBadge.textContent = lesson.badge;
-  lessonSubtitle.textContent = lesson.subtitle;
   lessonTitle.textContent = lesson.title;
-  lessonDesc.innerHTML = `<p>${lesson.desc}</p>`;
+  lessonDesc.innerHTML = lesson.desc;
   codeEditor.value = lesson.code;
 
+  // Re-hook inline link events
+  const linkPrev = document.getElementById('linkPrev');
+  const linkNext = document.getElementById('linkNext');
+  if (linkPrev) linkPrev.addEventListener('click', () => loadLesson(currentLessonIndex - 1));
+  if (linkNext) linkNext.addEventListener('click', () => loadLesson(currentLessonIndex + 1));
+
+  updateLineNumbers();
   switchToTab(lesson.defaultTab, lesson.defaultView);
 }
 
@@ -531,6 +567,13 @@ lessonSelect.addEventListener('change', (e) => loadLesson(parseInt(e.target.valu
 btnPrevLesson.addEventListener('click', () => loadLesson(currentLessonIndex - 1));
 btnNextLesson.addEventListener('click', () => loadLesson(currentLessonIndex + 1));
 btnResetCode.addEventListener('click', () => loadLesson(currentLessonIndex));
+
+btnFormatCode.addEventListener('click', () => {
+  // Simple code indentation alignment
+  const lines = codeEditor.value.split('\n');
+  codeEditor.value = lines.map(l => l.replace(/^\t+/, '    ')).join('\n');
+  updateLineNumbers();
+});
 
 // Initialize WebAssembly Runtime
 async function initWasm() {
@@ -545,11 +588,9 @@ async function initWasm() {
     wasmReady = true;
     statusDot.classList.add('ready');
     statusText.textContent = window.raptorVersion ? window.raptorVersion() : "Raptor Ready";
-    outputMetrics.textContent = "Wasm Ready";
   } catch (err) {
-    statusDot.style.background = 'var(--accent-rose)';
-    statusText.textContent = 'Wasm Error';
-    outputMetrics.textContent = 'Failed to load Wasm';
+    statusDot.style.background = '#dc2626';
+    statusText.textContent = 'Wasm Load Error';
     appendTerminalEntry(null, null, `WebAssembly initialization error: ${err.message}`, true);
   }
 }
@@ -599,10 +640,8 @@ function executeCode(sourceCode) {
   const res = window.raptorEval(sourceCode);
   if (res.error) {
     appendTerminalEntry(sourceCode, null, res.error, true);
-    outputMetrics.textContent = `Error in ${res.durationMs || 0}ms`;
   } else {
     appendTerminalEntry(sourceCode, res.result, res.output, false);
-    outputMetrics.textContent = `Done in ${res.durationMs || 0}ms`;
   }
 }
 
@@ -610,7 +649,6 @@ btnRun.addEventListener('click', () => executeCode(codeEditor.value));
 
 btnClearConsole.addEventListener('click', () => {
   consoleTerminal.innerHTML = '';
-  outputMetrics.textContent = 'Cleared';
 });
 
 // REPL input prompt
@@ -639,11 +677,17 @@ replInput.addEventListener('keydown', (e) => {
   }
 });
 
-// Global Ctrl+Enter shortcut
+// Global keyboard shortcuts (Shift+Enter, Ctrl+Enter, PageUp, PageDown)
 window.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+  if ((e.shiftKey || e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault();
     executeCode(codeEditor.value);
+  } else if (e.key === 'PageUp') {
+    e.preventDefault();
+    loadLesson(currentLessonIndex - 1);
+  } else if (e.key === 'PageDown') {
+    e.preventDefault();
+    loadLesson(currentLessonIndex + 1);
   }
 });
 

@@ -3,7 +3,92 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>A Tour of Raptor</title>
+  
+  <!-- Primary Meta Tags -->
+  <title>A Tour of Raptor — Post-LLM Dynamic Language Runtime in WebAssembly</title>
+  <meta name="title" content="A Tour of Raptor — Post-LLM Dynamic Language Runtime in WebAssembly">
+  <meta name="description" content="Interactive in-browser WebAssembly playground and tour for Raptor — a high-performance, post-LLM dynamic language featuring continuous assignment predicate invariants, C-ABI structs, UFCS, Canvas 2D graphics, WebAudio synthesis, and PodLit literate programming.">
+  <meta name="keywords" content="Raptor, Raptor Language, WebAssembly, WASM, Post-LLM, Raku, Perl 5, MoarVM, Dynamic Language, Predicate Dispatch, Continuous Contracts, PodLit, Literate Programming, Go Tour, In-Browser IDE, Online Compiler, REPL">
+  <meta name="author" content="Raptor Programming Language Team">
+  <meta name="robots" content="index, follow">
+  <meta name="theme-color" content="#007d9c">
+  <link rel="canonical" href="https://xyzzyapps.github.io/raptor/">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://xyzzyapps.github.io/raptor/">
+  <meta property="og:title" content="A Tour of Raptor — Post-LLM Dynamic Language Runtime">
+  <meta property="og:description" content="Run Raptor 100% in-browser via WebAssembly. Explore continuous invariant checking, predicate dispatching, C-ABI structs, Canvas 2D graphics, WebAudio, and PodLit literate programming.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/xyzzyapps/raptor/master/raptor/assets/logo_wt.png">
+  <meta property="og:site_name" content="Raptor Programming Language">
+
+  <!-- Twitter Card -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://xyzzyapps.github.io/raptor/">
+  <meta property="twitter:title" content="A Tour of Raptor — Post-LLM Dynamic Language Runtime">
+  <meta property="twitter:description" content="Interactive in-browser WebAssembly tour and playground for Raptor. High token density, continuous predicate invariants, C-structs, and zero OOP boilerplate.">
+  <meta property="twitter:image" content="https://raw.githubusercontent.com/xyzzyapps/raptor/master/raptor/assets/logo_wt.png">
+
+  <!-- AEO (Answer Engine Optimization) Structured Data: SoftwareApplication & FAQPage -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Raptor WebAssembly Tour & Playground",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Web Browser, WebAssembly",
+        "url": "https://xyzzyapps.github.io/raptor/",
+        "description": "An interactive in-browser WebAssembly execution environment and interactive language tour for the Raptor programming language.",
+        "softwareRequirements": "Modern web browser with WebAssembly support (Chrome, Firefox, Safari, Edge)",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is the Raptor programming language?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Raptor is a high-performance, post-LLM dynamic programming language designed as the pure dynamic Perl 5 subset of Raku targeting MoarVM. It features high token density, zero OOP boilerplate, continuous predicate invariant enforcement on every assignment, C-ABI structs, Uniform Function Call Syntax (UFCS), and Knuth-style PodLit literate programming."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What are continuous invariant predicates in Raptor?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "In Raptor, variables and dynamic subsets hold 'where' boolean predicates that are continuously evaluated on every mutation and assignment. If an assignment produces an invalid state, it is immediately caught at runtime at the exact point of mutation."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does Raptor run in the web browser?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Raptor compiles directly into a standalone WebAssembly (WASM) binary that executes 100% client-side without any server-side dependencies. It provides direct hardware integration with HTML5 Canvas 2D rendering, WebAudio waveform synthesis, and dynamic DOM manipulation."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is PodLit literate programming in Raptor?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "PodLit is Raptor's built-in Literate Programming subsystem grounded in Johan Hidding's IEEE e-Science 2023 research on bi-directional literate programming (Entangled). It supports weaving Markdown documentation, tangling source code chunks, and reverse-stitching modified code back into literate documents."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">

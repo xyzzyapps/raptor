@@ -2,7 +2,6 @@
 
 Raptor enforces dynamic value contracts through Raku's `subset` system and **Predicate Dispatching** (ECOOP 1998).
 
----
 
 ## 1. Defining Dynamic Refinement Types (`subset`)
 
@@ -15,7 +14,6 @@ subset PortNumber where { $_ >= 1 && $_ <= 65535 };
 subset NonEmptyStr where { $_.chars > 0 };
 ```
 
----
 
 ## 2. Variable Contract Enforcement
 
@@ -28,7 +26,6 @@ my Positive $score = 100; # OK
 # $score = -5; # Error: dynamic constraint violated for subset Positive
 ```
 
----
 
 ## 3. Predicate Dispatching for Multi Subs
 
@@ -54,7 +51,6 @@ multi sub grade($score where { $score >= 75 && $score < 90 }) { return "B"; }
 multi sub grade($score where { $score < 75 }) { return "C"; }
 ```
 
----
 
 ## 4. Smart Matching (`~~`)
 

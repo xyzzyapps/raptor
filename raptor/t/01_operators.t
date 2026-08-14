@@ -2,7 +2,7 @@
 plan(14);
 
 # Defined-or
-my $val = $nil // "default_val";
+my $val = Nil // "default_val";
 is($val, "default_val", "defined-or returns default on nil");
 
 my $assigned = "existing";

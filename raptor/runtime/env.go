@@ -6,12 +6,16 @@ import "fmt"
 type Env struct {
 	parent   *Env
 	bindings map[string]*Value
+	types    map[string]string
+	wheres   map[string]Expr
 }
 
 // NewEnv creates a new top-level environment.
 func NewEnv() *Env {
 	return &Env{
 		bindings: make(map[string]*Value),
+		types:    make(map[string]string),
+		wheres:   make(map[string]Expr),
 	}
 }
 
@@ -20,12 +24,38 @@ func (e *Env) NewChild() *Env {
 	return &Env{
 		parent:   e,
 		bindings: make(map[string]*Value),
+		types:    make(map[string]string),
+		wheres:   make(map[string]Expr),
 	}
 }
 
 // Define declares a new variable in the current frame.
 func (e *Env) Define(name string, val *Value) {
 	e.bindings[name] = val
+}
+
+// DefineTyped declares a variable with an invariant type and optional predicate constraint.
+func (e *Env) DefineTyped(name string, val *Value, typeName string, where Expr) {
+	e.bindings[name] = val
+	if typeName != "" {
+		e.types[name] = typeName
+	}
+	if where != nil {
+		e.wheres[name] = where
+	}
+}
+
+// LookupType finds a variable's type and where constraint looking up the lexical chain.
+func (e *Env) LookupType(name string) (string, Expr, bool) {
+	if _, ok := e.bindings[name]; ok {
+		t := e.types[name]
+		w := e.wheres[name]
+		return t, w, true
+	}
+	if e.parent != nil {
+		return e.parent.LookupType(name)
+	}
+	return "", nil, false
 }
 
 // RegisterMulti adds a multi sub candidate to the current frame.
@@ -49,7 +79,6 @@ func (e *Env) RegisterMulti(name string, cand *Closure) {
 		existing.Candidates = append(existing.Candidates, cand)
 		return
 	}
-
 
 	if existing.Type == ValClosure {
 		// Upgrade existing single closure to multi sub

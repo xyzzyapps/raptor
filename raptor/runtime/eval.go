@@ -224,7 +224,7 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 				return nil, fmt.Errorf("type check failed: where constraint violated for variable %s", s.Name)
 			}
 		}
-		env.Define(s.Name, initVal)
+		env.DefineTyped(s.Name, initVal, s.Type, s.Where)
 		return initVal, nil
 
 	case *AssignStmt:
@@ -562,10 +562,55 @@ func (in *Interp) evalBlock(b *BlockStmt, env *Env) (*Value, error) {
 	return lastVal, nil
 }
 
+func (in *Interp) validateTypeAndWhere(name string, val *Value, env *Env) error {
+	if val == nil || val.Type == ValNil {
+		return nil
+	}
+	typeName, whereExpr, ok := env.LookupType(name)
+	if !ok {
+		return nil
+	}
+	if typeName != "" {
+		if subVal, ok := in.GlobalEnv.Lookup(typeName); ok && subVal.Type == ValClosure {
+			r, err := in.InvokeCallable(subVal, []*Value{val})
+			if err != nil || !r.IsTrue() {
+				return fmt.Errorf("type check failed: dynamic constraint violated for subset %s on variable %s", typeName, name)
+			}
+		} else if structDecl, ok := in.Structs[typeName]; ok {
+			if val.Type != ValCStruct || val.CStructVal == nil || val.CStructVal.Class != structDecl {
+				return fmt.Errorf("type check failed on %s: expected struct %s, got %s", name, typeName, val.TypeName())
+			}
+		} else if !val.MatchesType(typeName) {
+			return fmt.Errorf("type check failed on %s: expected %s, got %s", name, typeName, val.TypeName())
+		}
+	}
+	if whereExpr != nil {
+		whereEnv := env.NewChild()
+		whereEnv.Define("$_", val)
+		whereEnv.Define(name, val)
+		res, err := in.evalExpr(whereExpr, whereEnv)
+		if err != nil {
+			return fmt.Errorf("where constraint evaluation failed for %s: %w", name, err)
+		}
+		if res != nil && res.Type == ValClosure {
+			r, err := in.InvokeCallable(res, []*Value{val})
+			if err != nil || !r.IsTrue() {
+				return fmt.Errorf("type check failed: where constraint violated for variable %s", name)
+			}
+		} else if res != nil && !res.IsTrue() {
+			return fmt.Errorf("type check failed: where constraint violated for variable %s", name)
+		}
+	}
+	return nil
+}
+
 func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Value, error) {
 	switch t := target.(type) {
 	case *VarExpr:
 		if op == "=" {
+			if err := in.validateTypeAndWhere(t.Name, val, env); err != nil {
+				return nil, err
+			}
 			if err := env.Assign(t.Name, val); err != nil {
 				env.Define(t.Name, val)
 			}
@@ -575,6 +620,9 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 			cur, ok := env.Lookup(t.Name)
 			if ok && cur.Type != ValNil {
 				return cur, nil
+			}
+			if err := in.validateTypeAndWhere(t.Name, val, env); err != nil {
+				return nil, err
 			}
 			if err := env.Assign(t.Name, val); err != nil {
 				env.Define(t.Name, val)
@@ -587,6 +635,9 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 		}
 		newVal, err := in.evalBinaryOp(cur, op[:len(op)-1], val)
 		if err != nil {
+			return nil, err
+		}
+		if err := in.validateTypeAndWhere(t.Name, newVal, env); err != nil {
 			return nil, err
 		}
 		if err := env.Assign(t.Name, newVal); err != nil {
@@ -671,16 +722,34 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		case TokString:
 			return StringValue(e.Value.(string)), nil
 		case TokIdent:
-			if val, ok := env.Lookup(e.Value.(string)); ok {
+			identStr := e.Value.(string)
+			if identStr == "Nil" {
+				return NilValue(), nil
+			}
+			if identStr == "True" || identStr == "true" {
+				return BoolValue(true), nil
+			}
+			if identStr == "False" || identStr == "false" {
+				return BoolValue(false), nil
+			}
+			if val, ok := env.Lookup(identStr); ok {
 				return val, nil
 			}
-			return StringValue(e.Value.(string)), nil
+			return StringValue(identStr), nil
 		default:
 			return NilValue(), nil
 		}
 
-
 	case *VarExpr:
+		if e.Name == "Nil" {
+			return NilValue(), nil
+		}
+		if e.Name == "True" || e.Name == "true" {
+			return BoolValue(true), nil
+		}
+		if e.Name == "False" || e.Name == "false" {
+			return BoolValue(false), nil
+		}
 		if val, ok := env.Lookup(e.Name); ok {
 			return val, nil
 		}

@@ -6,7 +6,7 @@ say "=== Raptor Feature Showcase (.rp) ===";
 
 # [1] Perl5 & Raku Operators Suite
 say "\n[1] Operators Suite:";
-my $defaultVal = $nil // "Default Value";
+my $defaultVal = Nil // "Default Value";
 say "  Defined-or: " ~ $defaultVal;
 
 my $condition = 10 > 5 ?? "10 is greater" !! "5 is greater";

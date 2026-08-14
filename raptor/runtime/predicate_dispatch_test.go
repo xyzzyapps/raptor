@@ -255,3 +255,42 @@ my $neg = -$v2;
 		t.Errorf("expected neg (-5, -15), got (%v, %v)", val.ArrayVal[4], val.ArrayVal[5])
 	}
 }
+
+func TestContinuousAssignmentPredicateEnforcement(t *testing.T) {
+	in := NewInterp()
+
+	codeSuccess := `
+subset Positive of Int where { $_ > 0 };
+my Positive $balance = 100;
+$balance = 250;
+$balance += 50;
+$balance;
+`
+	val, err := in.Eval(codeSuccess)
+	if err != nil {
+		t.Fatalf("expected valid assignment to pass, got error: %v", err)
+	}
+	if val.IntVal != 300 {
+		t.Errorf("expected 300, got %v", val.IntVal)
+	}
+
+	codeViolation := `
+subset Positive of Int where { $_ > 0 };
+my Positive $score = 50;
+$score = -10;
+`
+	_, err = in.Eval(codeViolation)
+	if err == nil {
+		t.Fatalf("expected assignment of -10 to Positive variable to fail with invariant violation")
+	}
+
+	codeWhereViolation := `
+my Int $port where { $_ >= 1 && $_ <= 65535 } = 8080;
+$port = 99999;
+`
+	_, err = in.Eval(codeWhereViolation)
+	if err == nil {
+		t.Fatalf("expected assignment of 99999 to port range variable to fail with invariant violation")
+	}
+}
+

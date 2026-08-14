@@ -2,11 +2,9 @@
   <img src="assets/logo_wt.png" alt="Raptor Language Logo" width="160" />
 </p>
 
-# Raptor 
+# Raptor: A Post-LLM Dynamic Language
 
-Raptor is a dynamic language - roughly a Perl5 subset of Raku targeting **MoarVM** in go. It supports go FFI, C FFI, Uniform Function Call Syntax (UFCS), refinement types, predicate types, multimethods, defensive programming, literate programming and standalone binary packaging (`raptor pack`).
-
-It comes with a few sample libraries to aid in development and testing
+Raptor is a high-performance, post-LLM dynamic language — a Perl 5 subset of Raku targeting **MoarVM** in Go. Engineered for AI-assisted software generation, it combines high token density, verification-first contracts, continuous assignment predicate invariants, Uniform Function Call Syntax (UFCS), C-ABI struct memory, Charmbracelet terminal styling, literate programming with PodLit, and standalone binary packaging (`raptor pack`).
 
 1. **Uniform Function Call Syntax (UFCS)**:
    Invoke any subroutine or multi-sub candidate using method invocation syntax on the first argument (`$val.func()`, `20.double()`, `"raptor".uc()`, `@list.map(...)`).
@@ -24,9 +22,6 @@ It comes with a few sample libraries to aid in development and testing
     60 FPS desktop window rendering with Windows x64 ABI struct-by-value packing and UTF-8 string marshalling ([examples/raylib_game.rp](examples/raylib_game.rp)).
 
 Licensed under the **Artistic License 2.0**.
-
-
----
 
 ## Binaries & Build Artifacts
 
@@ -58,8 +53,6 @@ These DLLs are copied into `bin/` so every executable is zero-dependency. At run
 | **`bin/moar.dll`** | Built from the MoarVM C source tree in `../moarvm-go/vendor/MoarVM` (see "Building from Source" below) | MoarVM 64-bit JIT / 6model engine executing `raptor compile` bytecode |
 | **`bin/libraylib.dll`** | Raylib 5.5 from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin\libraylib.dll`) | Raylib desktop graphics engine (`lib/Raylib.rp`, `examples/raylib_game.rp`) |
 | **`bin/sqlite3.dll`** | SQLite from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin\libsqlite3-0.dll`) | Native SQLite database (`sqlite_open`, `sqlite_query`, `sqlite_close`) |
-
----
 
 ## Building from Source
 
@@ -120,8 +113,6 @@ go test ./...                      # Go unit test suites (runtime/)
 .\bin\raptorhp.exe -S localhost:8000   # development template server
 ```
 
----
-
 ## Key Features
 
 1. **Pure Dynamic Typing & No-OO Architecture**:
@@ -151,8 +142,6 @@ go test ./...                      # Go unit test suites (runtime/)
     Package any script into a self-contained `.exe` executable (`raptor pack`), with `moar.dll`, `libraylib.dll`, and `sqlite3.dll` residing directly in `bin/` for zero-dependency portability.
 13. **WebAssembly (Wasm) In-Browser IDE & REPL**:
     Run 100% client-side in the browser via `web/raptor.wasm`, featuring interactive REPL prompt, code playground, presets, and live PodLit literate inspector (`raptor serve`).
-
----
 
 ## Quick Start
 

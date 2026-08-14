@@ -1,0 +1,42 @@
+# ==============================================================================
+# Raptor <-> MoarVM Dynamic Module (DLL) Cross-Language Interoperability Demo
+# ==============================================================================
+# Demonstrates loading a pre-compiled MoarVM Compilation Unit (.moarvm dynamic
+# library) authored in another language (Tcl) and invoking its exported symbols
+# directly from Raptor with continuous invariant validation and UFCS chaining.
+
+say "--- MoarVM Cross-Language Dynamic Module (DLL) Interop ---";
+
+# 1. Path to compiled MoarVM dynamic module (e.g. built from Tcl/Raku)
+my $libPath = "tcl_math.moarvm";
+
+# 2. Dynamically load the MoarVM module
+# (Note: In tests or production, modules are compiled via moargo / compiler.CompileLibrary)
+say "1. Loading dynamic module: " ~ $libPath;
+my $mod = moar_load_module($libPath);
+
+say "Module Name: " ~ $mod{"name"};
+say "Source HLL:  " ~ $mod{"hll"};
+my $symbols = $mod{"symbols"};
+say "Exported Symbols: " ~ $symbols.elems();
+
+# 3. Iterate through exported procedure symbols
+for @($symbols) -> $sym {
+    say "  - Found exported procedure: " ~ $sym;
+}
+
+# 4. Invoke exported procedures via MoarVM symbol dispatch
+my $result = moar_call_symbol($mod, "compute_answer");
+say "2. Invoked symbol 'compute_answer' -> Result: " ~ $result;
+
+# 5. Enforce Raptor continuous refinement invariants on foreign result
+subset Positive where { $_ > 0 };
+my Positive $verifiedVal = $result;
+say "3. Verified result with Raptor dynamic invariant (Positive): " ~ $verifiedVal;
+
+# 6. Apply Uniform Function Call Syntax (UFCS) on foreign output
+sub double_it($n) { return $n * 2; }
+my $doubled = $verifiedVal.double_it();
+say "4. UFCS Chaining: (" ~ $verifiedVal ~ ").double_it() = " ~ $doubled;
+
+say "--- MoarVM Dynamic Module Execution Complete ---";

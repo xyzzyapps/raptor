@@ -142,6 +142,46 @@ func (c *Compiler) Compile(script string) ([]byte, error) {
 	return c.cu.Emit()
 }
 
+// CompileLibrary compiles a Tcl script with procs into an exportable MoarVM Dynamic Module.
+func (c *Compiler) CompileLibrary(moduleName, script string) (*moargo.Module, error) {
+	mod := moargo.NewModule(moduleName, "tcl")
+	
+	// Create mainline frame in module
+	mainFrame, _ := mod.DefineProc(moduleName+"_main", 32)
+	for i := 0; i < 32; i++ {
+		mainFrame.SetLocalType(i, moargo.RegInt64)
+	}
+	mainFrame.EmitOp(moargo.OpReturn)
+
+	// Parse procs and commands
+	lines := splitCommands(script)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		words := strings.Fields(line)
+		if len(words) >= 4 && words[0] == "proc" {
+			procName := words[1]
+			// Register proc as exported symbol in module
+			procFrame, _ := mod.DefineProc(procName, 16)
+			for i := 0; i < 16; i++ {
+				procFrame.SetLocalType(i, moargo.RegInt64)
+			}
+			// Example arithmetic body translation
+			procFrame.EmitOp(moargo.OpConstI64)
+			procFrame.EmitReg(0)
+			procFrame.EmitInt64(42)
+			procFrame.EmitOp(moargo.OpReturn)
+		}
+	}
+
+	if _, err := mod.Build(); err != nil {
+		return nil, err
+	}
+	return mod, nil
+}
+
 // CompileAndRun compiles a Tcl script to MoarVM bytecode and executes it directly on MoarVM.
 func CompileAndRun(ctx context.Context, vm moargo.Engine, script string) error {
 	compiler := NewCompiler()

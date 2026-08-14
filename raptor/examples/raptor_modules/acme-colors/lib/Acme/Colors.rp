@@ -1,0 +1,41 @@
+# ==============================================================================
+# Package: Acme::Colors (Installed in raptor_modules/acme-colors/)
+# ==============================================================================
+
+# Exported ColorRGB Struct
+struct ColorRGB {
+    int32 $r;
+    int32 $g;
+    int32 $b;
+}
+
+# Invariant type refinement: valid RGB channel byte (0..255)
+subset ColorByte where { $_ >= 0 && $_ <= 255 };
+
+# Helper to construct a ColorRGB struct
+sub make_color($r, $g, $b) {
+    my $c = ColorRGB.new();
+    $c.r = $r;
+    $c.g = $g;
+    $c.b = $b;
+    return $c;
+}
+
+# Colorize text with 24-bit TrueColor ANSI codes
+sub color_fg($r, $g, $b, $text) {
+    my $esc = chr(27);
+    my $escape = $esc ~ "[38;2;" ~ $r ~ ";" ~ $g ~ ";" ~ $b ~ "m";
+    my $reset  = $esc ~ "[0m";
+    return $escape ~ $text ~ $reset;
+}
+
+# Apply struct color on text
+sub color_apply(ColorRGB $col, $text) {
+    return color_fg($col.r, $col.g, $col.b, $text);
+}
+
+# Format styled badge with border
+sub color_badge($label, $r, $g, $b) {
+    my $coloredLabel = color_fg($r, $g, $b, " " ~ $label ~ " ");
+    return "[" ~ $coloredLabel ~ "]";
+}

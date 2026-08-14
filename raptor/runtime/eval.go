@@ -80,6 +80,7 @@ func NewInterp() *Interp {
 	registerVerificationBuiltins(in)
 	in.registerPodLitBuiltins()
 	in.registerWebBuiltins()
+	in.registerMoarVMModuleBuiltins()
 	return in
 }
 

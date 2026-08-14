@@ -3,7 +3,9 @@ package raptor
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -45,6 +47,54 @@ func (in *Interp) evalUse(u *UseStmt, env *Env) (*Value, error) {
 		}
 		return BoolValue(true), nil
 	}
+
+	// 1. Convert Package::Submodule to filesystem path
+	relPath := strings.ReplaceAll(u.Module, "::", "/")
+	baseName := filepath.Base(relPath)
+
+	candidates := []string{
+		filepath.Join("lib", relPath+".rp"),
+		filepath.Join("lib", relPath+".raptor"),
+		filepath.Join("lib", relPath, baseName+".rp"),
+		relPath + ".rp",
+		relPath + ".raptor",
+		relPath + ".moarvm",
+		filepath.Join("lib", relPath+".moarvm"),
+	}
+
+	// 2. Search raptor_modules/ (including examples/raptor_modules/)
+	if rmPath := FindModuleInRaptorModules(baseName); rmPath != "" {
+		candidates = append([]string{rmPath}, candidates...)
+	}
+	if _, err := os.Stat("examples/raptor_modules"); err == nil {
+		_ = filepath.Walk("examples/raptor_modules", func(p string, info os.FileInfo, err error) error {
+			if err == nil && !info.IsDir() {
+				b := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+				if (b == baseName || b == u.Module) && (strings.HasSuffix(p, ".rp") || strings.HasSuffix(p, ".raptor")) {
+					candidates = append([]string{p}, candidates...)
+					return filepath.SkipAll
+				}
+			}
+			return nil
+		})
+	}
+
+	// 3. Evaluate matching candidate
+	for _, path := range candidates {
+		if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+			if strings.HasSuffix(path, ".moarvm") {
+				if loader, ok := in.Builtins["moar_load_module"]; ok {
+					return loader(in, []*Value{StringValue(path)})
+				}
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("failed reading module %s from %s: %w", u.Module, path, err)
+			}
+			return in.Eval(string(content))
+		}
+	}
+
 	return BoolValue(true), nil
 }
 

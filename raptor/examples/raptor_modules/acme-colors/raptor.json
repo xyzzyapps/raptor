@@ -1,0 +1,9 @@
+{
+  "name": "acme-colors",
+  "version": "1.0.0",
+  "description": "ANSI TrueColor styling and terminal formatting utilities for Raptor",
+  "main": "lib/Acme/Colors.rp",
+  "author": "Acme Tools Corp",
+  "license": "Artistic-2.0",
+  "dependencies": {}
+}

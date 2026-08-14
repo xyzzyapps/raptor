@@ -1,0 +1,33 @@
+# ==============================================================================
+# Raptor Package Management & raptor_modules/ Import Demo
+# ==============================================================================
+# Demonstrates loading a modular dependency installed in raptor_modules/
+# (acme-colors) via standard 'use Acme::Colors;' syntax.
+
+say "--- Raptor Package Manager (raptor_modules/) Demo ---";
+
+# 1. Import module from raptor_modules/acme-colors/lib/Acme/Colors.rp
+use Acme::Colors;
+
+say "1. Successfully loaded package 'Acme::Colors' from raptor_modules/";
+
+# 2. Instantiate and use exported struct from the package
+my $brandColor = make_color(52, 211, 153); # Emerald RGB (52, 211, 153)
+say "2. Instantiated ColorRGB struct: R=" ~ $brandColor.r ~ ", G=" ~ $brandColor.g ~ ", B=" ~ $brandColor.b;
+
+# 3. Call exported styling functions directly
+my $banner = color_fg(56, 189, 248, "RAPTOR POST-LLM RUNTIME");
+say "3. Direct function invocation: " ~ $banner;
+
+# 4. Use struct color application
+my $msg = color_apply($brandColor, "Dynamic Invariants Active!");
+say "4. Applied struct color: " ~ $msg;
+
+# 5. Format package badges
+my $badge1 = color_badge("PASSING", 52, 211, 153);
+my $badge2 = color_badge("STABLE", 56, 189, 248);
+my $badge3 = color_badge("MOARVM", 167, 139, 250);
+
+say "5. Package Badges: " ~ $badge1 ~ " " ~ $badge2 ~ " " ~ $badge3;
+
+say "--- Raptor Package Demonstration Complete ---";

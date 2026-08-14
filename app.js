@@ -553,7 +553,58 @@ if 10 <= $val <= 50 {
   },
 
   {
-    title: "2. Dynamic Subsets & Continuous Invariants",
+    title: "2. Rich Control Flow & Decision Operators",
+    desc: `
+      <p>Raptor provides a rich suite of procedural, Raku-style, and short-circuit control flow constructs:</p>
+      <ul>
+        <li><strong>Conditionals:</strong> <code>if / elsif / else</code> and inverted <code>unless</code>.</li>
+        <li><strong>Topical Pattern Matching:</strong> <code>given / when / default</code> with smartmatch (<code>~~</code>).</li>
+        <li><strong>Loops:</strong> Pointy-block <code>for ... -&gt; $elem</code>, <code>while</code>, inverted <code>until</code>, and C-style <code>loop (;;)</code>.</li>
+        <li><strong>Jump Operators:</strong> <code>last</code> (break), <code>next</code> (continue), and <code>return</code>.</li>
+        <li><strong>Short-Circuit Operators:</strong> Raku ternary (<code>?? !!</code>) and defined-or defaulting (<code>//</code>, <code>//=</code>).</li>
+      </ul>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `# 1. Conditionals: if/elsif/else and unless
+my $status = "active";
+unless $status eq "disabled" {
+    say "Service is operational.";
+}
+
+# 2. Topical Pattern Matching: given / when / default
+my $score = 95;
+given $score {
+    when 90..100 { say "Score category: Distinction (A+)"; }
+    when 80..89  { say "Score category: Merit (A)"; }
+    default      { say "Score category: Pass ($_)"; }
+}
+
+# 3. Looping: for -> $x, until, and loop (;;)
+say "--- Pointy-block For Loop with next / last ---";
+for 1..6 -> $n {
+    if $n == 2 { next; } # Skip 2
+    if $n == 5 { last; } # Terminate before 5
+    say "Processing item: ", $n;
+}
+
+say "--- Until Loop (Inverted Condition) ---";
+my $ready_count = 0;
+until $ready_count >= 3 {
+    $ready_count += 1;
+    say "Warming up... stage ", $ready_count;
+}
+
+# 4. Short-Circuit & Ternary Evaluation
+my $val = Nil;
+my $fallback = $val // "default_config";
+my $label = ($ready_count == 3) ?? "Fully Ready" !! "Initializing";
+say "Config: ", $fallback, " | State: ", $label;
+`
+  },
+
+  {
+    title: "3. Dynamic Subsets & Continuous Invariants",
     desc: `
       <p>Raptor replaces heavyweight OOP with <strong>Dynamic Subsets</strong> and <strong>Refinement Predicates</strong>.</p>
       <p>A subset defines a runtime type refinement constrained by a boolean block (<code>where { ... }</code>). Invariants can be attached directly to variables (<code>my $score where { $_ &gt;= 0 } = 100;</code>) or multiple-dispatch subroutines.</p>
@@ -586,7 +637,7 @@ handle_request(8080);
   },
 
   {
-    title: "3. C-ABI Struct Records & Overloading",
+    title: "4. C-ABI Struct Records & Overloading",
     desc: `
       <p>Raptor features C-compatible contiguous memory <code>struct</code> records with O(1) field offsets.</p>
       <p>Structs can store first-class function pointer fields (closures) and support custom operator overloading via <code>multi sub infix:&lt;+&gt;</code>.</p>
@@ -632,7 +683,7 @@ $btn.onClick(1337);
   },
 
   {
-    title: "4. Uniform Function Call Syntax (UFCS)",
+    title: "5. Uniform Function Call Syntax (UFCS)",
     desc: `
       <p>Raptor embraces <strong>Uniform Function Call Syntax (UFCS)</strong> across the entire language.</p>
       <p>Any subroutine <code>foo($target, @args)</code> can be invoked seamlessly as <code>$target.foo(@args)</code>, enabling fluid functional pipelines without class hierarchies.</p>
@@ -662,7 +713,7 @@ say $msg;
   },
 
   {
-    title: "5. Autothreading Quantum Junctions",
+    title: "6. Autothreading Quantum Junctions",
     desc: `
       <p>Junctions combine multiple values into a single superposition state: <code>any</code>, <code>all</code>, <code>one</code>, or <code>none</code>.</p>
       <p>When evaluated in boolean conditionals or <code>given / when</code> pattern matching, the condition checks across all quantum states concurrently.</p>
@@ -691,7 +742,7 @@ given $target {
   },
 
   {
-    title: "6. Signature Destructuring & Fast JSON",
+    title: "7. Signature Destructuring & Fast JSON",
     desc: `
       <p>Raptor allows deep parameter destructuring of lists (head & tail) and associative hashes directly in subroutine signatures.</p>
       <p>JSON serialization and parsing are built into the core language via <code>to_json</code> and <code>from_json</code>.</p>
@@ -723,7 +774,7 @@ say "Decoded engine: ", %decoded{"engine"};
   },
 
   {
-    title: "7. Gather / Take Generators & Lazy Lists",
+    title: "8. Gather / Take Generators & Lazy Lists",
     desc: `
       <p>Raptor features first-class coroutine generators using <code>gather { ... take ... }</code>.</p>
       <p>Generators yield values dynamically, allowing elegant creation of mathematical sequences and filtered data streams.</p>
@@ -753,7 +804,7 @@ say "Multiples of 3 or 5: ", @filtered;
   },
 
   {
-    title: "8. Design-by-Contract & Verification",
+    title: "9. Design-by-Contract & Verification",
     desc: `
       <p>Raptor incorporates formal <strong>Design-by-Contract</strong> specifications and automated <strong>Property-Based Verification</strong> (QuickCheck-style randomized test generation).</p>
       <p>Click <strong>Run</strong> to verify contracts and execute 100 randomized property trials.</p>
@@ -777,7 +828,7 @@ property "Addition Commutativity", sub ($a, $b) {
   },
 
   {
-    title: "9. PodLit Literate Programming",
+    title: "10. PodLit Literate Programming",
     desc: `
       <p>Raptor includes the <strong>PodLit</strong> literate programming engine supporting Donald Knuth-style chunk tangling (<code>pod_tangle</code>), documentation weaving (<code>pod_weave</code>), and bidirectional code stitching (<code>pod_stitch</code>).</p>
       <p>Click <strong>Run</strong> to weave the specification to Markdown and tangle the executable source files into stdout.</p>
@@ -815,7 +866,7 @@ say "=== Literate Programming Pipeline Verified ===";
   },
 
   {
-    title: "10. HTML5 Canvas 2D Graphics Engine",
+    title: "11. HTML5 Canvas 2D Graphics Engine",
     desc: `
       <p>Raptor communicates directly with HTML5 2D Canvas contexts via procedural drawing primitives.</p>
       <p>The entire radar HUD, coordinate grid, and geometric math are evaluated in <strong>pure Raptor code</strong>.</p>
@@ -903,7 +954,7 @@ say "Canvas 2D HUD generated with pure Raptor vector primitives and trigonometry
   },
 
   {
-    title: "11. WebGL 3D Hardware Graphics",
+    title: "12. WebGL 3D Hardware Graphics",
     desc: `
       <p>Raptor compiles GLSL shaders, defines 3D geometry buffers, and computes 4x4 trigonometric transformation matrices directly in Raptor source code.</p>
       <p>Click <strong>Run</strong> to compile shaders, upload the 3D cube to GPU memory, and start continuous hardware-accelerated 3D rotation!</p>
@@ -1057,7 +1108,7 @@ say " - Continuous 60fps hardware rotation loop active!";
   },
 
   {
-    title: "12. WebAudio Waveform Synthesizer",
+    title: "13. WebAudio Waveform Synthesizer",
     desc: `
       <p>Generate audio waveforms, musical arpeggios, and synthesizers in real-time through the browser's WebAudio API directly from pure Raptor.</p>
       <p>Click <strong>Run</strong> to listen to the generated musical sequence.</p>
@@ -1085,7 +1136,7 @@ say "WebAudio Arpeggio playing via browser WebAudio API!";
   },
 
   {
-    title: "13. Full-Stack In-Browser App",
+    title: "14. Full-Stack In-Browser App",
     desc: `
       <p>Combine Canvas 2D, WebGL 3D, DOM mutation, and WebAudio sound effects in a single reactive in-browser application.</p>
     `,
@@ -1494,21 +1545,8 @@ async function initWasm() {
       throw new Error(`HTTP ${response.status} (${response.statusText || 'Not Found'}) loading ${wasmUrl}`);
     }
 
-    let result;
-    const contentType = response.headers.get('Content-Type') || '';
-    if (WebAssembly.instantiateStreaming && contentType.includes('application/wasm')) {
-      try {
-        result = await WebAssembly.instantiateStreaming(response, go.importObject);
-      } catch (streamErr) {
-        console.warn("[WASM] instantiateStreaming failed, falling back to ArrayBuffer:", streamErr);
-        const source = await response.arrayBuffer();
-        result = await WebAssembly.instantiate(source, go.importObject);
-      }
-    } else {
-      const source = await response.arrayBuffer();
-      result = await WebAssembly.instantiate(source, go.importObject);
-    }
-
+    const source = await response.arrayBuffer();
+    const result = await WebAssembly.instantiate(source, go.importObject);
     go.run(result.instance);
 
     // Check until Go runtime has fully registered exports

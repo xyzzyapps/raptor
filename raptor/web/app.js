@@ -1283,8 +1283,29 @@ function setupEventListeners() {
     btnResetCode.addEventListener('click', () => {
       const lesson = tourLessons[currentLessonIdx];
       if (lesson && lesson.code) {
-        codeEditor.value = lesson.code.trim();
+        codeEditor.value = lesson.code.trim() + '\n';
         updateLineNumbers();
+      }
+      if (consoleTerminal) {
+        consoleTerminal.innerHTML = '';
+        appendToConsole("Reset: Editor code, canvas, and console restored to initial lesson state.", "output");
+      }
+      const cv2d = document.getElementById('wasmCanvas');
+      if (cv2d) {
+        const c2dCtx = cv2d.getContext('2d');
+        if (c2dCtx) c2dCtx.clearRect(0, 0, cv2d.width, cv2d.height);
+      }
+      if (webglAnimId) {
+        cancelAnimationFrame(webglAnimId);
+        webglAnimId = null;
+        isWebglAnimating = false;
+      }
+      if (codeEditor) {
+        codeEditor.style.transition = 'background-color 0.2s';
+        codeEditor.style.backgroundColor = '#e8f4fd';
+        setTimeout(() => {
+          codeEditor.style.backgroundColor = '';
+        }, 250);
       }
     });
   }

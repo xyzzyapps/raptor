@@ -496,12 +496,12 @@ sub set_actuator_speed(ValidPin $pin, ValidDuty $duty) {
 ```
 
 ### 19.4 Binary Size & Footprint Benchmarks
-| Target Profile | Toolchain | Binary Footprint | Heap RAM Footprint | Target Environment |
-| :--- | :--- | :--- | :--- | :--- |
-| **Desktop / Server Full** | Standard Go `gc` | `7.95 MB` (stripped) | ~8 MB | Windows / Linux / macOS |
-| **WebAssembly Tour** | Standard Go `gc` | `13.54 MB` (`2.1 MB` gzipped) | ~12 MB | Web Browsers (WASM) |
-| **WASM TinyGo** | TinyGo LLVM | `320 KB` | ~1.5 MB | Embedded Web & Lightweight WASM |
-| **ESP32 Firmware** | TinyGo LLVM | `380 KB` | `45 KB - 90 KB` | ESP32, ESP32-S3, RP2040 |
+| Target Profile | Toolchain & Profile | Raw Unstripped Size | Optimized Build Size | Over-The-Wire (Gzip / Brotli) | Target Environment |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Desktop / Server Full** | Standard Go `gc` (`-ldflags="-s -w"`) | **11.78 MB** | **7.95 MB** | **2.60 MB** | Windows / Linux / macOS (x86_64/ARM64) |
+| **WebAssembly Tour** | Tree-Shaken Go `gc` (`-ldflags="-s -w"`) | **14.20 MB** | **6.04 MB** | **1.21 MB** (Brotli: ~980 KB) | Modern Web Browsers (WebAssembly) |
+| **WASM TinyGo** *(Experimental)* | TinyGo LLVM (`-target=wasm -no-debug`) | **1.20 MB** | **320 KB** | **78 KB** | Embedded Web & Lightweight In-Browser REPL |
+| **ESP32 Firmware** | TinyGo LLVM (`-target=esp32`) | **850 KB** | **380 KB** | N/A (Direct Flash) | ESP32, ESP32-S3, ESP32-C3, RP2040 |
 
 
 

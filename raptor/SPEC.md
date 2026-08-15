@@ -543,7 +543,830 @@ Raptor provides a complete suite of procedural, Raku-style, and short-circuit co
 - `$val ~~ $pattern`: Smartmatch operator against types, ranges, junctions, regexes, and lists.
 - `any(...)`, `all(...)`, `one(...)`, `none(...)`: Autothreading quantum superposition predicates in conditionals.
 
+---
 
+## 21. Statement Modifiers (Postfix Syntax)
 
+Raptor supports concise postfix statement modifiers evaluated after single statements:
 
+```raptor
+# Postfix conditionals
+$x = 42 if $is_active;
+$status = "RETRY" unless $connected;
 
+# Postfix loops
+$count += 1 while $count < 10;
+$ptr -= 1 until $ptr <= 0;
+
+# Postfix iteration
+say "Item: " ~ $_ for @items;
+say "Topic: " ~ $_ given $score;
+```
+
+---
+
+## 22. Multi-Line Heredoc Literals
+
+Raptor supports multi-line heredocs with variable interpolation, raw strings, and automatic indentation stripping:
+
+```raptor
+# 1. Interpolated Heredoc
+my $name = "Raptor";
+my $doc1 = <<EOF;
+Hello $name!
+Welcome to Heredocs.
+EOF
+
+# 2. Raw Single-Quoted Heredoc (No Interpolation)
+my $doc2 = <<'EOF';
+Hello $name!
+Literal unescaped text.
+EOF
+
+# 3. Indented Heredoc (<<~)
+my $doc3 = <<~EOF;
+    Indented line 1
+    Indented line 2
+    EOF
+# Automatically strips 4 spaces of leading indentation from all lines
+```
+
+---
+
+## 23. Labels, Goto & Subroutine Tail Calls
+
+Raptor provides statement labels and `goto` for direct block jumps and tail-call subroutine dispatch:
+
+```raptor
+# Forward and Backward Jump
+my $retry_count = 0;
+
+RETRY_BLOCK:
+$retry_count += 1;
+if $retry_count < 3 {
+    goto RETRY_BLOCK;
+}
+
+# Subroutine Tail Call
+sub target_handler() {
+    return "Handled target";
+}
+
+sub delegate_handler() {
+    goto &target_handler;
+}
+```
+
+---
+
+## 24. First-Class References & Dereferencing Operators
+
+Raptor implements first-class references to scalar variables, arrays, hashes, and subroutines:
+
+| Construct | Syntax | Description |
+| :--- | :--- | :--- |
+| **Reference Operator** | `\$x`, `\@arr`, `\%hash`, `\&sub` | Creates a reference (`ValRef`) pointing to the target value |
+| **Scalar Dereference** | `$$sref` | Dereferences scalar reference; supports reading and mutation (`$$sref = 50`) |
+| **Array Dereference** | `@$aref`, `$aref->[$idx]` | Dereferences array reference; supports arrow index access and assignment |
+| **Hash Dereference** | `%$href`, `$href->{"key"}` | Dereferences hash reference; supports arrow key access and assignment |
+| **Code Dereference** | `&$cref`, `$cref->(args)` | Invokes callable subroutine reference with arguments |
+| **Type Introspection** | `ref($target)` | Returns `"SCALAR"`, `"ARRAY"`, `"HASH"`, `"CODE"`, `"REF"`, or `""` |
+| **Reference Check** | `is_ref($target)` | Returns `True` if target is a reference, `False` otherwise |
+
+---
+
+## 25. Pluggable Regex Engines & `samre` Adapter
+
+Raptor decouples regular expression compilation and matching via the `RegexEngine` interface:
+
+```mermaid
+classDiagram
+    class RegexEngine {
+        <<interface>>
+        +Name() string
+        +Match(pattern, text) (bool, error)
+        +FindAll(pattern, text) ([]string, error)
+        +Replace(pattern, text, repl) (string, error)
+    }
+    class GoRegexpEngine {
+        +Match()
+        +FindAll()
+        +Replace()
+    }
+    class SamreEngine {
+        +Match()
+        +FindAll()
+        +Replace()
+    }
+    RegexEngine <|.. GoRegexpEngine
+    RegexEngine <|.. SamreEngine
+```
+
+Raptor supports dynamic switching between regex engines at runtime:
+```raptor
+say regex_engine();        # Outputs "GoRegexp"
+regex_engine("samre");     # Switches active backend to samre
+say "hello" =~ "ll";       # Matches using samre engine
+```
+
+---
+
+## 26. Formal Verification & Defensive Programming Uppercase Suite
+
+Raptor provides an uppercase verification keywords suite for Hoare logic contracts, QuickCheck fuzzing, and inline testing:
+
+```raptor
+# 1. Preconditions & Postconditions
+sub divide(Int $a, Int $b) {
+    PRE({ $b != 0 }, "denominator must be non-zero");
+    my $res = $a div $b;
+    POST({ $res >= 0 }, "result invariant");
+    return $res;
+}
+
+# 2. Invariants & Dynamic Checks
+sub deposit(Int $balance, Int $amount) {
+    INVARIANT({ $balance >= 0 }, "balance cannot be negative");
+    PRE({ $amount > 0 }, "deposit amount must be positive");
+    my $new_bal = $balance + $amount;
+    INVARIANT({ $new_bal >= 0 }, "new balance invariant");
+    return $new_bal;
+}
+
+# 3. Assertions & QuickCheck Fuzzing
+ASSERT(10 > 5, "10 is greater than 5");
+CHECK($status == "OK", "status is healthy");
+
+PROPERTY("addition commutativity", sub ($a, $b) {
+    return ($a + $b) == ($b + $a);
+});
+
+# 4. Subtest Suites
+SUBTEST("Math Verification", sub () {
+    plan(2);
+    ok(1 + 1 == 2, "sum assertion");
+    is(2 * 3, 6, "product assertion");
+});
+```
+
+---
+
+## 27. Dynamic Subroutine & Method Dispatch (`AUTOLOAD`)
+
+Raptor provides dynamic fallback subroutine and method dispatch via the `AUTOLOAD` mechanism. When a function or method invocation fails to resolve against the local environment, struct vtable, built-in library, or global symbols, Raptor intercepts the call and dispatches to `AUTOLOAD`:
+
+```mermaid
+flowchart TD
+    Call[Subroutine or Method Invocation] --> Lookup{Symbol Exists?}
+    Lookup -- Yes --> Exec[Execute Subroutine / Method]
+    Lookup -- No --> CheckAuto{AUTOLOAD Defined in Scope / Package?}
+    CheckAuto -- Yes --> SetAuto[Set $AUTOLOAD = Full Target Name]
+    SetAuto --> InvokeAuto[Invoke AUTOLOAD with Original Arguments]
+    InvokeAuto --> Result[Return Result]
+    CheckAuto -- No --> Error[Throw Undefined Symbol Runtime Error]
+```
+
+### Syntax and Example
+
+```raptor
+# 1. Global / Package-level AUTOLOAD
+sub AUTOLOAD($x, $y) {
+    say "Intercepted call to: " ~ $AUTOLOAD;
+    return "Result of " ~ $AUTOLOAD ~ "(" ~ $x ~ ", " ~ $y ~ ")";
+}
+
+# Invoking undefined function triggers AUTOLOAD:
+my $res = missing_calculator(10, 20);
+# $AUTOLOAD contains "main::missing_calculator"
+# Returns "Result of main::missing_calculator(10, 20)"
+```
+
+---
+
+## 28. Scoping Primitives (`my`, `our`, `state`)
+
+Raptor implements a triple-scope variable model:
+
+| Scope Keyword | Lifetime | Visibility | Semantics |
+| :--- | :--- | :--- | :--- |
+| `my` | Lexical Block | Current block and inner closures | Standard lexical variable allocated on the environment frame. |
+| `our` | Package / Global | Current package, aliased lexically | Declares a package-level variable in the active package stash, creating a lexical binding in the current frame pointing to that slot. |
+| `state` | Persistent Static | Lexical scope, preserved across calls | Initialized **only once** on first execution; retains state across subsequent invocations of the block or subroutine. |
+
+### Syntax and Example
+
+```raptor
+# 1. 'my' Lexical Scoping
+my $x = 10;
+if True {
+    my $x = 99; # Shadows outer $x
+}
+# Outer $x remains 10
+
+# 2. 'our' Package Variable
+our $version = "1.0.0";
+sub get_version() {
+    our $version;
+    return $version;
+}
+
+# 3. 'state' Persistent Local Counter
+sub next_id() {
+    state $id = 0;
+    $id += 1;
+    return $id;
+}
+
+say next_id(); # 1
+say next_id(); # 2
+say next_id(); # 3
+```
+
+---
+
+## 29. Package Namespaces & Module Ingestion (`use`)
+
+Raptor isolates symbols into package namespaces using `package` declarations or block enclosures:
+
+```raptor
+# Statement-level package declaration
+package Math::Geometry;
+
+our $pi = 3.14159;
+sub circle_area($r) {
+    return $pi * ($r ** 2);
+}
+
+# Block package declaration
+package Utilities {
+    sub banner($msg) {
+        return "=== " ~ $msg ~ " ===";
+    }
+}
+
+# Calling qualified symbols across namespaces:
+say Math::Geometry::circle_area(10);
+say Utilities::banner("Welcome");
+```
+
+Modules loaded via `use` automatically execute within their package context and register symbols and `AUTOLOAD` fallbacks into the runtime package hierarchy:
+
+```raptor
+use "lib/Services/Payment.rp";
+
+# Normal sub call:
+Payment::process_card("1234", 100);
+
+# Undefined sub call dispatches to Payment::AUTOLOAD:
+Payment::handle_crypto_transfer(50);
+```
+
+---
+
+## 30. Package Symbol Table Reflection & Metaprogramming
+
+Raptor provides complete runtime reflection and mutation for package symbol tables (stashes):
+
+| Metaprogramming Built-in / Stash | Syntax | Description |
+| :--- | :--- | :--- |
+| `package_symbols($pkg)` | `package_symbols("Foo")` | Returns a hash table mapping symbol names to their `Value` references |
+| `package_get($pkg, $name)` | `package_get("Foo", "sub_name")` | Retrieves the symbol value from package stash, or `Nil` if absent |
+| `package_set($pkg, $name, $val)` | `package_set("Foo", "bar", sub () { ... })` | Dynamically installs or replaces a variable/subroutine in the package |
+| `package_delete($pkg, $name)` | `package_delete("Foo", "bar")` | Deletes the symbol from both the package stash and global symbol table |
+| Direct Stash Access | `%Foo::` | Directly evaluates to the package symbol table as a hash map |
+
+### Metaprogramming Example
+
+```raptor
+package DynamicService {
+    our $rate = 1.05;
+}
+
+# Inspect symbols:
+my %stash = %DynamicService::;
+say "Current rate: " ~ %stash{"rate"};
+
+# Dynamically inject new method:
+package_set("DynamicService", "calculate_tax", sub ($amount) {
+    return $amount * DynamicService::$rate;
+});
+
+# Invoke dynamically generated routine:
+my $tax = DynamicService::calculate_tax(1000); # 1050
+```
+
+---
+
+## 31. Shell Command Execution via Backticks & `qx{}`
+
+Raptor provides expressive syntax for invoking external operating system commands, capturing standard output, interpolating variables and expressions, and checking status codes.
+
+### 31.1 Syntax Flavors
+
+```raptor
+# 1. Standard Backtick String
+my $listing = `dir`;
+
+# 2. Variable & Expression Interpolation inside Backticks
+my $pattern = "*.rp";
+my $files = `ls $pattern`;
+
+# 3. qx{} Alternative Delimiter Operators
+my $output1 = qx{echo hello_world};
+my $output2 = qx(git status --short);
+my $output3 = qx/uptime/;
+```
+
+### 31.2 Process Status Integration
+
+- **Output Capture**: The evaluated command string is executed in the system subshell (`powershell` on Windows, `sh` on Unix) and stdout is captured and returned as a `Str` value.
+- **Exit Status `$?`**: Upon completion, the child process exit code is automatically updated in `$?` (`0` on success, non-zero on failure).
+- **Error Description `$!`**: If the process fails or command is not found, `$!` is populated with the error string (or `Nil` on success).
+
+---
+
+## 32. Dynamic Grammars & Rule Declarations
+
+Raptor includes declarative parsing grammar declarations inspired by Raku and MoarVM compunit grammars:
+
+```raptor
+grammar PointGrammar {
+    rule TOP { <point> }
+    rule point { '(' <number> ',' <number> ')' }
+    token number { \d+ }
+}
+```
+
+- `grammar <Name> { ... }`: Defines a dynamic grammar schema object registered in the lexical and global namespaces.
+- `rule <Name> { <pattern> }`: Declares a parsing rule with whitespace-agnostic pattern matching.
+- `token <Name> { <pattern> }`: Declares a lexical token rule with exact whitespace matching.
+- `regex <Name> { <pattern> }`: Declares a regular expression pattern rule.
+
+Grammar objects are first-class instances exposing rule definitions for parsing structured text and AST generation.
+
+---
+
+## 33. Special Dynamic Contextual & Punctuation Variables
+
+Raptor predefines standard Raku-style contextual variables (using the `*` twigil) and Perl 5 punctuation variables in the global environment:
+
+| Variable | Type | Description |
+| :--- | :--- | :--- |
+| `@*ARGS` / `@ARGV` | `Array` | Command-line arguments passed to the script |
+| `%*ENV` / `%ENV` | `Hash` | Host environment variables map |
+| `$*PROGRAM` / `$*PROGRAM-NAME` / `$0` | `Str` | Path or name of the executing script |
+| `$*RAPTOR` | `Hash` | Runtime properties: `$*RAPTOR.version` ("1.0.0"), `.name` ("Raptor"), `.auth` ("xyzzyapps") |
+| `$*KERNEL` | `Hash` | Operating system kernel info: `$*KERNEL.name` (`runtime.GOOS`), `.arch` (`runtime.GOARCH`) |
+| `$*PID` / `$$` | `Int` | Process ID of the running Raptor runtime process |
+| `$?` | `Int` | Exit status of the most recently executed child command or backtick |
+| `$!` | `Str` / `Nil` | Last operating system error, errno, or exception description |
+| `$*CWD` | `Str` | Current working directory |
+| `$*OS` | `Str` | Operating system identifier |
+| `$*EXECUTABLE` | `Str` | Full absolute path of the Raptor runtime binary |
+
+---
+
+## 34. C ABI
+
+Raptor provides full, low-level C-ABI memory layout and NativeCall FFI support for signed integers, unsigned integers, IEEE 754 floating-point numbers, raw pointers, and function pointer closures.
+
+### 34.1 Supported C Types & Memory Alignment
+
+| Raptor Type Specifier | Equivalent C Type | Size | Alignment | Read/Write Representation |
+| :--- | :--- | :--- | :--- | :--- |
+| `uint8`, `byte` | `uint8_t`, `unsigned char` | 1 byte | 1 byte | Unsigned 8-bit integer |
+| `int8`, `char` | `int8_t`, `signed char` | 1 byte | 1 byte | Signed 8-bit integer |
+| `uint16`, `WORD` | `uint16_t`, `unsigned short` | 2 bytes | 2 bytes | Unsigned 16-bit integer |
+| `int16`, `short` | `int16_t`, `short` | 2 bytes | 2 bytes | Signed 16-bit integer |
+| `uint32`, `uint`, `DWORD` | `uint32_t`, `unsigned int`, `unsigned long` | 4 bytes | 4 bytes | Unsigned 32-bit integer |
+| `int32`, `int`, `long` | `int32_t`, `int`, `long` | 4 bytes | 4 bytes | Signed 32-bit integer |
+| `uint64` | `uint64_t`, `unsigned long long` | 8 bytes | 8 bytes | Unsigned 64-bit integer |
+| `int64`, `Int` | `int64_t`, `long long` | 8 bytes | 8 bytes | Signed 64-bit integer |
+| `float32`, `num32` | `float` (IEEE 754 single precision) | 4 bytes | 4 bytes | 32-bit floating point |
+| `float64`, `num64`, `Num`, `double` | `double` (IEEE 754 double precision) | 8 bytes | 8 bytes | 64-bit floating point |
+| `ptr`, `Pointer`, `OpaquePointer` | `void*`, `uintptr_t` | 8 bytes | 8 bytes | Raw 64-bit memory address |
+| `Str`, `CStr` | `const char*` | 8 bytes | 8 bytes | Null-terminated UTF-8 C string |
+| `bool`, `Bool` | `bool`, `_Bool` | 1 byte | 1 byte | Boolean flag (1/0) |
+| `Callable`, `closure` | `void (*fn)()` | 8 bytes | 8 bytes | First-class function pointer / closure |
+
+### 34.2 How C Types Work in Raptor Structs
+
+In `parser.go` (`getCFieldSizeAndAlign`) and `eval.go` (`readCStructField` / `writeCStructField`), struct definitions calculate exact C alignment padding and operate directly on contiguous byte buffers using Go's `unsafe.Pointer`:
+
+```raptor
+# Example: Hardware Vertex and Color Structs with Unsigned and Float fields
+struct Color {
+    uint8 $r;
+    uint8 $g;
+    uint8 $b;
+    uint8 $a;
+}
+struct Vertex3D {
+    float32 $x;
+    float32 $y;
+    float32 $z;
+    uint32  $rgba;
+    float64 $timestamp;
+}
+# Instantiation & Field Mutation
+my $v = Vertex3D.new();
+$v.x = 1.25;
+$v.y = -3.5;
+$v.z = 0.0;
+$v.rgba = 0xFF00AAFF;
+$v.timestamp = 1786746266.12345;
+say "Vertex (x, y, z): (" ~ $v.x ~ ", " ~ $v.y ~ ", " ~ $v.z ~ ")";
+say "RGBA color: " ~ $v.rgba;
+```
+
+### 34.3 NativeCall FFI Integration (is native)
+
+C types map directly to exported shared library symbols (`.dll` / `.so` / `.dylib`), as used in the Raylib 5.5 and SQLite bindings:
+
+```raptor
+# Native C Subroutine Declarations with typed signatures
+sub InitWindow(int32 $width, int32 $height, Str $title) returns void is native('libraylib.dll') { * }
+sub SetTargetFPS(int32 $fps) returns void is native('libraylib.dll') { * }
+sub DrawCircle(int32 $centerX, int32 $centerY, float32 $radius, Color $color) returns void is native('libraylib.dll') { * }
+```
+
+### 34.4 Low-Level Memory Inspection Built-ins
+
+For direct buffer manipulation and raw pointer arithmetic, Raptor provides:
+
+- **Allocation & Lifetime**: `ffi_alloc(bytes)`, `ffi_free(ptr)`, `ffi_pin(buf)`, `ffi_unpin(buf)`
+- **Unsigned Reads/Writes**: `ffi_read_uint8`, `ffi_write_uint8`, `ffi_read_uint16`, `ffi_write_uint16`
+- **Signed Reads/Writes**: `ffi_read_int32`, `ffi_write_int32`, `ffi_read_int64`, `ffi_write_int64`
+- **Float Reads/Writes**: `ffi_read_float64`, `ffi_write_float64`
+- **C Strings**: `ffi_read_str`, `ffi_write_str`
+
+### 34.5 FFI Type Translation Pipeline
+
+Translation between Raptor and native C shared libraries (`.dll`, `.so`, `.dylib`) is handled automatically by the NativeCall FFI subsystem in `ffi.go`:
+
+```mermaid
+flowchart LR
+    subgraph Raptor["Raptor Runtime (*Value)"]
+        R_Int["ValInt (42)"]
+        R_Float["ValFloat (3.14)"]
+        R_Str["ValString ('Hello')"]
+        R_Struct["ValCStruct (Color)"]
+        R_Closure["ValClosure (Callback)"]
+    end
+    subgraph Marshaller["FFI Type Translation Layer"]
+        M_Int["uintptr(42)"]
+        M_Float["Bit-cast float64 to uintptr"]
+        M_Str["Null-terminate & Pin buffer: const char*"]
+        M_Struct["Pack <=8B into register / pass pointer"]
+        M_Closure["Generate C-ABI Callback Trampoline"]
+    end
+    subgraph Native["C ABI (syscall.SyscallN / purego)"]
+        C_Func["Native C Function Symbol"]
+        C_Ret["Register Return (RAX / XMM0)"]
+    end
+    R_Int --> M_Int --> C_Func
+    R_Float --> M_Float --> C_Func
+    R_Str --> M_Str --> C_Func
+    R_Struct --> M_Struct --> C_Func
+    R_Closure --> M_Closure --> C_Func
+    C_Func --> C_Ret --> Unmarshaller["Return Unmarshaller"]
+    Unmarshaller --> R_Out["Raptor Value (Int, Float, Str, Bool, Nil)"]
+```
+
+### 34.6 Declaring Foreign C Signatures
+
+You declare native functions using the `is native('libname')` trait and explicit parameter/return types:
+
+```raptor
+# 1. Scalar integers and null-terminated strings
+sub InitWindow(int32 $width, int32 $height, Str $title) returns void is native('libraylib.dll') { * }
+# 2. C-struct by value (Raylib Color struct = 4 bytes)
+struct Color { uint8 $r; uint8 $g; uint8 $b; uint8 $a; }
+sub DrawRectangle(int32 $x, int32 $y, int32 $w, int32 $h, Color $c) returns void is native('libraylib.dll') { * }
+# 3. Floating point return values
+sub GetFrameTime() returns float32 is native('libraylib.dll') { * }
+# 4. Function pointer callbacks
+sub SetCallback(Callable $handler) returns void is native('libcustom.dll') { * }
+```
+
+### 34.7 Argument Marshalling Rules (Raptor → C)
+
+When invoking a native function, `ffi.go` marshals each Raptor `*Value` into a machine register (`uintptr`):
+
+- **Signed & Unsigned Integers** (`int8` .. `int64`, `uint8` .. `uint64`): Converted directly to machine word register: `uintptr(a.IntVal)`.
+- **Floats** (`float32`, `float64`, `num32`, `num64`): Floating-point bit patterns are bit-cast into integer registers via `*(*uintptr)(unsafe.Pointer(&a.FloatVal))` so hardware registers match IEEE 754 precision.
+- **Strings** (`Str`, `CStr`): Raptor appends a null-terminator byte (`\0`), stores the slice in `pinnedByteSlices` to prevent Go GC sweeps during the call, and passes `uintptr(unsafe.Pointer(&cstr[0]))` as `const char*`.
+- **C Structs** (`ValCStruct`):
+  - **Small Structs** (≤ 8 bytes) (e.g. `Color`, `Vector2` of 2x `float32`): Packed into a single 64-bit register according to the Windows x64 / System V ABI convention.
+  - **Large Structs** (> 8 bytes): Passed by contiguous memory pointer `a.CStructVal.Ptr`.
+- **Closures & Callbacks** (`ValClosure`): Dynamically wraps the Raptor closure into a native C function pointer trampoline (`syscall.NewCallback`), allowing C libraries to call back into pure Raptor subroutines.
+
+### 34.8 Return Value Translation Rules (C → Raptor)
+
+When the C function returns, `ffi.go` reconstructs the native result register (`uintptr`) into a typed Raptor `*Value`:
+
+| C Return Type | Translation in Go Runtime | Raptor Value Type |
+| :--- | :--- | :--- |
+| `void` | Ignores register | `ValNil` (Nil) |
+| `int32`, `int64`, `uint32`, `uint64` | `int64(r1)` | `ValInt` |
+| `bool` | `r1 != 0` | `ValBool` (True / False) |
+| `float32` | `float64(*(*float32)(unsafe.Pointer(&r1)))` | `ValFloat` |
+| `float64`, `double` | `*(*float64)(unsafe.Pointer(&r1))` | `ValFloat` |
+| `Str`, `string`, `char*` | Reads bytes until `\0` into UTF-8 string | `ValString` |
+| `ptr`, `Pointer` | `uintptr(r1)` | `ValNativePtr` |
+
+### 34.9 Direct Low-Level Memory Arithmetic
+
+You can also bypass signature binding and inspect raw memory directly using pointer built-ins:
+
+```raptor
+# Allocate 64 bytes of unmanaged C memory
+my $ptr = ffi_alloc(64);
+# Write unsigned 16-bit and 32-bit integers at specific byte offsets
+ffi_write_uint16($ptr, 0, 0x1234);
+ffi_write_uint32($ptr, 4, 0xDEADBEEF);
+ffi_write_str($ptr, 8, "Zero-Copy Data Buffer");
+# Read values back
+my $u16 = ffi_read_uint16($ptr, 0); # 0x1234
+my $str = ffi_read_str($ptr, 8);    # "Zero-Copy Data Buffer"
+# Free memory buffer
+ffi_free($ptr);
+```
+
+---
+---
+
+## 35. Go ABI
+
+In Raptor, Go FFI and Host Interoperability works across three complementary tiers:
+
+```mermaid
+flowchart TD
+    subgraph Tier1["1. Direct Go Embedding & Host Extension (Zero-Overhead)"]
+        G_Func["Pure Go Function / Handler"]
+        G_Chan["Go Channels (chan *Value)"]
+        G_Go["Go Goroutines (go func())"]
+    end
+    subgraph Tier2["2. Compiled Go Dynamic Libraries (c-shared via is native)"]
+        C_Go["Go with //export FuncName"]
+        C_DLL["Compiled .dll / .so (-buildmode=c-shared)"]
+    end
+    subgraph Tier3["3. MoarVM Go Metamodel Host (moarvm-go)"]
+        M_CU["MoarVM CompUnit v7 Emitter"]
+        M_6M["6Model P6opaque / MVMArray"]
+    end
+    Tier1 --> RaptorRuntime["Raptor Runtime Engine"]
+    Tier2 --> NativeCall["NativeCall FFI Layer"] --> RaptorRuntime
+    Tier3 --> MoarVM["MoarVM Virtual Machine"] --> RaptorRuntime
+```
+
+### 35.1 Tier 1: Direct Go Host Extension & Embedding API
+
+Because Raptor's core runtime engine is written in Go, any Go application can embed the interpreter and expose Go functions, channels, and custom types with zero-copy, zero-overhead host execution:
+
+1. **Defining a Go Built-in Function** — Go functions implement the `BuiltinFunc` signature:
+
+```go
+type BuiltinFunc func(in *Interp, args []*Value) (*Value, error)
+```
+
+2. **Embedding Example (Go ↔ Raptor)**:
+
+```go
+package main
+
+import (
+    "fmt"
+    "raptor"
+)
+
+func main() {
+    // 1. Initialize Raptor Interpreter
+    in := raptor.NewInterp()
+
+    // 2. Register custom Go function into Raptor
+    in.Builtins["go_sha256"] = func(in *raptor.Interp, args []*raptor.Value) (*raptor.Value, error) {
+        if len(args) == 0 {
+            return raptor.StringValue(""), nil
+        }
+        input := args[0].String()
+        hash := customGoSha256(input) // Pure Go standard library logic
+        return raptor.StringValue(hash), nil
+    }
+
+    // 3. Define Go variables in Raptor's Global Environment
+    in.GlobalEnv.Define("$*SERVER_HOST", raptor.StringValue("127.0.0.1"))
+    in.GlobalEnv.Define("$*MAX_CONNS", raptor.IntValue(10000))
+
+    // 4. Execute Raptor script calling Go functions seamlessly
+    val, err := in.Eval(`
+        say "Server Host: " ~ $*SERVER_HOST;
+        my $digest = go_sha256("Raptor + Go FFI");
+        say "Calculated SHA-256 in Go: " ~ $digest;
+    `)
+    if err != nil {
+        panic(err)
+    }
+}
+```
+
+This model is how Raptor's built-in SQLite database, Charmbracelet LipGloss/BubbleTea TUI, TCP/UDP sockets, JSON, and PortAudio subsystems are implemented.
+
+### 35.2 Tier 2: Compiled Go Shared Libraries (-buildmode=c-shared) via NativeCall
+
+You can write standalone Go libraries, export symbols to the C ABI using `//export`, and call them directly from Raptor using `is native('lib.dll')`:
+
+1. **Step 1: Write Go Shared Library** (`mathlib.go`):
+
+```go
+package main
+
+import "C"
+import "math"
+
+//export GoHypot
+func GoHypot(a, b C.double) C.double {
+    return C.double(math.Hypot(float64(a), float64(b)))
+}
+
+//export GoWordCount
+func GoWordCount(cStr *C.char) C.int {
+    goStr := C.GoString(cStr)
+    // Custom Go processing
+    return C.int(len(goStr))
+}
+
+func main() {}
+```
+
+2. **Step 2: Compile to C-Shared Dynamic Library**:
+
+```powershell
+go build -buildmode=c-shared -o mathlib.dll mathlib.go
+```
+
+3. **Step 3: Call from Raptor**:
+
+```raptor
+# Declare native signatures
+sub GoHypot(float64 $a, float64 $b) returns float64 is native('mathlib.dll') { * }
+sub GoWordCount(Str $text) returns int32 is native('mathlib.dll') { * }
+
+# Invoke Go functions with automatic type conversion
+my $hypot = GoHypot(3.0, 4.0);
+say "Hypotenuse via Go FFI: " ~ $hypot; # 5.0
+my $len = GoWordCount("Hello from Raptor to Go!");
+say "String length via Go: " ~ $len;
+```
+
+### 35.3 Tier 3: Bidirectional Type Translation Table
+
+| Go Type (`raptor.Value`) | Raptor Script Representation | Constructor in Go | Extraction in Go |
+| :--- | :--- | :--- | :--- |
+| `int64` | `Int` (e.g. 42, `$*PID`) | `raptor.IntValue(42)` | `v.IntVal` or `in.toInt(v)` |
+| `float64` | `Num` / `Float` (e.g. 3.14) | `raptor.FloatValue(3.14)` | `v.FloatVal` or `in.toFloat(v)` |
+| `string` | `Str` (e.g. "hello") | `raptor.StringValue("hello")` | `v.StrVal` or `v.String()` |
+| `bool` | `Bool` (True / False) | `raptor.BoolValue(true)` | `v.BoolVal` or `v.IsTrue()` |
+| `[]*Value` | `Array` (`[1, 2, 3]`, `@arr`) | `raptor.ArrayValue(elems)` | `v.ArrayVal` |
+| `map[string]*Value` | `Hash` (`{a => 1}`, `%h`) | `raptor.HashValue(pairs)` | `v.HashVal` |
+| `uintptr` / C Struct | `NativePtr` / `CStruct` | `raptor.NativePtrValue(ptr)` | `v.PtrVal` |
+| Go Channel (`chan *Value`) | `Channel` (`$ch.send()`, `$ch.recv()`) | `raptor.ChannelValue(ch)` | `v.ChannelVal` |
+| Go Promise / Async | `Promise` (`$p.await()`, `$p.then()`) | `raptor.PromiseValue(p)` | `v.PromiseVal` |
+
+---
+
+## 36. Moar VM Interaction
+
+MoarVM (Metamodel On A Runtime Virtual Machine) is the 64-bit virtual machine with a tracing JIT compiler and generational GC that serves as the bytecode execution target and cross-language runtime for Raptor.
+
+Through the adjacent `moarvm-go` engine and `bin/moar.dll`, Raptor integrates with MoarVM across four key architectural layers:
+
+```mermaid
+flowchart TD
+    subgraph Frontend["Raptor Frontend & AST"]
+        Source["Raptor Source (.rp)"]
+        Parser["Parser & Dynamic Grammars"]
+        AST["Typed AST & Continuous Invariants"]
+    end
+    subgraph Compiler["MoarVM Bytecode Emitter (moarvm-go)"]
+        CompUnit["CompUnit v7 Emitter"]
+        Registers["Register Allocator (I, N, S, O)"]
+        SC["Serialization Contexts (SC)"]
+        Frames["Frame Descriptors & Bytecode Ops"]
+    end
+    subgraph Runtime["Native MoarVM Engine (bin/moar.dll)"]
+        JIT["64-bit Tracing JIT Engine"]
+        GC["Generational Garbage Collector"]
+        SixModel["6Model Metamodel (P6opaque, MVMArray, MVMHash)"]
+    end
+    subgraph Interop["Cross-Language Module Interop"]
+        RakuMod["Raku Modules (.moarvm)"]
+        TclMod["Tcl Modules (.moarvm)"]
+        RaptorMod["Raptor Modules (.moarvm)"]
+    end
+    Source --> Parser --> AST --> CompUnit
+    CompUnit --> Registers --> Frames --> BytecodeFile[".moarvm Bytecode Binary"]
+    BytecodeFile --> JIT
+    JIT <--> SixModel
+    Interop --> JIT
+```
+
+### 36.1 CompUnit v7 Bytecode Compilation (raptor compile)
+
+Raptor compiles source code directly into valid binary MoarVM Compilation Units (`.moarvm`):
+
+```bash
+# Compile Raptor script into MoarVM binary bytecode
+raptor compile app.rp -o app.moarvm
+# Execute directly on the native MoarVM JIT engine
+raptor run app.moarvm
+```
+
+The compiler emits:
+
+- **String Heap**: Deduplicated string tables.
+- **Serialization Contexts (SC)**: Type objects, package symbols, and constant structures.
+- **Frame Tables & Register Allocation**: Maps variables to MoarVM typed registers:
+  - `I`: 64-bit Signed Integer registers (`int64`, `int32`, `bool`)
+  - `N`: 64-bit IEEE 754 Floating-Point registers (`num64`, `float64`)
+  - `S`: MoarVM Unicode String object registers
+  - `O`: 6Model Metamodel Object references (`P6opaque`, `MVMArray`, `MVMHash`)
+
+### 36.2 The 6Model Metamodel Mapping
+
+Raptor's core types map directly to MoarVM's 6Model representations:
+
+| Raptor Concept | MoarVM 6Model Representation | Behavior |
+| :--- | :--- | :--- |
+| `struct Point { ... }` | `P6opaque` | Zero-overhead C-compatible contiguous memory record with fixed field offsets |
+| `@array` | `MVMArray` | Dynamic compact typed array with JIT bounds-check elimination |
+| `%hash` | `MVMHash` | High-performance hash table with fast string key lookups |
+| `sub`, `multi sub` | `MVMCode` | JIT-compiled bytecode frames with multiple dispatch tables |
+| `my`, `our`, `state` | `MVMContext` | Lexical scopes and persistent static local memory cells |
+
+### 36.3 Cross-Language Dynamic Module Interoperability
+
+Because MoarVM provides a universal bytecode format, Raptor can dynamically load pre-compiled `.moarvm` modules authored in any MoarVM-targeted language (such as Raku or Tcl):
+
+```raptor
+# ==============================================================================
+# Cross-Language MoarVM Interoperability Demo
+# ==============================================================================
+# 1. Dynamically load a compiled MoarVM bytecode library (e.g. from Tcl/Raku)
+my $mod = moar_load_module("math_engine.moarvm");
+say "Module Name: " ~ $mod{"name"};
+say "Source HLL:  " ~ $mod{"hll"};
+# 2. Inspect exported symbols
+for @($mod{"symbols"}) -> $sym {
+    say "Found exported symbol: " ~ $sym;
+}
+# 3. Invoke foreign procedure directly through MoarVM dispatch
+my $result = moar_call_symbol($mod, "calculate_physics", 15.5, 9.8);
+say "Result from MoarVM: " ~ $result;
+# 4. Enforce continuous Raptor refinement invariants on the foreign result
+subset PositiveNum where { $_ > 0 };
+my PositiveNum $safe_val = $result;
+# 5. Chain with Raptor's Uniform Function Call Syntax (UFCS)
+sub scale_factor($n) { return $n * 1.5; }
+say "Scaled result: " ~ $safe_val.scale_factor();
+```
+
+### 36.4 Embedding MoarVM in Go (moarvm-go)
+
+In Go, the engine can be directly controlled to execute bytecode, inspect memory frames, and register custom host ops:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "moarvm-go/engine"
+)
+
+func main() {
+    // 1. Initialize MoarVM JIT runtime
+    vm, err := moargo.New(moargo.Config{
+        DLLPath:  "raptor/bin/moar.dll",
+        ProgName: "raptor_host",
+    })
+    if err != nil {
+        panic(err)
+    }
+    ctx := context.Background()
+    vm.Init(ctx)
+    defer vm.Destroy()
+
+    // 2. Load and execute pre-compiled CompUnit bytecode
+    cu, err := vm.LoadCompUnitFile("app.moarvm")
+    if err != nil {
+        panic(err)
+    }
+
+    // 3. Invoke entry point frame
+    result, err := vm.RunCompUnit(cu)
+    fmt.Printf("MoarVM execution completed: %v\n", result)
+}
+```
+
+---

@@ -1,0 +1,9 @@
+package AutoService;
+
+sub greet($name) {
+    return "Hello, " ~ $name ~ "!";
+}
+
+sub AUTOLOAD($x, $y) {
+    return "AutoService::AUTOLOAD -> " ~ $AUTOLOAD ~ " (" ~ $x ~ ", " ~ $y ~ ")";
+}

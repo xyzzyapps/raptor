@@ -5,4 +5,4 @@ sub fib($n) {
     return fib($n - 1) + fib($n - 2);
 }
 my $res = fib(25);
-say "Raku5 Fib(25) = " ~ $res;
+say "Raptor Fib(25) = " ~ $res;

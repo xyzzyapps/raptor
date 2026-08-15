@@ -4,21 +4,43 @@
 
 # Raptor
 
-Raptor is a post-LLM dynamic language — a Perl 5 subset of Raku targeting **MoarVM** in Go. Engineered for AI-assisted software generation, it combines high token density, verification-first contracts, continuous assignment predicate invariants, Uniform Function Call Syntax (UFCS), C-ABI struct memory, Charmbracelet terminal styling, literate programming with PodLit, and standalone binary packaging (`raptor pack`).
+Raptor is a post-LLM dynamic language — a Perl 5 subset of Raku targeting **MoarVM** in Go. Engineered for AI-assisted software generation, it combines high token density, verification-first contracts, continuous assignment predicate invariants, Uniform Function Call Syntax (UFCS), backticks & shell execution (`` `...` ``, `qx{}`), dynamic grammars (`grammar`, `rule`, `token`, `regex`), standard contextual variables (`@*ARGS`, `%*ENV`, `$*RAPTOR`, `$*KERNEL`, `$*PID`, `$?`, `$!`), statement modifiers, heredocs, labels and goto, first-class references, dynamic `AUTOLOAD` dispatch, lexical and persistent variable scoping (`my`, `our`, `state`), package namespaces and symbol table metaprogramming (`%Package::`, `package_symbols`), pluggable regex engines (`samre`), C-ABI struct memory, Charmbracelet terminal styling, literate programming with PodLit, and standalone binary packaging (`raptor pack`).
 
-1. **Uniform Function Call Syntax (UFCS)**:
-   Invoke any subroutine or multi-sub candidate using method invocation syntax on the first argument (`$val.func()`, `20.double()`, `"raptor".uc()`, `@list.map(...)`).
-2. **Charmbracelet TUI & Terminal Styling Engine**:
-   Lip Gloss ANSI 24-bit TrueColor styling (`tui_style`), framed boxes (`tui_box`), data tables (`tui_table`), progress bars (`tui_progress`), terminal markdown rendering (`tui_markdown`), and Bubble Tea state-machine event loops (`tui_app_run`).
-3. **PortAudio Sound Engine & Waveform Synthesizer**:
+1. **Backtick & Shell Command Execution**:
+   Expressive `` `cmd` `` and `qx{cmd}` process execution with variable and expression interpolation, exit status tracking (`$?`), and error reporting (`$!`).
+2. **Declarative Dynamic Grammars**:
+   Parsing grammars (`grammar Name { rule TOP { ... } token id { \d+ } }`) with rule, token, and regex definitions.
+3. **Special Dynamic Contextual Variables**:
+   Standard Raku contextual variables (`@*ARGS`, `%*ENV`, `$*PROGRAM`, `$*RAPTOR.version`, `$*KERNEL.name`, `$*PID`) and punctuation variables (`$?`, `$!`, `$$`, `$0`).
+4. **Dynamic Subroutine & Method Dispatch (`AUTOLOAD`)**:
+   Fallback dispatch for unresolved functions and methods with `$AUTOLOAD` target string binding and parameter forwarding.
+5. **Scoping Suite (`my`, `our`, `state`)**:
+   Standard lexical block scopes (`my`), package-level variables aliased into lexical scope (`our`), and persistent static local variables (`state`) preserved across calls.
+6. **Package Namespaces & Symbol Metaprogramming**:
+   Package declarations (`package Foo;`, `package Foo { ... }`, `unit module Foo;`), direct `%Package::` stash reflection, and metaprogramming built-ins (`package_symbols`, `package_set`, `package_get`, `package_delete`).
+7. **Statement Modifiers & Heredocs**:
+   Postfix `if`, `unless`, `while`, `until`, `for`, and `given` modifiers, alongside multi-line interpolated, raw, and auto-indented (`<<~EOF`) heredoc strings.
+8. **First-Class References & Dereferencing**:
+   Full reference support (`\$s`, `\@a`, `\%h`, `\&sub`) with dereferencing (`$$s`, `@$a`, `$a->[0]`, `$h->{"k"}`, `$sub->()`), `ref()`, and `is_ref()`.
+9. **Labels, Goto & Subroutine Tail Calls**:
+   Direct block jumps (`LABEL:`, `goto LABEL;`) and seamless subroutine tail-call forwarding (`goto &target_sub;`).
+10. **Pluggable Regex Engines & `samre` Adapter**:
+    Unified `RegexEngine` interface supporting Go standard regexp and `samre` engines (`regex_engine("samre")`).
+11. **Defensive Programming & Uppercase Verification Suite**:
+    Hoare logic contracts and QuickCheck fuzzing: `TEST`, `PRE`, `POST`, `INVARIANT`, `PROPERTY`, `SUBTEST`, `CHECK`, `ASSERT`.
+12. **Uniform Function Call Syntax (UFCS)**:
+    Invoke any subroutine or multi-sub candidate using method invocation syntax on the first argument (`$val.func()`, `20.double()`, `"raptor".uc()`, `@list.map(...)`).
+13. **Charmbracelet TUI & Terminal Styling Engine**:
+    Lip Gloss ANSI 24-bit TrueColor styling (`tui_style`), framed boxes (`tui_box`), data tables (`tui_table`), progress bars (`tui_progress`), terminal markdown rendering (`tui_markdown`), and Bubble Tea state-machine event loops (`tui_app_run`).
+14. **PortAudio Sound Engine & Waveform Synthesizer**:
     Real-time audio engine integration (`pa_init`, `pa_terminate`, `pa_device_count`, `pa_device_info`, `pa_sine_wave`).
-4. **Native SQLite Database & Fast JSON**:
+15. **Native SQLite Database & Fast JSON**:
     Embedded database support (`sqlite_open`, `sqlite_exec`, `sqlite_query`, `sqlite_close`) and JSON serialization (`to_json`, `from_json`).
-5. **Procedural Sockets Networking (TCP & UDP)**:
-   Fast, low-level socket primitives: `tcp_listen`, `tcp_accept`, `tcp_connect`, `tcp_send`, `tcp_recv`, `tcp_close`, `udp_bind`, `udp_send`, `udp_recv`, and `tcp_close`.
-6. **Sockets-Based HTTP/1.1 & RFC 6455 WebSockets**:
+16. **Procedural Sockets Networking (TCP & UDP)**:
+    Fast, low-level socket primitives: `tcp_listen`, `tcp_accept`, `tcp_connect`, `tcp_send`, `tcp_recv`, `tcp_close`, `udp_bind`, `udp_send`, `udp_recv`.
+17. **Sockets-Based HTTP/1.1 & RFC 6455 WebSockets**:
     Direct protocol implementation over sockets: `http_get`, `http_post`, `http_server_start`, `ws_frame_text`, `ws_parse_frame`.
-7. **Raylib 5.5 Hardware Graphics Engine Integration**:
+18. **Raylib 5.5 Hardware Graphics Engine Integration**:
     60 FPS desktop window rendering with Windows x64 ABI struct-by-value packing and UTF-8 string marshalling ([examples/raylib_game.rp](examples/raylib_game.rp)).
 
 Licensed under the **Artistic License 2.0**.

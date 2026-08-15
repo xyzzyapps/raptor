@@ -8,24 +8,32 @@ import (
 
 // Lexer scans source code into a token stream for Raku5.
 type Lexer struct {
-	src  []rune
-	pos  int
-	line int
-	col  int
+	src     []rune
+	pos     int
+	line    int
+	col     int
+	pending []Token
 }
 
 // NewLexer creates a new Lexer instance.
 func NewLexer(input string) *Lexer {
 	return &Lexer{
-		src:  []rune(input),
-		pos:  0,
-		line: 1,
-		col:  1,
+		src:     []rune(input),
+		pos:     0,
+		line:    1,
+		col:     1,
+		pending: nil,
 	}
 }
 
 // NextToken returns the next Token from the input stream.
 func (l *Lexer) NextToken() Token {
+	if len(l.pending) > 0 {
+		tok := l.pending[0]
+		l.pending = l.pending[1:]
+		return tok
+	}
+
 	l.skipWhitespaceAndComments()
 
 	if l.pos >= len(l.src) {
@@ -38,8 +46,18 @@ func (l *Lexer) NextToken() Token {
 
 	// Sigils: $, @, %
 	if ch == '$' || ch == '@' || ch == '%' {
-		if l.pos+1 < len(l.src) && (unicode.IsLetter(l.src[l.pos+1]) || l.src[l.pos+1] == '_' || l.src[l.pos+1] == '*' || l.src[l.pos+1] == '!') {
+		if l.pos+1 < len(l.src) && (unicode.IsLetter(l.src[l.pos+1]) || l.src[l.pos+1] == '_' || l.src[l.pos+1] == '*' || l.src[l.pos+1] == '!' || l.src[l.pos+1] == '?' || unicode.IsDigit(l.src[l.pos+1]) || (ch == '$' && l.src[l.pos+1] == '$')) {
 			return l.scanVariable()
+		}
+	}
+
+	// Heredocs: <<EOF, <<'EOF', <<"EOF", <<~EOF, <<~'EOF', <<~"EOF"
+	if ch == '<' && l.pos+1 < len(l.src) && l.src[l.pos+1] == '<' {
+		if l.pos+2 < len(l.src) {
+			nextCh := l.src[l.pos+2]
+			if unicode.IsLetter(nextCh) || nextCh == '_' || nextCh == '~' || nextCh == '\'' || nextCh == '"' {
+				return l.scanHeredoc()
+			}
 		}
 	}
 
@@ -53,6 +71,11 @@ func (l *Lexer) NextToken() Token {
 		return l.scanString(ch)
 	}
 
+	// Backticks (command execution)
+	if ch == '`' {
+		return l.scanBacktick()
+	}
+
 	// Identifiers & Keywords & Types
 	if unicode.IsLetter(ch) || ch == '_' {
 		return l.scanIdentOrKeyword()
@@ -64,6 +87,10 @@ func (l *Lexer) NextToken() Token {
 		if triplet == "//=" {
 			l.advance(); l.advance(); l.advance()
 			return Token{Type: TokDefinedOrAssign, Literal: "//=", Line: curLine, Col: curCol}
+		}
+		if triplet == "..." {
+			l.advance(); l.advance(); l.advance()
+			return Token{Type: TokEllipsis, Literal: "...", Line: curLine, Col: curCol}
 		}
 	}
 
@@ -220,8 +247,14 @@ func (l *Lexer) NextToken() Token {
 		return Token{Type: TokRBracket, Literal: "]", Line: curLine, Col: curCol}
 	case '&':
 		return Token{Type: TokSubRef, Literal: "&", Line: curLine, Col: curCol}
+	case '$':
+		return Token{Type: TokScalar, Literal: "$", Line: curLine, Col: curCol}
+	case '@':
+		return Token{Type: TokArray, Literal: "@", Line: curLine, Col: curCol}
 	case '?':
 		return Token{Type: TokQuestion, Literal: "?", Line: curLine, Col: curCol}
+	case '\\':
+		return Token{Type: TokBackslash, Literal: "\\", Line: curLine, Col: curCol}
 
 	default:
 		return Token{Type: TokError, Literal: fmt.Sprintf("unexpected character %c", ch), Line: curLine, Col: curCol}
@@ -264,14 +297,29 @@ func (l *Lexer) scanVariable() Token {
 	var sb strings.Builder
 	sb.WriteRune(sigil)
 
+	if sigil == '$' && l.pos < len(l.src) && l.src[l.pos] == '$' && (l.pos+1 >= len(l.src) || (!unicode.IsLetter(l.src[l.pos+1]) && l.src[l.pos+1] != '_' && l.src[l.pos+1] != '{' && l.src[l.pos+1] != '$')) {
+		sb.WriteRune('$')
+		l.advance()
+		return Token{Type: TokScalar, Literal: "$$", Line: curLine, Col: curCol}
+	}
+
 	if l.pos < len(l.src) && (l.src[l.pos] == '*' || l.src[l.pos] == '!' || l.src[l.pos] == '?') {
 		sb.WriteRune(l.src[l.pos])
 		l.advance()
 	}
 
-	for l.pos < len(l.src) && (unicode.IsLetter(l.src[l.pos]) || unicode.IsDigit(l.src[l.pos]) || l.src[l.pos] == '_') {
-		sb.WriteRune(l.src[l.pos])
-		l.advance()
+	for l.pos < len(l.src) {
+		ch := l.src[l.pos]
+		if unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_' || (ch == '-' && l.pos+1 < len(l.src) && unicode.IsLetter(l.src[l.pos+1])) {
+			sb.WriteRune(ch)
+			l.advance()
+		} else if ch == ':' && l.pos+1 < len(l.src) && l.src[l.pos+1] == ':' {
+			sb.WriteString("::")
+			l.advance()
+			l.advance()
+		} else {
+			break
+		}
 	}
 
 	literal := sb.String()
@@ -395,18 +443,132 @@ func (l *Lexer) scanString(quote rune) Token {
 	return Token{Type: tokType, Literal: sb.String(), Line: curLine, Col: curCol}
 }
 
+func (l *Lexer) scanBacktick() Token {
+	curLine := l.line
+	curCol := l.col
+	l.advance() // skip opening `
+
+	var sb strings.Builder
+	hasInterp := false
+	for l.pos < len(l.src) {
+		ch := l.src[l.pos]
+		if ch == '`' {
+			l.advance() // skip closing `
+			break
+		}
+		if ch == '\\' && l.pos+1 < len(l.src) {
+			l.advance()
+			next := l.src[l.pos]
+			switch next {
+			case '`':
+				sb.WriteRune('`')
+			case 'n':
+				sb.WriteRune('\n')
+			case 't':
+				sb.WriteRune('\t')
+			case 'r':
+				sb.WriteRune('\r')
+			case '\\':
+				sb.WriteRune('\\')
+			default:
+				sb.WriteRune(next)
+			}
+			l.advance()
+			continue
+		}
+		if ch == '$' || ch == '{' {
+			hasInterp = true
+		}
+		sb.WriteRune(ch)
+		l.advance()
+	}
+
+	tokType := TokBacktick
+	if hasInterp {
+		tokType = TokInterpBacktick
+	}
+	return Token{Type: tokType, Literal: sb.String(), Line: curLine, Col: curCol}
+}
 
 func (l *Lexer) scanIdentOrKeyword() Token {
 	curLine := l.line
 	curCol := l.col
 	var sb strings.Builder
 
-	for l.pos < len(l.src) && (unicode.IsLetter(l.src[l.pos]) || unicode.IsDigit(l.src[l.pos]) || l.src[l.pos] == '_' || l.src[l.pos] == ':') {
-		sb.WriteRune(l.src[l.pos])
-		l.advance()
+	for l.pos < len(l.src) {
+		ch := l.src[l.pos]
+		if unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_' {
+			sb.WriteRune(ch)
+			l.advance()
+		} else if ch == ':' {
+			if l.pos+1 < len(l.src) && l.src[l.pos+1] == ':' {
+				sb.WriteString("::")
+				l.advance()
+				l.advance()
+			} else if l.pos+1 < len(l.src) && l.src[l.pos+1] == '<' {
+				sb.WriteRune(ch)
+				l.advance()
+			} else if sb.String() == "infix" || sb.String() == "prefix" || sb.String() == "postfix" || sb.String() == "circumfix" || sb.String() == "postcircumfix" {
+				sb.WriteRune(ch)
+				l.advance()
+			} else {
+				break
+			}
+		} else {
+			break
+		}
 	}
 
 	lit := sb.String()
+
+	// Check for qx command execution operator: qx{cmd}, qx/cmd/, qx(cmd), qx[cmd]
+	if lit == "qx" && l.pos < len(l.src) && (l.src[l.pos] == '{' || l.src[l.pos] == '/' || l.src[l.pos] == '(' || l.src[l.pos] == '[' || l.src[l.pos] == '!' || l.src[l.pos] == '\'' || l.src[l.pos] == '"' || l.src[l.pos] == '`') {
+		delim := l.src[l.pos]
+		closeDelim := delim
+		switch delim {
+		case '{':
+			closeDelim = '}'
+		case '(':
+			closeDelim = ')'
+		case '[':
+			closeDelim = ']'
+		case '<':
+			closeDelim = '>'
+		}
+		l.advance()
+		var cmdSb strings.Builder
+		hasInterp := false
+		depth := 1
+		for l.pos < len(l.src) {
+			ch := l.src[l.pos]
+			if delim != closeDelim && ch == delim {
+				depth++
+			} else if ch == closeDelim {
+				depth--
+				if depth == 0 {
+					l.advance()
+					break
+				}
+			}
+			if ch == '\\' && l.pos+1 < len(l.src) {
+				l.advance()
+				cmdSb.WriteRune(l.src[l.pos])
+				l.advance()
+				continue
+			}
+			if ch == '$' || ch == '{' {
+				hasInterp = true
+			}
+			cmdSb.WriteRune(ch)
+			l.advance()
+		}
+		tokType := TokBacktick
+		if hasInterp {
+			tokType = TokInterpBacktick
+		}
+		return Token{Type: tokType, Literal: cmdSb.String(), Line: curLine, Col: curCol}
+	}
+
 	// Check for operator syntax: infix:<+>, prefix:<->, postfix:<!>, postcircumfix:<[ ]>, circumfix:<[ ]>
 	if (strings.HasPrefix(lit, "infix:") || strings.HasPrefix(lit, "prefix:") || strings.HasPrefix(lit, "postfix:") || strings.HasPrefix(lit, "postcircumfix:") || strings.HasPrefix(lit, "circumfix:") || lit == "infix" || lit == "prefix" || lit == "postfix" || lit == "postcircumfix") && l.pos < len(l.src) && (l.src[l.pos] == '<' || (l.pos+1 < len(l.src) && l.src[l.pos] == ':' && l.src[l.pos+1] == '<')) {
 		if l.src[l.pos] == ':' {
@@ -434,6 +596,22 @@ func (l *Lexer) scanIdentOrKeyword() Token {
 		return Token{Type: TokMy, Literal: lit, Line: curLine, Col: curCol}
 	case "our":
 		return Token{Type: TokOur, Literal: lit, Line: curLine, Col: curCol}
+	case "state":
+		return Token{Type: TokState, Literal: lit, Line: curLine, Col: curCol}
+	case "package":
+		return Token{Type: TokPackage, Literal: lit, Line: curLine, Col: curCol}
+	case "module":
+		return Token{Type: TokModule, Literal: lit, Line: curLine, Col: curCol}
+	case "unit":
+		return Token{Type: TokUnit, Literal: lit, Line: curLine, Col: curCol}
+	case "grammar":
+		return Token{Type: TokGrammar, Literal: lit, Line: curLine, Col: curCol}
+	case "rule":
+		return Token{Type: TokRule, Literal: lit, Line: curLine, Col: curCol}
+	case "token":
+		return Token{Type: TokToken, Literal: lit, Line: curLine, Col: curCol}
+	case "regex":
+		return Token{Type: TokRegex, Literal: lit, Line: curLine, Col: curCol}
 	case "sub":
 		return Token{Type: TokSub, Literal: lit, Line: curLine, Col: curCol}
 	case "multi":
@@ -472,6 +650,8 @@ func (l *Lexer) scanIdentOrKeyword() Token {
 		return Token{Type: TokOr, Literal: lit, Line: curLine, Col: curCol}
 	case "not":
 		return Token{Type: TokNot, Literal: lit, Line: curLine, Col: curCol}
+	case "so":
+		return Token{Type: TokSo, Literal: lit, Line: curLine, Col: curCol}
 	case "x":
 		return Token{Type: TokRepeat, Literal: lit, Line: curLine, Col: curCol}
 	case "xx":
@@ -514,8 +694,139 @@ func (l *Lexer) scanIdentOrKeyword() Token {
 		return Token{Type: TokAfter, Literal: lit, Line: curLine, Col: curCol}
 	case "around":
 		return Token{Type: TokAround, Literal: lit, Line: curLine, Col: curCol}
+	case "goto":
+		return Token{Type: TokGoto, Literal: lit, Line: curLine, Col: curCol}
 
 	default:
 		return Token{Type: TokIdent, Literal: lit, Line: curLine, Col: curCol}
+	}
+}
+
+func (l *Lexer) scanHeredoc() Token {
+	curLine := l.line
+	curCol := l.col
+	l.advance() // skip '<'
+	l.advance() // skip '<'
+
+	isIndented := false
+	if l.pos < len(l.src) && l.src[l.pos] == '~' {
+		isIndented = true
+		l.advance()
+	}
+
+	quote := rune(0)
+	if l.pos < len(l.src) && (l.src[l.pos] == '\'' || l.src[l.pos] == '"') {
+		quote = l.src[l.pos]
+		l.advance()
+	}
+
+	var tagBuilder strings.Builder
+	for l.pos < len(l.src) {
+		ch := l.src[l.pos]
+		if quote != 0 {
+			if ch == quote {
+				l.advance()
+				break
+			}
+			tagBuilder.WriteRune(ch)
+			l.advance()
+		} else {
+			if unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_' {
+				tagBuilder.WriteRune(ch)
+				l.advance()
+			} else {
+				break
+			}
+		}
+	}
+
+	tag := tagBuilder.String()
+	if tag == "" {
+		return Token{Type: TokError, Literal: "empty heredoc tag", Line: curLine, Col: curCol}
+	}
+
+	// Check if header line has trailing tokens (e.g. semicolon)
+	hasTrailingSemicolon := false
+	for l.pos < len(l.src) && l.src[l.pos] != '\n' {
+		if l.src[l.pos] == ';' {
+			hasTrailingSemicolon = true
+		}
+		l.advance()
+	}
+	if l.pos < len(l.src) && l.src[l.pos] == '\n' {
+		l.advance()
+	}
+
+	// Collect lines until closing delimiter tag
+	var lines []string
+	for l.pos < len(l.src) {
+		var lineBuilder strings.Builder
+		for l.pos < len(l.src) && l.src[l.pos] != '\n' {
+			lineBuilder.WriteRune(l.src[l.pos])
+			l.advance()
+		}
+		if l.pos < len(l.src) && l.src[l.pos] == '\n' {
+			l.advance()
+		}
+		rawLine := lineBuilder.String()
+		trimmed := strings.TrimSpace(rawLine)
+		if trimmed == tag {
+			break
+		}
+		lines = append(lines, rawLine)
+	}
+
+	// If indented heredoc (<<~), calculate and strip common indentation
+	if isIndented && len(lines) > 0 {
+		minIndent := -1
+		for _, ln := range lines {
+			if strings.TrimSpace(ln) == "" {
+				continue
+			}
+			indent := 0
+			for _, r := range ln {
+				if r == ' ' || r == '\t' {
+					indent++
+				} else {
+					break
+				}
+			}
+			if minIndent == -1 || indent < minIndent {
+				minIndent = indent
+			}
+		}
+		if minIndent > 0 {
+			for i, ln := range lines {
+				if len(ln) >= minIndent {
+					lines[i] = ln[minIndent:]
+				}
+			}
+		}
+	}
+
+	body := strings.Join(lines, "\n")
+	if len(lines) > 0 {
+		body += "\n"
+	}
+
+	if hasTrailingSemicolon {
+		l.pending = append(l.pending, Token{
+			Type:    TokSemicolon,
+			Literal: ";",
+			Line:    curLine,
+			Col:     curCol,
+		})
+	}
+
+	tokType := TokString
+	if quote != '\'' && (strings.Contains(body, "$") || strings.Contains(body, "@") || strings.Contains(body, "%")) {
+		tokType = TokInterpString
+	}
+
+	return Token{
+		Type:    tokType,
+		Literal: body,
+		Line:    curLine,
+		Col:     curCol,
 	}
 }

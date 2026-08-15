@@ -61,18 +61,27 @@ type BlockStmt struct {
 func (b *BlockStmt) node() {}
 func (b *BlockStmt) stmt() {}
 
-// VarDeclStmt represents a 'my' or 'our' variable declaration.
+// VarDeclStmt represents a 'my', 'our', or 'state' variable declaration.
 type VarDeclStmt struct {
-	Scope string // "my" or "our"
+	Scope string // "my", "our", or "state"
 	Type  string // "Int", "Str", etc. (empty for untyped)
 	Name  string // "$x", "@a", "%h"
 	Where Expr   // optional where constraint: { $_ > 0 }
 	Value Expr   // optional initializer
 }
 
-
 func (v *VarDeclStmt) node() {}
 func (v *VarDeclStmt) stmt() {}
+
+// PackageDeclStmt represents a 'package Foo;' or 'package Foo { ... }' or 'module Foo;' declaration.
+type PackageDeclStmt struct {
+	Name   string     // e.g. "Math::Utils", "Foo"
+	IsUnit bool       // 'unit module Foo;' / 'unit package Foo;'
+	Body   *BlockStmt // optional block scope
+}
+
+func (p *PackageDeclStmt) node() {}
+func (p *PackageDeclStmt) stmt() {}
 
 // AssignStmt represents variable, index, or hash element assignment.
 type AssignStmt struct {
@@ -413,5 +422,118 @@ type AdviceHookStmt struct {
 
 func (a *AdviceHookStmt) node() {}
 func (a *AdviceHookStmt) stmt() {}
+
+// ModifierKind represents the kind of statement modifier.
+type ModifierKind int
+
+const (
+	ModIf ModifierKind = iota
+	ModUnless
+	ModWhile
+	ModUntil
+	ModFor
+	ModGiven
+)
+
+// ModifierStmt represents postfix statement modifiers:
+// $x = 10 if $cond;
+// return $err unless $valid;
+// $i++ while $i < 10;
+// $i++ until $i >= 10;
+// say $_ for @list;
+// say $x given $val;
+type ModifierStmt struct {
+	Kind      ModifierKind
+	Target    Stmt // The modified statement (e.g. ExprStmt, AssignStmt, ReturnStmt)
+	Condition Expr // The condition or iterable expression
+	VarName   string // Optional variable name for 'for', defaults to "$_"
+}
+
+func (m *ModifierStmt) node() {}
+func (m *ModifierStmt) stmt() {}
+
+// LabelStmt represents a statement label: LABEL: or LABEL: stmt
+type LabelStmt struct {
+	Name string
+	Stmt Stmt
+}
+
+func (l *LabelStmt) node() {}
+func (l *LabelStmt) stmt() {}
+
+// GotoStmt represents a goto jump: goto LABEL; or goto &subname;
+type GotoStmt struct {
+	Target string
+	IsSub  bool
+}
+
+func (g *GotoStmt) node() {}
+func (g *GotoStmt) stmt() {}
+
+// RefExpr represents taking a reference: \$scalar, \@arr, \%hash, \&sub
+type RefExpr struct {
+	Expr Expr
+}
+
+func (r *RefExpr) node() {}
+func (r *RefExpr) expr() {}
+
+// DerefKind defines the flavor of dereference.
+type DerefKind int
+
+const (
+	DerefScalar     DerefKind = iota // $$ref or ${$ref}
+	DerefArray                       // @$ref or @{$ref}
+	DerefHash                        // %$ref or %{$ref}
+	DerefCode                        // &$ref or &{$ref}
+	DerefArrowArray                  // $ref->[0]
+	DerefArrowHash                   // $ref->{"key"}
+	DerefArrowCode                   // $ref->("arg")
+)
+
+// DerefExpr represents dereferencing expressions.
+type DerefExpr struct {
+	Kind  DerefKind
+	Ref   Expr
+	Index Expr   // for DerefArrowArray or DerefArrowHash
+	Args  []Expr // for DerefArrowCode
+}
+
+func (d *DerefExpr) node() {}
+func (d *DerefExpr) expr() {}
+
+// BacktickExpr represents a shell command execution via backticks or qx{}.
+type BacktickExpr struct {
+	Command Expr
+}
+
+func (b *BacktickExpr) node() {}
+func (b *BacktickExpr) expr() {}
+
+// RuleDecl represents a rule, token, or regex inside a grammar.
+type RuleDecl struct {
+	Kind    string // "rule", "token", "regex"
+	Name    string
+	Pattern string
+}
+
+// GrammarDeclStmt represents a grammar declaration: grammar PointGrammar { rule TOP { ... } ... }
+type GrammarDeclStmt struct {
+	Name  string
+	Rules []RuleDecl
+}
+
+func (g *GrammarDeclStmt) node() {}
+func (g *GrammarDeclStmt) stmt() {}
+
+// StubExpr represents the ... (yada-yada / stub) operator.
+type StubExpr struct {
+	Message string
+}
+
+func (s *StubExpr) node() {}
+func (s *StubExpr) expr() {}
+func (s *StubExpr) stmt() {}
+
 
 

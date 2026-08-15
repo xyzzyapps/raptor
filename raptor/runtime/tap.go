@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"reflect"
-	"regexp"
 	"strings"
 	"sync"
 )
@@ -196,7 +195,7 @@ func registerTAPBuiltins(in *Interp) {
 			name = " - " + args[2].String()
 		}
 
-		matched, err := regexp.MatchString(pattern, gotStr)
+		matched, err := RegexMatch(pattern, gotStr)
 		passed := err == nil && matched
 
 		if passed {
@@ -230,7 +229,7 @@ func registerTAPBuiltins(in *Interp) {
 			name = " - " + args[2].String()
 		}
 
-		matched, err := regexp.MatchString(pattern, gotStr)
+		matched, err := RegexMatch(pattern, gotStr)
 		passed := err == nil && !matched
 
 		if passed {

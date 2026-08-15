@@ -11,9 +11,30 @@ import (
 func registerVerificationBuiltins(in *Interp) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	// pre($condition, [$message]) - Precondition contract
-	in.Builtins["pre"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) == 0 || !args[0].IsTrue() {
+	evalCond := func(in *Interp, arg *Value) (bool, error) {
+		if arg == nil {
+			return false, nil
+		}
+		if arg.Type == ValClosure {
+			res, err := in.InvokeCallable(arg, nil)
+			if err != nil {
+				return false, err
+			}
+			return res.IsTrue(), nil
+		}
+		return arg.IsTrue(), nil
+	}
+
+	// PRE / pre($condition, [$message]) - Precondition contract
+	preHandler := func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) == 0 {
+			return nil, fmt.Errorf("PreconditionError: precondition failed")
+		}
+		ok, err := evalCond(in, args[0])
+		if err != nil {
+			return nil, fmt.Errorf("PreconditionError evaluation failed: %w", err)
+		}
+		if !ok {
 			msg := "precondition failed"
 			if len(args) > 1 {
 				msg = args[1].String()
@@ -22,10 +43,19 @@ func registerVerificationBuiltins(in *Interp) {
 		}
 		return BoolValue(true), nil
 	}
+	in.Builtins["PRE"] = preHandler
+	in.Builtins["pre"] = preHandler
 
-	// post($condition, [$message]) - Postcondition contract
-	in.Builtins["post"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) == 0 || !args[0].IsTrue() {
+	// POST / post($condition, [$message]) - Postcondition contract
+	postHandler := func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) == 0 {
+			return nil, fmt.Errorf("PostconditionError: postcondition failed")
+		}
+		ok, err := evalCond(in, args[0])
+		if err != nil {
+			return nil, fmt.Errorf("PostconditionError evaluation failed: %w", err)
+		}
+		if !ok {
 			msg := "postcondition failed"
 			if len(args) > 1 {
 				msg = args[1].String()
@@ -34,10 +64,19 @@ func registerVerificationBuiltins(in *Interp) {
 		}
 		return BoolValue(true), nil
 	}
+	in.Builtins["POST"] = postHandler
+	in.Builtins["post"] = postHandler
 
-	// invariant($condition, [$message]) - Invariant contract
-	in.Builtins["invariant"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) == 0 || !args[0].IsTrue() {
+	// INVARIANT / invariant($condition, [$message]) - Invariant contract
+	invariantHandler := func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) == 0 {
+			return nil, fmt.Errorf("InvariantError: invariant violation")
+		}
+		ok, err := evalCond(in, args[0])
+		if err != nil {
+			return nil, fmt.Errorf("InvariantError evaluation failed: %w", err)
+		}
+		if !ok {
 			msg := "invariant violation"
 			if len(args) > 1 {
 				msg = args[1].String()
@@ -46,9 +85,33 @@ func registerVerificationBuiltins(in *Interp) {
 		}
 		return BoolValue(true), nil
 	}
+	in.Builtins["INVARIANT"] = invariantHandler
+	in.Builtins["invariant"] = invariantHandler
 
-	// TEST($name, $closure) or test($name, $closure) - Zero-overhead inline tests
-	// Only runs when RAPTOR_TEST_MODE is enabled or --test flag is set
+	// CHECK / check / ASSERT / assert ($condition, [$message]) - Explicit assertion
+	checkHandler := func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) == 0 {
+			return nil, fmt.Errorf("AssertionError: assertion failed")
+		}
+		ok, err := evalCond(in, args[0])
+		if err != nil {
+			return nil, fmt.Errorf("AssertionError evaluation failed: %w", err)
+		}
+		if !ok {
+			msg := "assertion failed"
+			if len(args) > 1 {
+				msg = args[1].String()
+			}
+			return nil, fmt.Errorf("AssertionError: %s", msg)
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["CHECK"] = checkHandler
+	in.Builtins["check"] = checkHandler
+	in.Builtins["ASSERT"] = checkHandler
+	in.Builtins["assert"] = checkHandler
+
+	// TEST / test ($name, $closure) - Zero-overhead inline tests
 	inlineTestHandler := func(in *Interp, args []*Value) (*Value, error) {
 		if os.Getenv("RAPTOR_TEST_MODE") != "1" {
 			return NilValue(), nil
@@ -58,16 +121,27 @@ func registerVerificationBuiltins(in *Interp) {
 		}
 		name := args[0].String()
 		closure := args[1]
-		return in.Builtins["subtest"](in, []*Value{StringValue(name), closure})
+		if subtestFn, ok := in.Builtins["subtest"]; ok {
+			return subtestFn(in, []*Value{StringValue(name), closure})
+		}
+		return NilValue(), nil
 	}
-
 	in.Builtins["TEST"] = inlineTestHandler
 	in.Builtins["test"] = inlineTestHandler
 
-	// property($name, $closure, [%opts]) - Property-Based QuickCheck Testing / Fuzzing
-	in.Builtins["property"] = func(in *Interp, args []*Value) (*Value, error) {
+	// SUBTEST / subtest ($name, $closure) - Nested test suite
+	subtestAlias := func(in *Interp, args []*Value) (*Value, error) {
+		if subtestFn, ok := in.Builtins["subtest"]; ok {
+			return subtestFn(in, args)
+		}
+		return NilValue(), nil
+	}
+	in.Builtins["SUBTEST"] = subtestAlias
+
+	// PROPERTY / property ($name, $closure, [%opts]) - Property-Based QuickCheck Testing / Fuzzing
+	propertyHandler := func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) < 2 || args[1].Type != ValClosure {
-			return nil, fmt.Errorf("property requires name string and verification closure")
+			return nil, fmt.Errorf("PROPERTY requires name string and verification closure")
 		}
 		name := args[0].String()
 		closure := args[1].ClosureVal
@@ -112,11 +186,19 @@ func registerVerificationBuiltins(in *Interp) {
 				if err != nil {
 					failMsg += fmt.Sprintf(" (error: %v)", err)
 				}
-				return in.Builtins["ok"](in, []*Value{BoolValue(false), StringValue(failMsg)})
+				if okFn, ok := in.Builtins["ok"]; ok {
+					return okFn(in, []*Value{BoolValue(false), StringValue(failMsg)})
+				}
+				return BoolValue(false), fmt.Errorf("%s", failMsg)
 			}
 		}
 
 		successMsg := fmt.Sprintf("Property %q holds for %d randomized trials", name, iterations)
-		return in.Builtins["ok"](in, []*Value{BoolValue(true), StringValue(successMsg)})
+		if okFn, ok := in.Builtins["ok"]; ok {
+			return okFn(in, []*Value{BoolValue(true), StringValue(successMsg)})
+		}
+		return BoolValue(true), nil
 	}
+	in.Builtins["PROPERTY"] = propertyHandler
+	in.Builtins["property"] = propertyHandler
 }

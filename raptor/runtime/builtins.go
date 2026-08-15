@@ -30,8 +30,30 @@ func (in *Interp) registerBuiltins() {
 	in.GlobalEnv.Define("$*OS", StringValue(goruntime.GOOS))
 	exe, _ := os.Executable()
 	in.GlobalEnv.Define("$*EXECUTABLE", StringValue(exe))
+	in.GlobalEnv.Define("$*PROGRAM", StringValue(os.Args[0]))
 	in.GlobalEnv.Define("$*PROGRAM-NAME", StringValue(os.Args[0]))
 	in.GlobalEnv.Define("$0", StringValue(os.Args[0]))
+
+	// $*RAPTOR runtime object
+	raptorHash := map[string]*Value{
+		"name":     StringValue("Raptor"),
+		"version":  StringValue("1.0.0"),
+		"auth":     StringValue("xyzzyapps"),
+		"compiler": StringValue("moarvm-go"),
+	}
+	in.GlobalEnv.Define("$*RAPTOR", HashValue(raptorHash))
+
+	// $*KERNEL OS/Architecture object
+	kernelHash := map[string]*Value{
+		"name":    StringValue(goruntime.GOOS),
+		"arch":    StringValue(goruntime.GOARCH),
+		"version": StringValue(goruntime.Version()),
+	}
+	in.GlobalEnv.Define("$*KERNEL", HashValue(kernelHash))
+
+	// Punctuation variables
+	in.GlobalEnv.Define("$?", IntValue(0))
+	in.GlobalEnv.Define("$!", NilValue())
 
 	var argsList []*Value
 	if len(os.Args) > 1 {
@@ -49,6 +71,90 @@ func (in *Interp) registerBuiltins() {
 	in.GlobalEnv.Define("tau", FloatValue(2*math.Pi))
 	in.GlobalEnv.Define("ℯ", FloatValue(math.E))
 	in.GlobalEnv.Define("e", FloatValue(math.E))
+
+	in.Builtins["ref"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) == 0 {
+			return StringValue(""), nil
+		}
+		return StringValue(args[0].RefType()), nil
+	}
+
+	in.Builtins["is_ref"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) == 0 {
+			return BoolValue(false), nil
+		}
+		return BoolValue(args[0].RefType() != ""), nil
+	}
+
+	in.Builtins["regex_engine"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) > 0 {
+			name := strings.ToLower(args[0].String())
+			if name == "samre" || name == "sam" {
+				SetRegexEngine(&SamreEngine{})
+			} else {
+				SetRegexEngine(&GoRegexpEngine{})
+			}
+		}
+		return StringValue(GetRegexEngine().Name()), nil
+	}
+
+
+	in.Builtins["package_symbols"] = func(in *Interp, args []*Value) (*Value, error) {
+		pkg := in.CurrentPackage
+		if len(args) > 0 && args[0].Type != ValNil {
+			pkg = args[0].String()
+		}
+		stash := in.GetPackage(pkg)
+		return HashValue(stash), nil
+	}
+
+	in.Builtins["package_get"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return NilValue(), nil
+		}
+		pkg := args[0].String()
+		sym := args[1].String()
+		if val, ok := in.GetPackageSymbol(pkg, sym); ok {
+			return val, nil
+		}
+		return NilValue(), nil
+	}
+
+	in.Builtins["package_set"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 3 {
+			return NilValue(), nil
+		}
+		pkg := args[0].String()
+		sym := args[1].String()
+		val := args[2]
+		in.SetPackageSymbol(pkg, sym, val)
+		return val, nil
+	}
+
+	in.Builtins["package_delete"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return BoolValue(false), nil
+		}
+		pkg := args[0].String()
+		sym := args[1].String()
+		if stash, ok := in.Packages[pkg]; ok {
+			delete(stash, sym)
+			delete(stash, "$"+sym)
+			delete(stash, "@"+sym)
+			delete(stash, "%"+sym)
+			delete(stash, "&"+sym)
+			noSigil := strings.TrimLeft(sym, "$@%&")
+			delete(stash, noSigil)
+			in.GlobalEnv.Delete(pkg + "::" + sym)
+			in.GlobalEnv.Delete("&" + pkg + "::" + sym)
+			in.GlobalEnv.Delete(pkg + "::$" + sym)
+			in.GlobalEnv.Delete("$" + pkg + "::" + sym)
+			in.GlobalEnv.Delete(pkg + "::" + noSigil)
+			in.GlobalEnv.Delete("$" + pkg + "::" + noSigil)
+			return BoolValue(true), nil
+		}
+		return BoolValue(false), nil
+	}
 
 	in.Builtins["all"] = func(in *Interp, args []*Value) (*Value, error) {
 		var elements []*Value

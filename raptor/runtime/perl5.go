@@ -55,6 +55,7 @@ func (in *Interp) evalUse(u *UseStmt, env *Env) (*Value, error) {
 	baseName := filepath.Base(relPath)
 
 	candidates := []string{
+		u.Module,
 		filepath.Join("lib", relPath+".rp"),
 		filepath.Join("lib", relPath+".raptor"),
 		filepath.Join("lib", relPath, baseName+".rp"),
@@ -93,7 +94,12 @@ func (in *Interp) evalUse(u *UseStmt, env *Env) (*Value, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed reading module %s from %s: %w", u.Module, path, err)
 			}
-			return in.Eval(string(content))
+			prevPkg := in.CurrentPackage
+			in.CurrentPackage = u.Module
+			_ = in.GetPackage(u.Module)
+			res, evalErr := in.Eval(string(content))
+			in.CurrentPackage = prevPkg
+			return res, evalErr
 		}
 	}
 

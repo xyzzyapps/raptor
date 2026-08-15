@@ -26,6 +26,7 @@ const (
 	ValChannel
 	ValJunction
 	ValLazySeq
+	ValRef
 )
 
 type JunctionKind int
@@ -100,6 +101,7 @@ type Value struct {
 	ChannelVal  *Channel
 	JunctionVal *Junction
 	LazySeqVal  *LazySeq
+	RefVal      *Value
 }
 
 func JunctionValue(kind JunctionKind, vals []*Value) *Value {
@@ -189,6 +191,10 @@ func ChannelValue(c *Channel) *Value {
 	return &Value{Type: ValChannel, ChannelVal: c}
 }
 
+func RefValue(target *Value) *Value {
+	return &Value{Type: ValRef, RefVal: target}
+}
+
 // IsTrue returns Raku truthiness.
 func (v *Value) IsTrue() bool {
 	if v == nil {
@@ -209,7 +215,7 @@ func (v *Value) IsTrue() bool {
 		return len(v.ArrayVal) > 0
 	case ValHash:
 		return len(v.HashVal) > 0
-	case ValClosure, ValMultiSub, ValNativePtr, ValCStruct, ValPromise, ValChannel:
+	case ValClosure, ValMultiSub, ValNativePtr, ValCStruct, ValPromise, ValChannel, ValRef:
 		return true
 	case ValJunction:
 		if v.JunctionVal == nil {
@@ -289,6 +295,8 @@ func (v *Value) TypeName() string {
 		return "Junction"
 	case ValLazySeq:
 		return "Seq"
+	case ValRef:
+		return "Ref"
 	case ValCStruct:
 		if v.CStructVal != nil && v.CStructVal.Class != nil {
 			return v.CStructVal.Class.Name
@@ -332,6 +340,8 @@ func (v *Value) MatchesType(constraint string) bool {
 		return v.Type == ValJunction
 	case "Seq":
 		return v.Type == ValLazySeq || v.Type == ValArray
+	case "Ref", "Reference":
+		return v.Type == ValRef
 	default:
 		if v.Type == ValCStruct && v.CStructVal != nil && v.CStructVal.Class != nil {
 			return v.CStructVal.Class.Name == constraint
@@ -414,6 +424,11 @@ func (v *Value) String() string {
 			return "(" + strings.Join(parts, " ") + "...)"
 		}
 		return "Seq(...)"
+	case ValRef:
+		if v.RefVal != nil {
+			return "\\" + v.RefVal.String()
+		}
+		return "\\(nil)"
 	case ValCStruct:
 		if v.CStructVal != nil && v.CStructVal.Class != nil {
 			return fmt.Sprintf("struct %s(0x%x)", v.CStructVal.Class.Name, v.CStructVal.Ptr)
@@ -421,6 +436,39 @@ func (v *Value) String() string {
 		return "struct (nil)"
 	default:
 		return "<unknown>"
+	}
+}
+
+// RefType returns the Perl 5 ref($val) type string: "SCALAR", "ARRAY", "HASH", "CODE", "REF", or "".
+func (v *Value) RefType() string {
+	if v == nil {
+		return ""
+	}
+	switch v.Type {
+	case ValRef:
+		if v.RefVal == nil {
+			return "SCALAR"
+		}
+		switch v.RefVal.Type {
+		case ValArray:
+			return "ARRAY"
+		case ValHash:
+			return "HASH"
+		case ValClosure, ValMultiSub:
+			return "CODE"
+		case ValRef:
+			return "REF"
+		default:
+			return "SCALAR"
+		}
+	case ValArray:
+		return "ARRAY"
+	case ValHash:
+		return "HASH"
+	case ValClosure, ValMultiSub:
+		return "CODE"
+	default:
+		return ""
 	}
 }
 

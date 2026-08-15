@@ -1,4 +1,4 @@
-# Raylib Raku5 FFI Binding Test
+# Raylib Raptor FFI Binding Test
 
 struct Color {
     uint8 $r;
@@ -15,7 +15,7 @@ sub GetScreenWidth() returns int32 is native('libraylib.dll') { * }
 sub GetScreenHeight() returns int32 is native('libraylib.dll') { * }
 
 say "Initializing Raylib Window...";
-InitWindow(640, 480, "Raku5 + Raylib NativeCall FFI");
+InitWindow(640, 480, "Raptor + Raylib NativeCall FFI");
 SetTargetFPS(60);
 
 my $w = GetScreenWidth();

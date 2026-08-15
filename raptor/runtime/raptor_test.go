@@ -10,6 +10,20 @@ import (
 )
 
 
+func TestScopingAndAutoload(t *testing.T) {
+	in := NewInterp()
+	code := `
+my $x = 10;
+if True {
+    my $x = 99;
+}
+`
+	_, err := in.Eval(code)
+	if err != nil {
+		t.Fatalf("eval failed: %v", err)
+	}
+}
+
 func TestRaku5TypedVariables(t *testing.T) {
 	in := NewInterp()
 	code := `

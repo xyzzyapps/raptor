@@ -1,4 +1,4 @@
-# Perl 5 Module Bridge Demo in Raku4
+# Perl 5 Module Bridge Demo in Raptor
 
 say "Evaluating Perl 5 expression:";
 my $math_result = eval_perl5("sqrt(144) + 10");

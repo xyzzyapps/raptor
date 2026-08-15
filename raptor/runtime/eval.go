@@ -5,7 +5,8 @@ import (
 	"io"
 	"math"
 	"os"
-	"regexp"
+	"os/exec"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -31,6 +32,16 @@ type ContinueSignal struct{}
 
 func (c *ContinueSignal) Error() string { return "continue" }
 
+// GotoSignal unwinds stack on 'goto'.
+type GotoSignal struct {
+	Target string
+	IsSub  bool
+}
+
+func (g *GotoSignal) Error() string {
+	return "goto: " + g.Target
+}
+
 // Interp is the AST tree-walking evaluation interpreter for Raku5.
 type Interp struct {
 	GlobalEnv       *Env
@@ -44,6 +55,10 @@ type Interp struct {
 	GatherStack     [][]*Value
 	CustomInfixOps  map[string]*Value
 	CustomPrefixOps map[string]*Value
+	Packages        map[string]map[string]*Value
+	CurrentPackage  string
+	StateVars       map[Stmt]*StateCell
+	Grammars        map[string]*GrammarDeclStmt
 }
 
 
@@ -63,7 +78,12 @@ func NewInterp() *Interp {
 		AroundHooks:     make(map[string][]*AdviceHookStmt),
 		CustomInfixOps:  make(map[string]*Value),
 		CustomPrefixOps: make(map[string]*Value),
+		Packages:        make(map[string]map[string]*Value),
+		CurrentPackage:  "main",
+		StateVars:       make(map[Stmt]*StateCell),
+		Grammars:        make(map[string]*GrammarDeclStmt),
 	}
+	in.Packages["main"] = make(map[string]*Value)
 	in.registerBuiltins()
 	in.registerIOBuiltins()
 	in.registerFFI()
@@ -104,8 +124,138 @@ func (in *Interp) SetStdout(w io.Writer) {
 	in.Stdout = w
 }
 
+// SetStderr sets the error stream for the interpreter.
 func (in *Interp) SetStderr(w io.Writer) {
 	in.Stderr = w
+}
+
+func (in *Interp) GetPackage(pkg string) map[string]*Value {
+	if pkg == "" {
+		pkg = "main"
+	}
+	if in.Packages == nil {
+		in.Packages = make(map[string]map[string]*Value)
+	}
+	if stash, ok := in.Packages[pkg]; ok {
+		return stash
+	}
+	stash := make(map[string]*Value)
+	in.Packages[pkg] = stash
+	return stash
+}
+
+func (in *Interp) SetPackageSymbol(pkg string, name string, val *Value) {
+	stash := in.GetPackage(pkg)
+	stash[name] = val
+	noSigil := strings.TrimLeft(name, "$@%&")
+	if noSigil != "" && noSigil != name {
+		stash[noSigil] = val
+	}
+	if pkg == "main" || pkg == "" {
+		in.GlobalEnv.Define(name, val)
+		if noSigil != "" && noSigil != name {
+			in.GlobalEnv.Define(noSigil, val)
+		}
+	}
+	in.GlobalEnv.Define(pkg+"::"+name, val)
+	if noSigil != "" && noSigil != name {
+		in.GlobalEnv.Define(pkg+"::"+noSigil, val)
+		sigil := name[:1]
+		in.GlobalEnv.Define(sigil+pkg+"::"+noSigil, val)
+	}
+}
+
+func (in *Interp) GetPackageSymbol(pkg string, name string) (*Value, bool) {
+	if stash, ok := in.Packages[pkg]; ok {
+		if v, exists := stash[name]; exists {
+			return v, true
+		}
+		if v, exists := stash["$"+name]; exists {
+			return v, true
+		}
+		if v, exists := stash["@"+name]; exists {
+			return v, true
+		}
+		if v, exists := stash["%"+name]; exists {
+			return v, true
+		}
+		if v, exists := stash["&"+name]; exists {
+			return v, true
+		}
+	}
+	if v, ok := in.GlobalEnv.Lookup(pkg + "::" + name); ok {
+		return v, true
+	}
+	if v, ok := in.GlobalEnv.Lookup(pkg + "::$" + name); ok {
+		return v, true
+	}
+	if v, ok := in.GlobalEnv.Lookup("$" + pkg + "::" + name); ok {
+		return v, true
+	}
+	return nil, false
+}
+
+func (in *Interp) lookupAutoload(funcName string, env *Env) (*Value, string, bool) {
+	// 1. If funcName contains '::', e.g. "Foo::bar"
+	if strings.Contains(funcName, "::") {
+		lastIdx := strings.LastIndex(funcName, "::")
+		pkg := funcName[:lastIdx]
+		if pkgStash, ok := in.Packages[pkg]; ok {
+			if autoVal, ok := pkgStash["AUTOLOAD"]; ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+				return autoVal, funcName, true
+			}
+			if autoVal, ok := pkgStash["&AUTOLOAD"]; ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+				return autoVal, funcName, true
+			}
+		}
+		if autoVal, ok := in.GlobalEnv.Lookup(pkg + "::AUTOLOAD"); ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+			return autoVal, funcName, true
+		}
+		if autoVal, ok := in.GlobalEnv.Lookup("&" + pkg + "::AUTOLOAD"); ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+			return autoVal, funcName, true
+		}
+	}
+
+	// 2. Check current package
+	pkg := in.CurrentPackage
+	if pkg != "" && pkg != "main" {
+		if pkgStash, ok := in.Packages[pkg]; ok {
+			if autoVal, ok := pkgStash["AUTOLOAD"]; ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+				return autoVal, pkg + "::" + funcName, true
+			}
+			if autoVal, ok := pkgStash["&AUTOLOAD"]; ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+				return autoVal, pkg + "::" + funcName, true
+			}
+		}
+		if autoVal, ok := in.GlobalEnv.Lookup(pkg + "::AUTOLOAD"); ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+			return autoVal, pkg + "::" + funcName, true
+		}
+		if autoVal, ok := in.GlobalEnv.Lookup("&" + pkg + "::AUTOLOAD"); ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+			return autoVal, pkg + "::" + funcName, true
+		}
+	}
+
+	// 3. Check lexical env and global env
+	if autoVal, ok := env.Lookup("AUTOLOAD"); ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+		return autoVal, "main::" + funcName, true
+	}
+	if autoVal, ok := env.Lookup("&AUTOLOAD"); ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+		return autoVal, "main::" + funcName, true
+	}
+	if autoVal, ok := in.GlobalEnv.Lookup("AUTOLOAD"); ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+		return autoVal, "main::" + funcName, true
+	}
+	if autoVal, ok := in.GlobalEnv.Lookup("&AUTOLOAD"); ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+		return autoVal, "main::" + funcName, true
+	}
+	if autoVal, ok := in.GlobalEnv.Lookup("main::AUTOLOAD"); ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+		return autoVal, "main::" + funcName, true
+	}
+	if autoVal, ok := in.GlobalEnv.Lookup("&main::AUTOLOAD"); ok && (autoVal.Type == ValClosure || autoVal.Type == ValMultiSub) {
+		return autoVal, "main::" + funcName, true
+	}
+
+	return nil, "", false
 }
 
 // Eval parses and evaluates a Raku5 source code string.
@@ -136,18 +286,48 @@ func (in *Interp) Eval(source string) (*Value, error) {
 
 // EvalProgram evaluates all top-level statements.
 func (in *Interp) EvalProgram(prog *Program, env *Env) (*Value, error) {
+	if prog == nil || len(prog.Stmts) == 0 {
+		return NilValue(), nil
+	}
+	labelMap := make(map[string]int)
+	for idx, s := range prog.Stmts {
+		if lStmt, ok := s.(*LabelStmt); ok {
+			labelMap[lStmt.Name] = idx
+		}
+	}
+
 	var lastVal *Value = NilValue()
-	for _, stmt := range prog.Stmts {
+	i := 0
+	for i < len(prog.Stmts) {
+		stmt := prog.Stmts[i]
 		val, err := in.evalStmt(stmt, env)
 		if err != nil {
 			if ret, ok := err.(*ReturnSignal); ok {
 				return ret.Value, nil
+			}
+			if gSig, ok := err.(*GotoSignal); ok {
+				if gSig.IsSub {
+					subName := strings.TrimPrefix(gSig.Target, "&")
+					if callee, ok := env.Lookup(subName); ok {
+						return in.InvokeCallable(callee, nil)
+					}
+					if callee, ok := in.GlobalEnv.Lookup(subName); ok {
+						return in.InvokeCallable(callee, nil)
+					}
+					return nil, fmt.Errorf("goto: subroutine %q not found", subName)
+				}
+				if targetIdx, ok := labelMap[gSig.Target]; ok {
+					i = targetIdx
+					continue
+				}
+				return nil, fmt.Errorf("goto: label %q not found", gSig.Target)
 			}
 			return nil, err
 		}
 		if val != nil {
 			lastVal = val
 		}
+		i++
 	}
 
 	// Auto-dispatch to Raku 'sub MAIN' or 'multi sub MAIN' if declared
@@ -197,7 +377,89 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		in.GlobalEnv.Define(s.Name, val)
 		return NilValue(), nil
 
+	case *PackageDeclStmt:
+		if s.Body != nil {
+			prevPkg := in.CurrentPackage
+			in.CurrentPackage = s.Name
+			_ = in.GetPackage(s.Name)
+			childEnv := env.NewChild()
+			val, err := in.evalBlock(s.Body, childEnv)
+			in.CurrentPackage = prevPkg
+			return val, err
+		}
+		in.CurrentPackage = s.Name
+		_ = in.GetPackage(s.Name)
+		return NilValue(), nil
+
+	case *GrammarDeclStmt:
+		if in.Grammars == nil {
+			in.Grammars = make(map[string]*GrammarDeclStmt)
+		}
+		in.Grammars[s.Name] = s
+		grammarHash := make(map[string]*Value)
+		grammarHash["name"] = StringValue(s.Name)
+		for _, r := range s.Rules {
+			grammarHash[r.Name] = StringValue(r.Pattern)
+		}
+		gVal := HashValue(grammarHash)
+		env.Define(s.Name, gVal)
+		in.GlobalEnv.Define(s.Name, gVal)
+		return gVal, nil
+
 	case *VarDeclStmt:
+		if s.Scope == "state" {
+			cell, ok := in.StateVars[s]
+			if !ok {
+				var initVal *Value = NilValue()
+				if s.Value != nil {
+					v, err := in.evalExpr(s.Value, env)
+					if err != nil {
+						return nil, err
+					}
+					initVal = v
+				} else if strings.HasPrefix(s.Name, "@") {
+					initVal = ArrayValue(nil)
+				} else if strings.HasPrefix(s.Name, "%") {
+					initVal = HashValue(make(map[string]*Value))
+				}
+				if in.StateVars == nil {
+					in.StateVars = make(map[Stmt]*StateCell)
+				}
+				cell = &StateCell{Val: initVal}
+				in.StateVars[s] = cell
+			}
+			env.DefineState(s.Name, cell)
+			return cell.Val, nil
+		}
+
+		if s.Scope == "our" {
+			pkg := in.CurrentPackage
+			if pkg == "" {
+				pkg = "main"
+			}
+			if s.Value == nil {
+				if existing, ok := in.GetPackageSymbol(pkg, s.Name); ok {
+					env.Define(s.Name, existing)
+					return existing, nil
+				}
+			}
+			var initVal *Value = NilValue()
+			if s.Value != nil {
+				v, err := in.evalExpr(s.Value, env)
+				if err != nil {
+					return nil, err
+				}
+				initVal = v
+			} else if strings.HasPrefix(s.Name, "@") {
+				initVal = ArrayValue(nil)
+			} else if strings.HasPrefix(s.Name, "%") {
+				initVal = HashValue(make(map[string]*Value))
+			}
+			in.SetPackageSymbol(pkg, s.Name, initVal)
+			env.Define(s.Name, initVal)
+			return initVal, nil
+		}
+
 		var initVal *Value = NilValue()
 		if s.Value != nil {
 			v, err := in.evalExpr(s.Value, env)
@@ -263,6 +525,10 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			env.RegisterMulti(s.Name, closure)
 			in.GlobalEnv.RegisterMulti(normName, closure)
 			in.GlobalEnv.RegisterMulti(s.Name, closure)
+			if in.CurrentPackage != "" && in.CurrentPackage != "main" {
+				in.GlobalEnv.RegisterMulti(in.CurrentPackage+"::"+normName, closure)
+				in.GlobalEnv.RegisterMulti("&"+in.CurrentPackage+"::"+normName, closure)
+			}
 
 			rawOp := extractRawOperatorName(s.Name)
 			if strings.HasPrefix(s.Name, "infix:") || strings.HasPrefix(s.Name, "infix:<") {
@@ -282,6 +548,11 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			in.GlobalEnv.Define(normName, val)
 			in.GlobalEnv.Define("&"+normName, val)
 			in.GlobalEnv.Define(s.Name, val)
+			if in.CurrentPackage != "" && in.CurrentPackage != "main" {
+				in.SetPackageSymbol(in.CurrentPackage, normName, val)
+				in.SetPackageSymbol(in.CurrentPackage, "&"+normName, val)
+				in.SetPackageSymbol(in.CurrentPackage, s.Name, val)
+			}
 
 			rawOp := extractRawOperatorName(s.Name)
 			if strings.HasPrefix(s.Name, "infix:") || strings.HasPrefix(s.Name, "infix:<") {
@@ -548,6 +819,142 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		return NilValue(), nil
 
 
+	case *LabelStmt:
+		if s.Stmt != nil {
+			return in.evalStmt(s.Stmt, env)
+		}
+		return NilValue(), nil
+
+	case *GotoStmt:
+		return nil, &GotoSignal{Target: s.Target, IsSub: s.IsSub}
+
+	case *ModifierStmt:
+		switch s.Kind {
+		case ModIf:
+			cVal, err := in.evalExpr(s.Condition, env)
+			if err != nil {
+				return nil, err
+			}
+			if cVal.IsTrue() {
+				return in.evalStmt(s.Target, env)
+			}
+			return NilValue(), nil
+
+		case ModUnless:
+			cVal, err := in.evalExpr(s.Condition, env)
+			if err != nil {
+				return nil, err
+			}
+			if !cVal.IsTrue() {
+				return in.evalStmt(s.Target, env)
+			}
+			return NilValue(), nil
+
+		case ModWhile:
+			var lastVal *Value = NilValue()
+			for {
+				cVal, err := in.evalExpr(s.Condition, env)
+				if err != nil {
+					return nil, err
+				}
+				if !cVal.IsTrue() {
+					break
+				}
+				val, err := in.evalStmt(s.Target, env)
+				if err != nil {
+					if _, ok := err.(*BreakSignal); ok {
+						break
+					}
+					if _, ok := err.(*ContinueSignal); ok {
+						continue
+					}
+					return nil, err
+				}
+				if val != nil {
+					lastVal = val
+				}
+			}
+			return lastVal, nil
+
+		case ModUntil:
+			var lastVal *Value = NilValue()
+			for {
+				cVal, err := in.evalExpr(s.Condition, env)
+				if err != nil {
+					return nil, err
+				}
+				if cVal.IsTrue() {
+					break
+				}
+				val, err := in.evalStmt(s.Target, env)
+				if err != nil {
+					if _, ok := err.(*BreakSignal); ok {
+						break
+					}
+					if _, ok := err.(*ContinueSignal); ok {
+						continue
+					}
+					return nil, err
+				}
+				if val != nil {
+					lastVal = val
+				}
+			}
+			return lastVal, nil
+
+		case ModFor:
+			iterVal, err := in.evalExpr(s.Condition, env)
+			if err != nil {
+				return nil, err
+			}
+			var items []*Value
+			if iterVal.Type == ValArray {
+				items = iterVal.ArrayVal
+			} else if iterVal.Type == ValLazySeq && iterVal.LazySeqVal != nil {
+				items = iterVal.LazySeqVal.Items
+			} else if iterVal.Type == ValRef && iterVal.RefVal != nil && iterVal.RefVal.Type == ValArray {
+				items = iterVal.RefVal.ArrayVal
+			} else {
+				items = []*Value{iterVal}
+			}
+			varName := s.VarName
+			if varName == "" {
+				varName = "$_"
+			}
+			var lastVal *Value = NilValue()
+			for _, it := range items {
+				loopEnv := env.NewChild()
+				loopEnv.Define(varName, it)
+				loopEnv.Define("$_", it)
+				val, err := in.evalStmt(s.Target, loopEnv)
+				if err != nil {
+					if _, ok := err.(*BreakSignal); ok {
+						break
+					}
+					if _, ok := err.(*ContinueSignal); ok {
+						continue
+					}
+					return nil, err
+				}
+				if val != nil {
+					lastVal = val
+				}
+			}
+			return lastVal, nil
+
+		case ModGiven:
+			topicVal, err := in.evalExpr(s.Condition, env)
+			if err != nil {
+				return nil, err
+			}
+			givenEnv := env.NewChild()
+			givenEnv.Define("$_", topicVal)
+			return in.evalStmt(s.Target, givenEnv)
+
+		default:
+			return in.evalStmt(s.Target, env)
+		}
+
 	case *TakeStmt:
 		var val *Value = NilValue()
 		if s.Value != nil {
@@ -570,15 +977,45 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 
 
 func (in *Interp) evalBlock(b *BlockStmt, env *Env) (*Value, error) {
+	if b == nil || len(b.Stmts) == 0 {
+		return NilValue(), nil
+	}
+	labelMap := make(map[string]int)
+	for idx, s := range b.Stmts {
+		if lStmt, ok := s.(*LabelStmt); ok {
+			labelMap[lStmt.Name] = idx
+		}
+	}
+
 	var lastVal *Value = NilValue()
-	for _, stmt := range b.Stmts {
+	i := 0
+	for i < len(b.Stmts) {
+		stmt := b.Stmts[i]
 		val, err := in.evalStmt(stmt, env)
 		if err != nil {
+			if gSig, ok := err.(*GotoSignal); ok {
+				if gSig.IsSub {
+					subName := strings.TrimPrefix(gSig.Target, "&")
+					if callee, ok := env.Lookup(subName); ok {
+						return in.InvokeCallable(callee, nil)
+					}
+					if callee, ok := in.GlobalEnv.Lookup(subName); ok {
+						return in.InvokeCallable(callee, nil)
+					}
+					return nil, fmt.Errorf("goto: subroutine %q not found", subName)
+				}
+				if targetIdx, ok := labelMap[gSig.Target]; ok {
+					i = targetIdx
+					continue
+				}
+				return nil, gSig
+			}
 			return nil, err
 		}
 		if val != nil {
 			lastVal = val
 		}
+		i++
 	}
 	return lastVal, nil
 }
@@ -628,9 +1065,37 @@ func (in *Interp) validateTypeAndWhere(name string, val *Value, env *Env) error 
 func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Value, error) {
 	switch t := target.(type) {
 	case *VarExpr:
+		if strings.HasPrefix(t.Name, "%") && strings.HasSuffix(t.Name, "::") {
+			pkg := strings.TrimPrefix(t.Name, "%")
+			pkg = strings.TrimPrefix(pkg, "::")
+			pkg = strings.TrimSuffix(pkg, "::")
+			if val.Type == ValHash && val.HashVal != nil {
+				in.Packages[pkg] = val.HashVal
+				return val, nil
+			}
+		}
+		if strings.Contains(t.Name, "::") {
+			sigil := t.Name[0:1]
+			if sigil == "$" || sigil == "@" || sigil == "%" {
+				rest := t.Name[1:]
+				lastIdx := strings.LastIndex(rest, "::")
+				if lastIdx != -1 {
+					pkg := rest[:lastIdx]
+					sym := sigil + rest[lastIdx+2:]
+					in.SetPackageSymbol(pkg, sym, val)
+					in.GlobalEnv.Define(t.Name, val)
+					return val, nil
+				}
+			}
+		}
 		if op == "=" {
 			if err := in.validateTypeAndWhere(t.Name, val, env); err != nil {
 				return nil, err
+			}
+			if in.CurrentPackage != "" {
+				if _, exists := in.GetPackageSymbol(in.CurrentPackage, t.Name); exists {
+					in.SetPackageSymbol(in.CurrentPackage, t.Name, val)
+				}
 			}
 			if err := env.Assign(t.Name, val); err != nil {
 				env.Define(t.Name, val)
@@ -710,6 +1175,96 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 		hashVal.HashVal[k] = val
 		return val, nil
 
+	case *DerefExpr:
+		refVal, err := in.evalExpr(t.Ref, env)
+		if err != nil {
+			return nil, err
+		}
+		switch t.Kind {
+		case DerefScalar:
+			if refVal.Type == ValRef && refVal.RefVal != nil {
+				if op == "=" {
+					*refVal.RefVal = *val
+					return val, nil
+				}
+				newVal, err := in.evalBinaryOp(refVal.RefVal, op[:len(op)-1], val)
+				if err != nil {
+					return nil, err
+				}
+				*refVal.RefVal = *newVal
+				return newVal, nil
+			}
+			return nil, fmt.Errorf("cannot assign to non-scalar reference")
+
+		case DerefArrowArray:
+			arrVal := refVal
+			if arrVal.Type == ValRef && arrVal.RefVal != nil {
+				arrVal = arrVal.RefVal
+			}
+			if arrVal.Type != ValArray {
+				return nil, fmt.Errorf("cannot array-index non-array reference of type %s", arrVal.TypeName())
+			}
+			idxVal, err := in.evalExpr(t.Index, env)
+			if err != nil {
+				return nil, err
+			}
+			idx := int(in.toInt(idxVal))
+			if idx < 0 {
+				idx = len(arrVal.ArrayVal) + idx
+			}
+			if idx < 0 {
+				return nil, fmt.Errorf("array index out of bounds: %d", idx)
+			}
+			for len(arrVal.ArrayVal) <= idx {
+				arrVal.ArrayVal = append(arrVal.ArrayVal, NilValue())
+			}
+			if op == "=" {
+				arrVal.ArrayVal[idx] = val
+				return val, nil
+			}
+			cur := arrVal.ArrayVal[idx]
+			newVal, err := in.evalBinaryOp(cur, op[:len(op)-1], val)
+			if err != nil {
+				return nil, err
+			}
+			arrVal.ArrayVal[idx] = newVal
+			return newVal, nil
+
+		case DerefArrowHash:
+			hashVal := refVal
+			if hashVal.Type == ValRef && hashVal.RefVal != nil {
+				hashVal = hashVal.RefVal
+			}
+			if hashVal.Type != ValHash {
+				return nil, fmt.Errorf("cannot hash-index non-hash reference of type %s", hashVal.TypeName())
+			}
+			keyVal, err := in.evalExpr(t.Index, env)
+			if err != nil {
+				return nil, err
+			}
+			k := keyVal.StrVal
+			if hashVal.HashVal == nil {
+				hashVal.HashVal = make(map[string]*Value)
+			}
+			if op == "=" {
+				hashVal.HashVal[k] = val
+				return val, nil
+			}
+			cur, ok := hashVal.HashVal[k]
+			if !ok {
+				cur = NilValue()
+			}
+			newVal, err := in.evalBinaryOp(cur, op[:len(op)-1], val)
+			if err != nil {
+				return nil, err
+			}
+			hashVal.HashVal[k] = newVal
+			return newVal, nil
+
+		default:
+			return nil, fmt.Errorf("unsupported dereference assignment")
+		}
+
 	case *MethodCallExpr:
 		invocantVal, err := in.evalExpr(t.Target, env)
 		if err != nil {
@@ -771,8 +1326,46 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		if e.Name == "False" || e.Name == "false" {
 			return BoolValue(false), nil
 		}
+		// Package stash reflection: %Foo:: or %::Foo::
+		if strings.HasPrefix(e.Name, "%") && strings.HasSuffix(e.Name, "::") {
+			raw := strings.TrimPrefix(e.Name, "%")
+			raw = strings.TrimPrefix(raw, "::")
+			raw = strings.TrimSuffix(raw, "::")
+			stash := in.GetPackage(raw)
+			return HashValue(stash), nil
+		}
 		if val, ok := env.Lookup(e.Name); ok {
 			return val, nil
+		}
+		if val, ok := in.GlobalEnv.Lookup(e.Name); ok {
+			return val, nil
+		}
+		if strings.Contains(e.Name, "::") {
+			sigil := e.Name[0:1]
+			if sigil == "$" || sigil == "@" || sigil == "%" || sigil == "&" {
+				rest := e.Name[1:]
+				lastIdx := strings.LastIndex(rest, "::")
+				if lastIdx != -1 {
+					pkg := rest[:lastIdx]
+					sym := sigil + rest[lastIdx+2:]
+					if val, ok := in.GetPackageSymbol(pkg, sym); ok {
+						return val, nil
+					}
+					symNoSigil := rest[lastIdx+2:]
+					if val, ok := in.GetPackageSymbol(pkg, symNoSigil); ok {
+						return val, nil
+					}
+				}
+			} else {
+				lastIdx := strings.LastIndex(e.Name, "::")
+				if lastIdx != -1 {
+					pkg := e.Name[:lastIdx]
+					sym := e.Name[lastIdx+2:]
+					if val, ok := in.GetPackageSymbol(pkg, sym); ok {
+						return val, nil
+					}
+				}
+			}
 		}
 		if builtin, ok := in.Builtins[e.Name]; ok {
 			return ClosureValue(&Closure{
@@ -797,6 +1390,127 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			return in.evalExpr(e.Then, env)
 		}
 		return in.evalExpr(e.Else, env)
+
+	case *RefExpr:
+		if vExpr, ok := e.Expr.(*VarExpr); ok {
+			if val, ok := env.Lookup(vExpr.Name); ok {
+				return RefValue(val), nil
+			}
+			newVal := NilValue()
+			env.Define(vExpr.Name, newVal)
+			return RefValue(newVal), nil
+		}
+		targetVal, err := in.evalExpr(e.Expr, env)
+		if err != nil {
+			return nil, err
+		}
+		return RefValue(targetVal), nil
+
+	case *DerefExpr:
+		refVal, err := in.evalExpr(e.Ref, env)
+		if err != nil {
+			return nil, err
+		}
+		switch e.Kind {
+		case DerefScalar:
+			if refVal.Type == ValRef {
+				if refVal.RefVal != nil {
+					return refVal.RefVal, nil
+				}
+				return NilValue(), nil
+			}
+			return refVal, nil
+
+		case DerefArray:
+			arrVal := refVal
+			if arrVal.Type == ValRef && arrVal.RefVal != nil {
+				arrVal = arrVal.RefVal
+			}
+			if arrVal.Type == ValArray {
+				return arrVal, nil
+			}
+			if arrVal.Type == ValLazySeq && arrVal.LazySeqVal != nil {
+				return ArrayValue(arrVal.LazySeqVal.Items), nil
+			}
+			return ArrayValue([]*Value{arrVal}), nil
+
+		case DerefHash:
+			hashVal := refVal
+			if hashVal.Type == ValRef && hashVal.RefVal != nil {
+				hashVal = hashVal.RefVal
+			}
+			if hashVal.Type == ValHash {
+				return hashVal, nil
+			}
+			return hashVal, nil
+
+		case DerefCode:
+			codeVal := refVal
+			if codeVal.Type == ValRef && codeVal.RefVal != nil {
+				codeVal = codeVal.RefVal
+			}
+			return codeVal, nil
+
+		case DerefArrowArray:
+			arrVal := refVal
+			if arrVal.Type == ValRef && arrVal.RefVal != nil {
+				arrVal = arrVal.RefVal
+			}
+			if arrVal.Type != ValArray {
+				return nil, fmt.Errorf("cannot index non-array reference of type %s", arrVal.TypeName())
+			}
+			idxVal, err := in.evalExpr(e.Index, env)
+			if err != nil {
+				return nil, err
+			}
+			idx := int(in.toInt(idxVal))
+			if idx < 0 {
+				idx = len(arrVal.ArrayVal) + idx
+			}
+			if idx < 0 || idx >= len(arrVal.ArrayVal) {
+				return NilValue(), nil
+			}
+			return arrVal.ArrayVal[idx], nil
+
+		case DerefArrowHash:
+			hashVal := refVal
+			if hashVal.Type == ValRef && hashVal.RefVal != nil {
+				hashVal = hashVal.RefVal
+			}
+			if hashVal.Type != ValHash {
+				return nil, fmt.Errorf("cannot access non-hash reference of type %s", hashVal.TypeName())
+			}
+			keyVal, err := in.evalExpr(e.Index, env)
+			if err != nil {
+				return nil, err
+			}
+			k := keyVal.StrVal
+			if hashVal.HashVal == nil {
+				return NilValue(), nil
+			}
+			if val, ok := hashVal.HashVal[k]; ok {
+				return val, nil
+			}
+			return NilValue(), nil
+
+		case DerefArrowCode:
+			codeVal := refVal
+			if codeVal.Type == ValRef && codeVal.RefVal != nil {
+				codeVal = codeVal.RefVal
+			}
+			var callArgs []*Value
+			for _, a := range e.Args {
+				aVal, err := in.evalExpr(a, env)
+				if err != nil {
+					return nil, err
+				}
+				callArgs = append(callArgs, aVal)
+			}
+			return in.InvokeCallable(codeVal, callArgs)
+
+		default:
+			return refVal, nil
+		}
 
 	case *BinaryExpr:
 		if e.Op == "//" {
@@ -948,12 +1662,12 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		}), nil
 
 	case *CallExpr:
-		calleeVal, err := in.evalExpr(e.Callee, env)
-		if err != nil {
-			return nil, err
+		var funcName string
+		if v, ok := e.Callee.(*VarExpr); ok {
+			funcName = v.Name
 		}
-		if varExpr, ok := e.Callee.(*VarExpr); ok {
-			if builtin, hasBuiltin := in.Builtins[varExpr.Name]; hasBuiltin {
+		if funcName != "" {
+			if builtin, hasBuiltin := in.Builtins[funcName]; hasBuiltin {
 				var args []*Value
 				for _, argExpr := range e.Args {
 					aVal, err := in.evalExpr(argExpr, env)
@@ -966,6 +1680,27 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			}
 		}
 
+		calleeVal, err := in.evalExpr(e.Callee, env)
+		if (err != nil || calleeVal == nil || calleeVal.Type == ValNil) && funcName != "" {
+			if autoVal, qualifiedName, hasAuto := in.lookupAutoload(funcName, env); hasAuto {
+				var args []*Value
+				for _, argExpr := range e.Args {
+					aVal, aErr := in.evalExpr(argExpr, env)
+					if aErr != nil {
+						return nil, aErr
+					}
+					args = append(args, aVal)
+				}
+				in.GlobalEnv.Define("$AUTOLOAD", StringValue(qualifiedName))
+				in.GlobalEnv.Define("AUTOLOAD", StringValue(qualifiedName))
+				env.Define("$AUTOLOAD", StringValue(qualifiedName))
+				return in.InvokeCallable(autoVal, args)
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+
 		var args []*Value
 		for _, argExpr := range e.Args {
 			aVal, err := in.evalExpr(argExpr, env)
@@ -973,6 +1708,19 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 				return nil, err
 			}
 			args = append(args, aVal)
+		}
+
+		if calleeVal != nil && (calleeVal.Type == ValClosure || calleeVal.Type == ValMultiSub || calleeVal.Type == ValCStruct || calleeVal.Type == ValRef) {
+			return in.InvokeCallable(calleeVal, args)
+		}
+
+		if funcName != "" {
+			if autoVal, qualifiedName, hasAuto := in.lookupAutoload(funcName, env); hasAuto {
+				in.GlobalEnv.Define("$AUTOLOAD", StringValue(qualifiedName))
+				in.GlobalEnv.Define("AUTOLOAD", StringValue(qualifiedName))
+				env.Define("$AUTOLOAD", StringValue(qualifiedName))
+				return in.InvokeCallable(autoVal, args)
+			}
 		}
 
 		return in.InvokeCallable(calleeVal, args)
@@ -1110,6 +1858,12 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		}
 
 
+		if invocantVal.Type == ValHash && invocantVal.HashVal != nil {
+			if v, ok := invocantVal.HashVal[e.Method]; ok && len(e.Args) == 0 {
+				return v, nil
+			}
+		}
+
 		var args []*Value
 		// UFCS places invocant as first argument: func(invocant, args...)
 		args = append(args, invocantVal)
@@ -1127,11 +1881,25 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		}
 
 		// 2. Check lexical environment for sub or multi sub
-		if calleeVal, ok := env.Lookup(e.Method); ok {
+		if calleeVal, ok := env.Lookup(e.Method); ok && (calleeVal.Type == ValClosure || calleeVal.Type == ValMultiSub) {
 			return in.InvokeCallable(calleeVal, args)
 		}
-		if calleeVal, ok := env.Lookup("&" + e.Method); ok {
+		if calleeVal, ok := in.GlobalEnv.Lookup(e.Method); ok && (calleeVal.Type == ValClosure || calleeVal.Type == ValMultiSub) {
 			return in.InvokeCallable(calleeVal, args)
+		}
+		if calleeVal, ok := env.Lookup("&" + e.Method); ok && (calleeVal.Type == ValClosure || calleeVal.Type == ValMultiSub) {
+			return in.InvokeCallable(calleeVal, args)
+		}
+		if calleeVal, ok := in.GlobalEnv.Lookup("&" + e.Method); ok && (calleeVal.Type == ValClosure || calleeVal.Type == ValMultiSub) {
+			return in.InvokeCallable(calleeVal, args)
+		}
+
+		// 3. Fallback to AUTOLOAD for method call
+		if autoVal, qualifiedName, hasAuto := in.lookupAutoload(e.Method, env); hasAuto {
+			in.GlobalEnv.Define("$AUTOLOAD", StringValue(qualifiedName))
+			in.GlobalEnv.Define("AUTOLOAD", StringValue(qualifiedName))
+			env.Define("$AUTOLOAD", StringValue(qualifiedName))
+			return in.InvokeCallable(autoVal, args)
 		}
 
 		return nil, fmt.Errorf("method or sub %q not found for invocant type %s", e.Method, invocantVal.TypeName())
@@ -1196,6 +1964,39 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 
 	case *AssignStmt:
 		return in.evalStmt(e, env)
+
+	case *BacktickExpr:
+		cmdVal, err := in.evalExpr(e.Command, env)
+		if err != nil {
+			return nil, err
+		}
+		cmdStr := cmdVal.String()
+		var cmd *exec.Cmd
+		if goruntime.GOOS == "windows" {
+			cmd = exec.Command("powershell", "-NoProfile", "-Command", cmdStr)
+		} else {
+			cmd = exec.Command("sh", "-c", cmdStr)
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			exitCode := 1
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
+			in.GlobalEnv.Define("$?", IntValue(int64(exitCode)))
+			in.GlobalEnv.Define("$!", StringValue(err.Error()))
+			env.Define("$?", IntValue(int64(exitCode)))
+			env.Define("$!", StringValue(err.Error()))
+		} else {
+			in.GlobalEnv.Define("$?", IntValue(0))
+			in.GlobalEnv.Define("$!", NilValue())
+			env.Define("$?", IntValue(0))
+			env.Define("$!", NilValue())
+		}
+		return StringValue(strings.TrimRight(string(out), "\r\n")), nil
+
+	case *StubExpr:
+		return nil, fmt.Errorf("Stub code executed (%s)", e.Message)
 
 	default:
 		return NilValue(), nil
@@ -1774,7 +2575,7 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 
 	case "=~":
 		pattern := right.String()
-		matched, err := regexp.MatchString(pattern, left.String())
+		matched, err := RegexMatch(pattern, left.String())
 		if err != nil {
 			return nil, fmt.Errorf("invalid regex pattern %q: %w", pattern, err)
 		}
@@ -1782,7 +2583,7 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 
 	case "!~":
 		pattern := right.String()
-		matched, err := regexp.MatchString(pattern, left.String())
+		matched, err := RegexMatch(pattern, left.String())
 		if err != nil {
 			return nil, fmt.Errorf("invalid regex pattern %q: %w", pattern, err)
 		}
@@ -1883,15 +2684,75 @@ func (in *Interp) evalUnaryOp(op string, rVal *Value, env *Env) (*Value, error) 
 	}
 
 	switch op {
-	case "!":
+	case "!", "not":
 		return BoolValue(!rVal.IsTrue()), nil
 	case "-":
 		if rVal.Type == ValFloat {
 			return FloatValue(-rVal.FloatVal), nil
 		}
-		return IntValue(-rVal.IntVal), nil
+		return IntValue(-in.toInt(rVal)), nil
 	case "+":
-		return rVal, nil
+		// Numeric context coercion
+		switch rVal.Type {
+		case ValInt:
+			return rVal, nil
+		case ValFloat:
+			return rVal, nil
+		case ValString:
+			if f, err := strconv.ParseFloat(rVal.StrVal, 64); err == nil {
+				if i, err2 := strconv.ParseInt(rVal.StrVal, 0, 64); err2 == nil {
+					return IntValue(i), nil
+				}
+				return FloatValue(f), nil
+			}
+			return IntValue(0), nil
+		case ValBool:
+			if rVal.BoolVal {
+				return IntValue(1), nil
+			}
+			return IntValue(0), nil
+		case ValArray:
+			return IntValue(int64(len(rVal.ArrayVal))), nil
+		case ValHash:
+			return IntValue(int64(len(rVal.HashVal))), nil
+		case ValLazySeq:
+			if rVal.LazySeqVal != nil {
+				return IntValue(int64(len(rVal.LazySeqVal.Items))), nil
+			}
+			return IntValue(0), nil
+		case ValNil:
+			return IntValue(0), nil
+		default:
+			return IntValue(in.toInt(rVal)), nil
+		}
+	case "~":
+		// String context coercion
+		switch rVal.Type {
+		case ValString:
+			return rVal, nil
+		case ValInt:
+			return StringValue(strconv.FormatInt(rVal.IntVal, 10)), nil
+		case ValFloat:
+			return StringValue(strconv.FormatFloat(rVal.FloatVal, 'f', -1, 64)), nil
+		case ValBool:
+			if rVal.BoolVal {
+				return StringValue("True"), nil
+			}
+			return StringValue("False"), nil
+		case ValNil:
+			return StringValue(""), nil
+		case ValArray:
+			parts := make([]string, len(rVal.ArrayVal))
+			for i, v := range rVal.ArrayVal {
+				parts[i] = v.String()
+			}
+			return StringValue(strings.Join(parts, " ")), nil
+		default:
+			return StringValue(rVal.String()), nil
+		}
+	case "?", "so":
+		// Boolean context coercion
+		return BoolValue(rVal.IsTrue()), nil
 
 	// File test operators
 	case "-e":

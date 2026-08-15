@@ -24,6 +24,10 @@ const (
 	// Keywords
 	TokMy
 	TokOur
+	TokState
+	TokPackage
+	TokModule
+	TokUnit
 	TokSub
 	TokMulti // multi
 	TokReturn
@@ -94,10 +98,12 @@ const (
 	TokSmartMatch  // ~~
 	TokDotDot      // ..
 	TokCaretDotDot // ^..
+	TokEllipsis    // ... (yada-yada / stub operator)
 	TokElem        // ∈
 	TokNotElem     // ∉
 	TokIntersect   // ∩
 	TokUnionOp     // ∪
+	TokSo          // so (boolean truth operator)
 
 
 	// Keywords - Control & OOP & FFI & Advice
@@ -115,11 +121,17 @@ const (
 	TokAfter
 	TokAround
 	TokReturns
+	TokGoto // goto
+	TokGrammar // grammar
+	TokRule    // rule
+	TokToken   // token
+	TokRegex   // regex
 
-
-
-	// Literals - Interpolated
+	// Literals - Interpolated & Heredoc & Backtick
 	TokInterpString // double-quoted string with interpolation markers
+	TokHeredoc      // heredoc multiline string
+	TokBacktick     // backtick raw command string
+	TokInterpBacktick // backtick interpolated command string
 
 	// Delimiters
 	TokSemicolon
@@ -134,6 +146,7 @@ const (
 	TokAngleL // <
 	TokAngleR // >
 	TokColon  // :
+	TokBackslash // \
 )
 
 

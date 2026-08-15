@@ -198,6 +198,46 @@ my %updates = { "add-implementation" => "sub add($a, $b) { return $a + $b; }" };
 my $updatedPod = pod_stitch($podSource, %updates);
 ```
 
+### 8. Statement Modifiers, Heredocs, References & Verification Suite
+Raptor provides complete Perl 5 idioms alongside formal uppercase defensive programming keywords:
+
+```raku
+# Postfix Statement Modifiers
+$val = 42 if $ready;
+say $_ for [10, 20, 30];
+
+# Multi-line Heredoc
+my $doc = <<~EOF;
+    Indented text line 1
+    Indented text line 2
+    EOF
+
+# First-Class References & Dereferencing
+my $sref = \$val;
+$$sref = 100;
+my $aref = \[1, 2, 3];
+say $aref->[0];      # 1
+
+# Labels & Goto
+LOOP_START:
+$val += 1;
+goto LOOP_START if $val < 10;
+
+# Uppercase Defensive Programming Suite
+sub safe_sqrt(Num $n) {
+    PRE({ $n >= 0 }, "input cannot be negative");
+    my $res = sqrt($n);
+    POST({ $res >= 0 }, "output must be non-negative");
+    return $res;
+}
+
+ASSERT(safe_sqrt(16) == 4, "square root of 16 is 4");
+CHECK(is_ref($sref), "sref is a valid reference");
+PROPERTY("sqrt square", sub ($x where { $x >= 0 }) {
+    return abs(safe_sqrt($x * $x) - $x) < 0.0001;
+});
+```
+
 ## Building & Testing from Source
 
 ### Linux (WSL / Native)

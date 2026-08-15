@@ -1,4 +1,4 @@
-# Demonstration of Uniform Function Call Syntax (UFCS) in Raku5
+# Demonstration of Uniform Function Call Syntax (UFCS) in Raptor
 
 # 1. UFCS with Built-in Functions
 my Str $greeting = "hello world";
@@ -23,5 +23,5 @@ multi sub tag(Str $content, Str $t) {
     return "<" ~ $t ~ ">" ~ $content ~ "</" ~ $t ~ ">";
 }
 
-my $html = "welcome to raku5".uc().tag("h1");
+my $html = "welcome to raptor".uc().tag("h1");
 say "Generated HTML: " ~ $html;

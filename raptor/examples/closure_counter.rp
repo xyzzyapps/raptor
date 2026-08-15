@@ -1,4 +1,4 @@
-# Lexical Closures in Raku4
+# Lexical Closures in Raptor
 
 sub make_counter($start, $step) {
     my $count = $start;

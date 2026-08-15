@@ -52,6 +52,40 @@ func ParseProgram(source string) (*Program, error) {
 }
 
 
+func (p *Parser) checkModifier(stmt Stmt) (Stmt, error) {
+	tok := p.peek()
+	var modKind ModifierKind
+	switch tok.Type {
+	case TokIf:
+		modKind = ModIf
+	case TokUnless:
+		modKind = ModUnless
+	case TokWhile:
+		modKind = ModWhile
+	case TokUntil:
+		modKind = ModUntil
+	case TokFor:
+		modKind = ModFor
+	case TokGiven:
+		modKind = ModGiven
+	default:
+		return stmt, nil
+	}
+
+	p.advance()
+	varName := "$_"
+	condExpr, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+	return &ModifierStmt{
+		Kind:      modKind,
+		Target:    stmt,
+		Condition: condExpr,
+		VarName:   varName,
+	}, nil
+}
+
 func (p *Parser) parseStatement() (Stmt, error) {
 	tok := p.peek()
 
@@ -60,8 +94,19 @@ func (p *Parser) parseStatement() (Stmt, error) {
 		p.advance()
 		return nil, nil
 
-	case TokMy, TokOur:
+	case TokMy, TokOur, TokState:
 		return p.parseVarDecl()
+
+	case TokPackage, TokModule, TokUnit:
+		return p.parsePackageDecl()
+
+	case TokGrammar:
+		return p.parseGrammarDecl()
+
+	case TokEllipsis:
+		p.advance()
+		p.match(TokSemicolon)
+		return &ExprStmt{Expr: &StubExpr{Message: "..."}}, nil
 
 	case TokMulti:
 		p.advance()
@@ -73,18 +118,48 @@ func (p *Parser) parseStatement() (Stmt, error) {
 	case TokSub:
 		return p.parseSubDecl(false)
 
+	case TokGoto:
+		p.advance()
+		isSub := false
+		target := ""
+		if p.peek().Type == TokSubRef {
+			p.advance() // consume &
+			if p.peek().Type == TokIdent {
+				isSub = true
+				target = p.advance().Literal
+			} else {
+				return nil, fmt.Errorf("line %d: expected sub name after '&' in goto", p.peek().Line)
+			}
+		} else if p.peek().Type == TokIdent {
+			if strings.HasPrefix(p.peek().Literal, "&") {
+				isSub = true
+				target = strings.TrimPrefix(p.advance().Literal, "&")
+			} else {
+				target = p.advance().Literal
+			}
+		} else {
+			return nil, fmt.Errorf("line %d: expected label or &sub after 'goto', got %s", p.peek().Line, p.peek().Literal)
+		}
+		p.match(TokSemicolon)
+		return &GotoStmt{Target: target, IsSub: isSub}, nil
+
 	case TokReturn:
 		p.advance()
-		if p.peek().Type == TokSemicolon {
-			p.advance()
-			return &ReturnStmt{Value: nil}, nil
+		var val Expr
+		if p.peek().Type != TokSemicolon && p.peek().Type != TokIf && p.peek().Type != TokUnless && p.peek().Type != TokWhile && p.peek().Type != TokUntil && p.peek().Type != TokFor && p.peek().Type != TokGiven {
+			v, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			val = v
 		}
-		val, err := p.parseExpression(0)
+		var stmt Stmt = &ReturnStmt{Value: val}
+		stmt, err := p.checkModifier(stmt)
 		if err != nil {
 			return nil, err
 		}
 		p.match(TokSemicolon)
-		return &ReturnStmt{Value: val}, nil
+		return stmt, nil
 
 	case TokIf:
 		return p.parseIf()
@@ -139,22 +214,50 @@ func (p *Parser) parseStatement() (Stmt, error) {
 		return p.parseBlock()
 
 	default:
+		// Statement Label: LABEL: [stmt]
+		if p.peek().Type == TokIdent && p.peekNext().Type == TokColon {
+			name := p.advance().Literal
+			p.advance() // consume ':'
+			if p.peek().Type == TokSemicolon {
+				p.advance()
+				return &LabelStmt{Name: name, Stmt: nil}, nil
+			}
+			if p.peek().Type != TokEOF && p.peek().Type != TokRBrace {
+				innerStmt, err := p.parseStatement()
+				if err != nil {
+					return nil, err
+				}
+				return &LabelStmt{Name: name, Stmt: innerStmt}, nil
+			}
+			return &LabelStmt{Name: name, Stmt: nil}, nil
+		}
+
 		if p.peek().Type == TokIdent && p.peek().Literal == "take" {
 			p.advance()
 			val, err := p.parseExpression(0)
 			if err != nil {
 				return nil, err
 			}
+			var stmt Stmt = &TakeStmt{Value: val}
+			stmt, err = p.checkModifier(stmt)
+			if err != nil {
+				return nil, err
+			}
 			p.match(TokSemicolon)
-			return &TakeStmt{Value: val}, nil
+			return stmt, nil
 		}
 
 		expr, err := p.parseExpression(0)
 		if err != nil {
 			return nil, err
 		}
+		var stmt Stmt = &ExprStmt{Expr: expr}
+		stmt, err = p.checkModifier(stmt)
+		if err != nil {
+			return nil, err
+		}
 		p.match(TokSemicolon)
-		return &ExprStmt{Expr: expr}, nil
+		return stmt, nil
 	}
 }
 
@@ -203,14 +306,19 @@ func (p *Parser) parseVarDecl() (Stmt, error) {
 		init = val
 	}
 
-	p.match(TokSemicolon)
-	return &VarDeclStmt{
+	var stmt Stmt = &VarDeclStmt{
 		Scope: scope,
 		Type:  typeName,
 		Name:  nameTok.Literal,
 		Where: whereExpr,
 		Value: init,
-	}, nil
+	}
+	stmt, err := p.checkModifier(stmt)
+	if err != nil {
+		return nil, err
+	}
+	p.match(TokSemicolon)
+	return stmt, nil
 }
 
 func (p *Parser) parseSubDecl(isMulti bool) (Stmt, error) {
@@ -558,6 +666,108 @@ func (p *Parser) parseLoop() (Stmt, error) {
 	return &LoopStmt{Init: initExpr, Cond: condExpr, Step: stepExpr, Body: body}, nil
 }
 
+func (p *Parser) parsePackageDecl() (Stmt, error) {
+	isUnit := false
+	if p.peek().Type == TokUnit {
+		p.advance()
+		isUnit = true
+	}
+	if p.peek().Type == TokPackage || p.peek().Type == TokModule {
+		p.advance()
+	}
+	nameTok := p.peek()
+	if nameTok.Type != TokIdent && nameTok.Type != TokString {
+		return nil, fmt.Errorf("line %d: expected package/module name, got %s", nameTok.Line, nameTok.Literal)
+	}
+	p.advance()
+	name := nameTok.Literal
+
+	var body *BlockStmt
+	if p.peek().Type == TokLBrace {
+		b, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		body = b
+	} else {
+		p.match(TokSemicolon)
+	}
+
+	return &PackageDeclStmt{
+		Name:   name,
+		IsUnit: isUnit,
+		Body:   body,
+	}, nil
+}
+
+func (p *Parser) parseGrammarDecl() (Stmt, error) {
+	p.consume(TokGrammar)
+	nameTok := p.peek()
+	if nameTok.Type != TokIdent {
+		return nil, fmt.Errorf("line %d: expected grammar name, got %s", nameTok.Line, nameTok.Literal)
+	}
+	p.advance()
+	name := nameTok.Literal
+
+	if err := p.consume(TokLBrace); err != nil {
+		return nil, err
+	}
+
+	var rules []RuleDecl
+	for p.peek().Type != TokRBrace && !p.isAtEnd() {
+		tok := p.peek()
+		if tok.Type == TokRule || tok.Type == TokToken || tok.Type == TokRegex {
+			kind := p.advance().Literal
+			ruleNameTok := p.peek()
+			if ruleNameTok.Type != TokIdent {
+				return nil, fmt.Errorf("line %d: expected rule/token name, got %s", ruleNameTok.Line, ruleNameTok.Literal)
+			}
+			ruleName := p.advance().Literal
+
+			if err := p.consume(TokLBrace); err != nil {
+				return nil, err
+			}
+
+			var pattern strings.Builder
+			depth := 1
+			for !p.isAtEnd() && depth > 0 {
+				if p.peek().Type == TokLBrace {
+					depth++
+				} else if p.peek().Type == TokRBrace {
+					depth--
+					if depth == 0 {
+						p.advance() // consume closing }
+						break
+					}
+				}
+				pattern.WriteString(p.advance().Literal)
+				if p.peek().Type != TokRBrace {
+					pattern.WriteString(" ")
+				}
+			}
+
+			rules = append(rules, RuleDecl{
+				Kind:    kind,
+				Name:    ruleName,
+				Pattern: strings.TrimSpace(pattern.String()),
+			})
+		} else if tok.Type == TokSemicolon {
+			p.advance()
+		} else {
+			p.advance()
+		}
+	}
+
+	if err := p.consume(TokRBrace); err != nil {
+		return nil, err
+	}
+
+	return &GrammarDeclStmt{
+		Name:  name,
+		Rules: rules,
+	}, nil
+}
+
 func (p *Parser) parseUse() (Stmt, error) {
 	p.consume(TokUse)
 	modTok := p.peek()
@@ -722,6 +932,80 @@ func (p *Parser) parseExpression(minPrec int) (Expr, error) {
 			continue
 		}
 
+		// Arrow dereference / method call: $ref->[0], $ref->{"key"}, $ref->("arg"), $obj->method(args)
+		if tok.Type == TokArrow {
+			nextTok := p.peekNext()
+			if nextTok.Type == TokLBracket {
+				p.advance() // consume ->
+				p.advance() // consume [
+				idxExpr, err := p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+				if err := p.consume(TokRBracket); err != nil {
+					return nil, err
+				}
+				left = &DerefExpr{Kind: DerefArrowArray, Ref: left, Index: idxExpr}
+				continue
+			}
+			if nextTok.Type == TokLBrace {
+				p.advance() // consume ->
+				p.advance() // consume {
+				keyExpr, err := p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+				if err := p.consume(TokRBrace); err != nil {
+					return nil, err
+				}
+				left = &DerefExpr{Kind: DerefArrowHash, Ref: left, Index: keyExpr}
+				continue
+			}
+			if nextTok.Type == TokLParen {
+				p.advance() // consume ->
+				p.advance() // consume (
+				var args []Expr
+				for p.peek().Type != TokRParen && !p.isAtEnd() {
+					arg, err := p.parseExpression(0)
+					if err != nil {
+						return nil, err
+					}
+					args = append(args, arg)
+					if p.peek().Type == TokComma {
+						p.advance()
+					}
+				}
+				if err := p.consume(TokRParen); err != nil {
+					return nil, err
+				}
+				left = &DerefExpr{Kind: DerefArrowCode, Ref: left, Args: args}
+				continue
+			}
+			if nextTok.Type == TokIdent {
+				p.advance() // consume ->
+				methTok := p.advance()
+				methodName := methTok.Literal
+				var args []Expr
+				if p.peek().Type == TokLParen {
+					p.advance()
+					for p.peek().Type != TokRParen && !p.isAtEnd() {
+						arg, err := p.parseExpression(0)
+						if err != nil {
+							return nil, err
+						}
+						args = append(args, arg)
+						if p.peek().Type == TokComma {
+							p.advance()
+						}
+					}
+					p.consume(TokRParen)
+				}
+				left = &MethodCallExpr{Target: left, Method: methodName, Args: args}
+				continue
+			}
+			break
+		}
+
 		// Hash access %h<key>, $obj<key>, $arr[0]<key>, $h<k1><k2>
 		if tok.Type == TokAngleL {
 			if p.pos+2 < len(p.tokens) && p.tokens[p.pos+2].Type == TokAngleR {
@@ -827,7 +1111,7 @@ func (p *Parser) parsePrimary() (Expr, error) {
 		}
 		return &UnaryExpr{Op: op, Right: right}, nil
 
-	case TokPlus, TokNot, TokFileTest:
+	case TokPlus, TokNot, TokFileTest, TokConcat, TokQuestion, TokSo:
 		p.advance()
 		op := tok.Literal
 		right, err := p.parseExpression(8)
@@ -835,6 +1119,10 @@ func (p *Parser) parsePrimary() (Expr, error) {
 			return nil, err
 		}
 		return &UnaryExpr{Op: op, Right: right}, nil
+
+	case TokEllipsis:
+		p.advance()
+		return &StubExpr{Message: "..."}, nil
 
 
 	case TokInt:
@@ -865,12 +1153,116 @@ func (p *Parser) parsePrimary() (Expr, error) {
 		p.advance()
 		return p.parseInterpString(tok.Literal)
 
-	case TokScalar, TokArray, TokHash:
+	case TokBacktick:
+		p.advance()
+		return &BacktickExpr{Command: &LiteralExpr{Type: TokString, Value: tok.Literal}}, nil
+
+	case TokInterpBacktick:
+		p.advance()
+		cmdExpr, err := p.parseInterpString(tok.Literal)
+		if err != nil {
+			return nil, err
+		}
+		return &BacktickExpr{Command: cmdExpr}, nil
+
+	case TokBackslash:
+		p.advance()
+		target, err := p.parsePrimary()
+		if err != nil {
+			return nil, err
+		}
+		return &RefExpr{Expr: target}, nil
+
+	case TokScalar:
+		p.advance()
+		if tok.Literal == "$" {
+			if p.peek().Type == TokLBrace {
+				p.advance()
+				inner, err := p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+				if err := p.consume(TokRBrace); err != nil {
+					return nil, err
+				}
+				return &DerefExpr{Kind: DerefScalar, Ref: inner}, nil
+			}
+			inner, err := p.parsePrimary()
+			if err != nil {
+				return nil, err
+			}
+			return &DerefExpr{Kind: DerefScalar, Ref: inner}, nil
+		}
+		return &VarExpr{Name: tok.Literal}, nil
+
+	case TokArray:
+		p.advance()
+		if tok.Literal == "@" {
+			if p.peek().Type == TokLBrace {
+				p.advance()
+				inner, err := p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+				if err := p.consume(TokRBrace); err != nil {
+					return nil, err
+				}
+				return &DerefExpr{Kind: DerefArray, Ref: inner}, nil
+			}
+			inner, err := p.parsePrimary()
+			if err != nil {
+				return nil, err
+			}
+			return &DerefExpr{Kind: DerefArray, Ref: inner}, nil
+		}
+		return &VarExpr{Name: tok.Literal}, nil
+
+	case TokHash:
 		p.advance()
 		return &VarExpr{Name: tok.Literal}, nil
 
+	case TokPercent:
+		p.advance()
+		if p.peek().Type == TokLBrace {
+			p.advance()
+			inner, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			if err := p.consume(TokRBrace); err != nil {
+				return nil, err
+			}
+			return &DerefExpr{Kind: DerefHash, Ref: inner}, nil
+		}
+		if p.peek().Type == TokScalar {
+			inner, err := p.parsePrimary()
+			if err != nil {
+				return nil, err
+			}
+			return &DerefExpr{Kind: DerefHash, Ref: inner}, nil
+		}
+		return nil, fmt.Errorf("line %d: unexpected '%%' in expression", tok.Line)
+
 	case TokSubRef:
 		p.advance()
+		if p.peek().Type == TokLBrace {
+			p.advance()
+			inner, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			if err := p.consume(TokRBrace); err != nil {
+				return nil, err
+			}
+			return &DerefExpr{Kind: DerefCode, Ref: inner}, nil
+		}
+		if p.peek().Type == TokScalar {
+			inner, err := p.parsePrimary()
+			if err != nil {
+				return nil, err
+			}
+			return &DerefExpr{Kind: DerefCode, Ref: inner}, nil
+		}
 		idTok := p.peek()
 		if idTok.Type == TokIdent {
 			p.advance()
@@ -898,8 +1290,10 @@ func (p *Parser) parsePrimary() (Expr, error) {
 		}
 
 		// Function call without parens in statement or argument context (e.g. say 1, 2)
-		if p.peek().Type != TokDot && p.peek().Type != TokAssign && p.peek().Type != TokLParen && p.peek().Type != TokLBracket && p.peek().Type != TokAngleL && p.peek().Type != TokSemicolon && p.peek().Type != TokRParen && p.peek().Type != TokRBrace && p.peek().Type != TokRBracket && p.peek().Type != TokComma && !p.isBinaryOp(p.peek()) {
-
+		// Unary context prefixes (+, -, ~, ?, !, so, not, file tests, ...) may begin an
+		// argument expression: say +@a  =>  say(+@a)  (Raku numeric/string/boolean context)
+		canStartCallArg := !p.isBinaryOp(p.peek()) || isUnaryPrefixTok(p.peek())
+		if p.peek().Type != TokDot && p.peek().Type != TokAssign && p.peek().Type != TokLParen && p.peek().Type != TokLBracket && p.peek().Type != TokLBrace && p.peek().Type != TokAngleL && p.peek().Type != TokSemicolon && p.peek().Type != TokRParen && p.peek().Type != TokRBrace && p.peek().Type != TokRBracket && p.peek().Type != TokComma && canStartCallArg {
 
 
 			var args []Expr
@@ -958,26 +1352,99 @@ func (p *Parser) parsePrimary() (Expr, error) {
 
 	case TokLBrace:
 		p.advance()
-		var pairs [][2]Expr
-		for p.peek().Type != TokRBrace && !p.isAtEnd() {
-			kExpr, err := p.parseExpression(0)
-			if err != nil {
-				return nil, err
-			}
-			if p.peek().Type == TokFatArrow || p.peek().Type == TokComma {
-				p.advance()
-			}
-			vExpr, err := p.parseExpression(0)
-			if err != nil {
-				return nil, err
-			}
-			pairs = append(pairs, [2]Expr{kExpr, vExpr})
-			if p.peek().Type == TokComma {
-				p.advance()
-			}
+		if p.peek().Type == TokRBrace {
+			p.advance()
+			return &HashLiteralExpr{Pairs: nil}, nil
 		}
-		p.consume(TokRBrace)
-		return &HashLiteralExpr{Pairs: pairs}, nil
+		firstExpr, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		// Hash with fat arrow: { key => val, ... }
+		if p.peek().Type == TokFatArrow {
+			p.advance()
+			valExpr, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			pairs := [][2]Expr{{firstExpr, valExpr}}
+			for p.peek().Type == TokComma {
+				p.advance()
+				if p.peek().Type == TokRBrace {
+					break
+				}
+				k, err := p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+				if p.peek().Type == TokFatArrow || p.peek().Type == TokComma {
+					p.advance()
+				}
+				v, err := p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+				pairs = append(pairs, [2]Expr{k, v})
+			}
+			if err := p.consume(TokRBrace); err != nil {
+				return nil, err
+			}
+			return &HashLiteralExpr{Pairs: pairs}, nil
+		}
+		// Multi-statement closure: { expr; stmt... }
+		if p.peek().Type == TokSemicolon {
+			p.advance()
+			stmts := []Stmt{&ExprStmt{Expr: firstExpr}}
+			for p.peek().Type != TokRBrace && !p.isAtEnd() {
+				s, err := p.parseStatement()
+				if err != nil {
+					return nil, err
+				}
+				if s != nil {
+					stmts = append(stmts, s)
+				}
+			}
+			if err := p.consume(TokRBrace); err != nil {
+				return nil, err
+			}
+			return &ClosureExpr{Params: []Param{{Name: "$_"}}, Body: &BlockStmt{Stmts: stmts}}, nil
+		}
+		// Single-expression closure: { $b != 0 } or { $_ > 0 }
+		if p.peek().Type == TokRBrace {
+			p.advance()
+			return &ClosureExpr{Params: []Param{{Name: "$_"}}, Body: &BlockStmt{Stmts: []Stmt{&ReturnStmt{Value: firstExpr}}}}, nil
+		}
+		if p.peek().Type == TokComma {
+			p.advance()
+			valExpr, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			pairs := [][2]Expr{{firstExpr, valExpr}}
+			for p.peek().Type == TokComma {
+				p.advance()
+				if p.peek().Type == TokRBrace {
+					break
+				}
+				k, err := p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+				if p.peek().Type == TokComma || p.peek().Type == TokFatArrow {
+					p.advance()
+				}
+				v, err := p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+				pairs = append(pairs, [2]Expr{k, v})
+			}
+			if err := p.consume(TokRBrace); err != nil {
+				return nil, err
+			}
+			return &HashLiteralExpr{Pairs: pairs}, nil
+		}
+		return nil, fmt.Errorf("line %d: unexpected token %s in block/hash expression", p.peek().Line, p.peek().Literal)
 
 	case TokSub:
 		p.advance()
@@ -1170,6 +1637,10 @@ func (p *Parser) parseInterpString(raw string) (Expr, error) {
 			}
 			// Parse the expression
 			exprStr := string(exprBuf)
+			if strings.TrimSpace(exprStr) == "" {
+				buf = append(buf, '{', '}')
+				continue
+			}
 			lexer := NewLexer(exprStr)
 			var tokens []Token
 			for {
@@ -1256,6 +1727,17 @@ func (p *Parser) isBinaryOp(t Token) bool {
 	return getPrecedence(t) > 0 || t.Type == TokAssign || t.Type == TokAddAssign || t.Type == TokSubAssign || t.Type == TokConcatAssign || t.Type == TokDefinedOrAssign
 }
 
+// isUnaryPrefixTok reports whether t may begin a unary expression. This covers
+// Raku-style context coercions (+ numeric, ~ string, ?/so boolean, !/not negation)
+// plus file-test operators and the yada-yada stub, so that statements such as
+// `say +@a` and `say ~@a` parse as function calls with coerced arguments.
+func isUnaryPrefixTok(t Token) bool {
+	switch t.Type {
+	case TokPlus, TokMinus, TokNot, TokConcat, TokQuestion, TokSo, TokFileTest, TokEllipsis:
+		return true
+	}
+	return false
+}
 
 func (p *Parser) peek() Token {
 	if p.pos >= len(p.tokens) {

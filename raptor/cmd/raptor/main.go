@@ -210,6 +210,7 @@ func runScript(path string, scriptArgs []string, dllPath string, logger *slog.Lo
 	}
 
 	in := raptor.NewInterp()
+	in.GlobalEnv.Define("$*PROGRAM", raptor.StringValue(path))
 	in.GlobalEnv.Define("$*PROGRAM-NAME", raptor.StringValue(path))
 	in.GlobalEnv.Define("$0", raptor.StringValue(path))
 	var argsList []*raptor.Value

@@ -97,5 +97,5 @@ go test -v ./...
 ## Documentation Links
 
 - **[SPEC.md](SPEC.md)**: Engineering System Requirements Specification and Architecture Document for MoarVM Go Host Engine, Bytecode Emitter, 6Model, and Grammar Engine.
-- **[tutorial.md](tutorial.md)**: Complete developer guide and command reference for the Tcl language frontend, declarative grammar integration, and C/Go FFI.
+- **[TUTORIAL.md](TUTORIAL.md)**: Complete developer guide and command reference for the Tcl language frontend, declarative grammar integration, and C/Go FFI.
 - **[TODO.md](TODO.md)**: Development roadmap and milestones.

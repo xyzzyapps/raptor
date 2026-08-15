@@ -6,7 +6,7 @@
 Raptor is engineered specifically for the Post-LLM paradigm:
 
 1. **High Token Density & Brief Syntax**: By adopting the concise syntax of Perl 5 and modern Raku (variables using `$` `@` `%` sigils, canonical `Nil`, built-in operators) while completely omitting `class`, `has`, and `is` boilerplate, Raptor maximizes LLM context window efficiency and reduces model hallucinations.
-2. **Verification-First by Default**: LLMs generate code rapidly, but need tight, verifiable guardrails. Raptor builds formal Design-by-Contract (`pre`, `post`, `invariant`), inline testing (`TEST`, `subtest`), and randomized property-based quickcheck fuzzing (`property`) directly into the core grammar.
+2. **Verification-First by Default**: LLMs generate code rapidly, but need tight, verifiable guardrails. Raptor builds formal Design-by-Contract (`PRE`, `POST`, `INVARIANT`), inline testing (`TEST`), and randomized property-based quickcheck fuzzing (`PROPERTY`) directly into the core grammar.
 3. **Continuous Invariant Checking on Every Assignment**: Unlike static types checked once at compile time, every variable in Raptor can hold a dynamic `where` predicate that is rigorously evaluated upon **every mutation and assignment**. If an LLM or runtime mutation produces an invalid state, it is caught immediately at the point of failure.
 4. **Uniform Function Call Syntax (UFCS)**: Functional method chaining (`$val.func().transform()`) allows LLMs to construct clean data transformation pipelines without wrapping primitives in artificial classes.
 5. **C-ABI Struct Memory & Closures**: Contiguous C-compatible memory layout records (`struct Vector2 { num64 $x; num64 $y; }`) with first-class closure fields provide native C performance without OOP overhead.

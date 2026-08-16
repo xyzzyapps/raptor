@@ -1179,6 +1179,50 @@ audio_play_melody(@melody, @durations);
 
 say "Full-stack application initialized: DOM, Canvas, and WebAudio active!";
 `
+  },
+
+  {
+    title: "15. Topic variable \$_ and Unicode math",
+    desc: `
+      <p>C<$_> is the default topic: C<for>, C<given>, and bare C<say> use it. Unicode operators C<× ÷ √> and names C<∑ ∏> are real identifiers.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `$_ = "hello topic";
+say;   # prints $_
+
+for 1..4 {
+    say "n=", $_, "  n×n=", $_ × $_;
+}
+
+given 9 {
+    when 9 { say "√", $_, " = ", √$_; }
+}
+
+say "sum ", ∑(1, 2, 3, 4, 5);
+say "prod ", ∏(2, 3, 7);
+`
+  },
+
+  {
+    title: "16. JSON, HTTP surface, and \$_ pipelines",
+    desc: `
+      <p>JSON is built in. Format HTTP responses. Pipe values through C<$_>.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `my %payload = { "lang" => "Raptor", "ok" => True };
+my $js = to_json(%payload);
+say $js;
+my %back = from_json($js);
+say %back{"lang"};
+
+my $http = http_format_response(200, {:Server => "Raptor/1.0"}, $js);
+say $http;
+
+$_ = %back{"lang"};
+say "topic still ", $_;
+`
   }
 ];
 

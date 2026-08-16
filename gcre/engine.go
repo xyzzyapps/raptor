@@ -1,4 +1,4 @@
-package grammar
+package gcre
 
 import (
 	"fmt"
@@ -419,31 +419,16 @@ func (g *Grammar) CharClass(spec string, ctx *Context) *Match {
 	}
 	ch := ctx.Src[ctx.Pos]
 
-	negated := strings.HasPrefix(spec, "-") || strings.HasPrefix(spec, "<-")
-	clean := strings.TrimPrefix(spec, "<+[")
-	clean = strings.TrimPrefix(clean, "<[")
-	clean = strings.TrimPrefix(clean, "<-[")
+	negated := strings.Contains(spec, "<-") || (strings.HasPrefix(spec, "-") && !strings.HasPrefix(spec, "<["))
+	clean := spec
+	clean = strings.TrimPrefix(clean, "<")
+	clean = strings.TrimSuffix(clean, ">")
 	clean = strings.TrimPrefix(clean, "+[")
 	clean = strings.TrimPrefix(clean, "-[")
-	clean = strings.TrimSuffix(clean, "]>")
+	clean = strings.TrimPrefix(clean, "[")
 	clean = strings.TrimSuffix(clean, "]")
 
-	matched := false
-	runes := []rune(clean)
-	for i := 0; i < len(runes); i++ {
-		if i+3 < len(runes) && runes[i+1] == '.' && runes[i+2] == '.' {
-			startR := runes[i]
-			endR := runes[i+3]
-			if ch >= startR && ch <= endR {
-				matched = true
-				break
-			}
-			i += 3
-		} else if runes[i] == ch {
-			matched = true
-			break
-		}
-	}
+	matched := classContains(clean, ch)
 
 	if negated {
 		matched = !matched
@@ -454,6 +439,59 @@ func (g *Grammar) CharClass(spec string, ctx *Context) *Match {
 		return NewMatch(string(ch), ctx.Pos-1, ctx.Pos, true)
 	}
 	return NewMatch("", ctx.Pos, ctx.Pos, false)
+}
+
+func classContains(spec string, ch rune) bool {
+	runes := []rune(spec)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == '\\' && i+1 < len(runes) {
+			i++
+			esc := runes[i]
+			switch esc {
+			case 's':
+				if unicode.IsSpace(ch) {
+					return true
+				}
+			case 'n':
+				if ch == '\n' {
+					return true
+				}
+			case 't':
+				if ch == '\t' {
+					return true
+				}
+			case 'r':
+				if ch == '\r' {
+					return true
+				}
+			case 'd':
+				if unicode.IsDigit(ch) {
+					return true
+				}
+			case 'w':
+				if unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_' {
+					return true
+				}
+			default:
+				if ch == esc {
+					return true
+				}
+			}
+			continue
+		}
+		if i+3 < len(runes) && runes[i+1] == '.' && runes[i+2] == '.' {
+			if ch >= r && ch <= runes[i+3] {
+				return true
+			}
+			i += 3
+			continue
+		}
+		if r == ch {
+			return true
+		}
+	}
+	return false
 }
 
 // ListWithSep matches modified quantified lists: <item> % <sep>

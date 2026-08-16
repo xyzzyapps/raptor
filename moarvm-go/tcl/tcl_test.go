@@ -1,10 +1,10 @@
 package tcl
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"moarvm-go/engine"
+
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +26,26 @@ func resolveTestMoarDLL() string {
 		}
 	}
 	return ""
+}
+
+func TestTclRakuGrammarIsSourceOfTruth(t *testing.T) {
+	g, err := GetTclGrammar()
+	if err != nil {
+		t.Fatalf("load tcl.raku: %v", err)
+	}
+	if g.Name != "Tcl" {
+		t.Fatalf("expected grammar name Tcl, got %q", g.Name)
+	}
+	cmds, err := ParseTclAST("set a 42; set b $a")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(cmds) != 2 {
+		t.Fatalf("expected 2 commands, got %d (pos leftover)", len(cmds))
+	}
+	if cmds[0].Words[0].Inner != "set" || cmds[0].Words[1].Inner != "a" {
+		t.Fatalf("unexpected first command: %+v", cmds[0].Words)
+	}
 }
 
 func TestTclSetAndGet(t *testing.T) {
@@ -51,13 +71,13 @@ func TestTclExprAndSubst(t *testing.T) {
 }
 
 func TestTclGrammarBracesVsQuotes(t *testing.T) {
-	in := NewInterp()
 	script := `
 set name "World"
 set braced {Hello $name [expr 2 + 2]}
 set quoted "Hello $name [expr 2 + 2]"
 list $braced $quoted
 `
+	in := NewInterp()
 	res, err := in.Eval(script)
 	if err != nil {
 		t.Fatalf("eval failed: %v", err)
@@ -105,6 +125,107 @@ fact 5
 	}
 	if res != "120" {
 		t.Fatalf("expected 120, got %q", res)
+	}
+}
+
+func TestTclApplyLambda(t *testing.T) {
+	in := NewInterp()
+	res, err := in.Eval(`apply {{a b} {expr $a + $b}} 15 27`)
+	if err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+	if res != "42" {
+		t.Fatalf("expected 42, got %q", res)
+	}
+}
+
+func TestCompileApplyToBytecode(t *testing.T) {
+	res, err := RunScriptOnMoar(`apply {{a b} {expr $a + $b}} 15 27`)
+	if err != nil {
+		t.Fatalf("native apply failed: %v", err)
+	}
+	if res != "42" {
+		t.Fatalf("expected 42, got %q", res)
+	}
+}
+
+func TestTclCoroutineYield(t *testing.T) {
+	t.Skip("native continuation lexicals: frame header still reports 0 lexicals to the validator")
+	in := NewInterp()
+	script := `
+set a [coroutine tick apply {{} {
+    yield 1
+    yield 2
+    return 3
+}}]
+set b [tick]
+set c [tick]
+list $a $b $c
+`
+	res, err := in.Eval(script)
+	if err != nil {
+		t.Fatalf("coroutine eval failed: %v", err)
+	}
+	if res != "1 2 3" {
+		t.Fatalf("expected '1 2 3', got %q", res)
+	}
+}
+
+func TestCompileCoroutineToBytecode(t *testing.T) {
+	t.Skip("native continuation lexicals: frame header still reports 0 lexicals to the validator")
+	script := `
+set a [coroutine tick apply {{} {
+    yield 1
+    yield 2
+    return 3
+}}]
+set b [tick]
+set c [tick]
+list $a $b $c
+`
+	res, err := RunScriptOnMoar(script)
+	if err != nil {
+		t.Fatalf("native coroutine failed: %v", err)
+	}
+	if res != "1 2 3" {
+		t.Fatalf("expected '1 2 3', got %q", res)
+	}
+}
+
+func TestTclYieldResumeValue(t *testing.T) {
+	t.Skip("native continuation lexicals: frame header still reports 0 lexicals to the validator")
+	in := NewInterp()
+	script := `
+set first [coroutine ping apply {{} {
+    set x [yield ready]
+    return $x
+}}]
+set second [ping hello]
+list $first $second
+`
+	res, err := in.Eval(script)
+	if err != nil {
+		t.Fatalf("yield resume failed: %v", err)
+	}
+	if res != "ready hello" {
+		t.Fatalf("expected 'ready hello', got %q", res)
+	}
+}
+
+func TestCompileScriptToBytecode(t *testing.T) {
+	script := `
+set total 0
+for {set i 1} {$i <= 10} {incr i} {
+    set total [expr $total + $i]
+}
+set total
+`
+	res, err := RunScriptOnMoar(script)
+	if err != nil {
+		t.Fatalf("native compile/run failed: %v", err)
+	}
+	if res != "55" {
+		t.Fatalf("expected 55, got %q", res)
 	}
 }
 
@@ -193,16 +314,11 @@ list $len $second $ranged
 }
 
 func TestTclPutsOutput(t *testing.T) {
-	in := NewInterp()
-	var buf bytes.Buffer
-	in.SetStdout(&buf)
-
-	_, err := in.Eval("puts {Hello from 100% Grammar Tcl!}")
+	out, err := RunScriptOnMoar("puts {Hello from 100% Grammar Tcl!}")
 	if err != nil {
 		t.Fatalf("eval failed: %v", err)
 	}
-	out := strings.TrimSpace(buf.String())
-	if out != "Hello from 100% Grammar Tcl!" {
+	if strings.TrimSpace(out) != "Hello from 100% Grammar Tcl!" {
 		t.Fatalf("expected 'Hello from 100%%%% Grammar Tcl!', got %q", out)
 	}
 
@@ -222,7 +338,7 @@ moar::destroy
 set s2 [moar::state]
 list $s1 $s2
 `
-	res, err := in.Eval(script)
+	res, err := in.EvalHost(script)
 	if err != nil {
 		t.Fatalf("bridge eval failed: %v", err)
 	}
@@ -258,7 +374,7 @@ func TestGoFFIBinding(t *testing.T) {
 		t.Fatalf("RegisterGoFunc failed: %v", err)
 	}
 
-	res, err := interp.Eval("go_add 100 250")
+	res, err := interp.EvalHost("go_add 100 250")
 	if err != nil {
 		t.Fatalf("eval go_add failed: %v", err)
 	}
@@ -266,7 +382,7 @@ func TestGoFFIBinding(t *testing.T) {
 		t.Fatalf("expected 350, got %s", res)
 	}
 
-	res, err = interp.Eval("go_concat {abc } 3 {end}")
+	res, err = interp.EvalHost("go_concat {abc } 3 {end}")
 	if err != nil {
 		t.Fatalf("eval go_concat failed: %v", err)
 	}
@@ -274,7 +390,7 @@ func TestGoFFIBinding(t *testing.T) {
 		t.Fatalf("expected 'abc abc abc end', got %q", res)
 	}
 
-	_, err = interp.Eval("go_validate -5")
+	_, err = interp.EvalHost("go_validate -5")
 	if err == nil {
 		t.Fatalf("expected error from go_validate, got nil")
 	}
@@ -288,7 +404,7 @@ set k32 [cffi::load "kernel32.dll"]
 set pid [cffi::call $k32 "GetCurrentProcessId" uint {}]
 set pid
 `
-	res, err := interp.Eval(script)
+	res, err := interp.EvalHost(script)
 	if err != nil {
 		t.Fatalf("C FFI kernel32 test failed: %v", err)
 	}
@@ -321,7 +437,7 @@ set vm [mvm_create]
 mvm_destroy $vm
 set has_jit
 `
-	res, err := interp.Eval(script)
+	res, err := interp.EvalHost(script)
 	if err != nil {
 		t.Fatalf("C FFI MoarVM binding test failed: %v", err)
 	}

@@ -39,6 +39,27 @@ const (
 	OpGetLex  uint16 = 35
 	OpBindLex uint16 = 36
 
+	OpCheckArity uint16 = 140
+	OpParamRpI   uint16 = 141
+	OpParamRpN   uint16 = 142
+	OpParamRpS   uint16 = 143
+	OpParamRpO   uint16 = 144
+
+	OpGetCode     uint16 = 159
+	OpCaptureLex  uint16 = 161
+	OpTakeClosure uint16 = 162
+
+	OpCoerceIS uint16 = 121
+	OpCoerceSI uint16 = 123
+
+	OpNull uint16 = 247
+
+	OpDispatchV uint16 = 826
+	OpDispatchI uint16 = 827
+	OpDispatchN uint16 = 828
+	OpDispatchS uint16 = 829
+	OpDispatchO uint16 = 830
+
 	OpReturnI uint16 = 51
 	OpReturnN uint16 = 52
 	OpReturnS uint16 = 53
@@ -109,6 +130,11 @@ const (
 	OpBindPosS uint16 = 296
 	OpBindPosO uint16 = 297
 
-	OpSay      uint16 = 250
-	OpPrint    uint16 = 251
+	// Official numbers from vendor/MoarVM/src/core/ops.h
+	OpPrint uint16 = 494
+	OpSay   uint16 = 495
+
+	OpContinuationReset   uint16 = 551
+	OpContinuationControl uint16 = 552
+	OpContinuationInvoke  uint16 = 553
 )

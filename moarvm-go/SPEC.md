@@ -1,129 +1,130 @@
-# moarvm-go - System Architecture & Requirements Specification (SPEC.md)
+# moarvm-go — Architecture & binding audit (SPEC.md)
 
-## 1. Executive Summary
+## 1. Purpose
 
-`moarvm-go` is an enterprise-grade Go package and FFI binding for **MoarVM** (the 64-bit 6model virtual machine with JIT compilation). It provides a full CompUnit v7 bytecode emitter, 6Model metamodel representations, a declarative Perl 6 / Raku grammar and regex pattern matching engine, dynamic C FFI bindings to native `moar.dll`, and a mock engine for isolated unit testing.
+`moarvm-go` embeds MoarVM from Go, emits CompUnit v7, and hosts a Tcl frontend whose **parse is grammatical**, **operations are Go compilers**, and **execution is MoarVM bytecode** (software interpreter or native `moar.dll`).
 
 ---
 
-## 2. Architecture Diagram
+## 2. Architecture
 
 ```mermaid
 flowchart TD
-    subgraph HostApp [Go Application Layer]
-        UserApp["External Go Application / Language Frontend"]
-        CustomGrammar["Custom .raku Grammar Definition"]
+    subgraph Frontend [Tcl frontend]
+        Src["Tcl source"]
+        AST["ParseTclAST — grammar words/commands"]
+        Ops["Go operations — compiler.go"]
+        CU["CompUnit v7 bytes"]
     end
 
-    subgraph MoarVMGoPkg [moarvm-go Subsystems]
-        GrammarEngine["grammar/ (Declarative Perl 6 / Raku Grammar Engine)"]
-        ExprClimber["grammar/ (EXPR Operator Precedence Table)"]
-        GrammarLoader["grammar/ (Dynamic .raku Grammar Loader)"]
-        Engine["engine/ (VM Interface, Lifecycle, Win32 FFI)"]
-        BytecodeEmitter["engine/ (CompUnit v7 Emitter, Frame, Opcodes)"]
-        SixModel["engine/ (6Model Metamodel, KnowHOW, Dispatch)"]
+    subgraph Engine [engine/]
+        Emit["CompUnitEmitter / FrameEmitter"]
+        Native["moar.dll MVM_vm_run_bytecode"]
+        FFI["WindowsMoarVM / POSIX stub"]
+        Six["6Model KnowHOW"]
     end
 
-    subgraph NativeCVM [Native MoarVM C Subsystem]
-        MoarDLL["build/moarvm/bin/moar.dll (Win32 Dynamic Library)"]
-        MoarSrc["vendor/MoarVM (MoarVM C Source Engine)"]
+    subgraph Native [Native MoarVM]
+        DLL["moar.dll"]
+        Exe["moar.exe"]
     end
 
-    UserApp --> Engine
-    UserApp --> GrammarEngine
-    CustomGrammar --> GrammarLoader
-    GrammarLoader --> GrammarEngine
-    GrammarEngine --> ExprClimber
-    UserApp --> BytecodeEmitter
-    BytecodeEmitter --> SixModel
-    Engine --> MoarDLL
-    MoarSrc --> MoarDLL
+    Src --> AST --> Ops --> Emit --> CU
+    CU --> Interp
+    CU --> FFI
+    FFI --> DLL
+    CU -.-> Exe
 ```
 
----
-
-## 3. Subsystem Specifications
-
-### 3.1 `engine` Subsystem (`moarvm-go/engine/`)
-
-#### 3.1.1 VM Lifecycle & Win32 FFI Interface (`vm_windows.go`, `vm_mock.go`)
-- **Native Dynamic Library Loading**:
-  - Dynamically binds to `moar.dll` via `syscall.LoadLibrary` and resolves entry points via `syscall.GetProcAddress`.
-  - Exported C API entry points:
-    - `MVM_vm_create_instance()`: Allocates and initializes an `MVMInstance` structure with thread pool and garbage collector.
-    - `MVM_vm_destroy_instance(instance)`: Tears down memory pools, finalizes active threads, and frees the instance.
-    - `MVM_vm_run_file(instance, path)`: Loads and executes a `.moarvm` bytecode file from disk.
-    - `MVM_vm_dump_bytecode(instance, path)`: Dumps bytecode assembly instructions for inspection.
-- **Engine Interface Abstraction (`engine.go`)**:
-  ```go
-  type Engine interface {
-      Init(ctx context.Context) error
-      Destroy() error
-      State() EngineState
-      RunFile(ctx context.Context, path string) error
-      RunBytecode(ctx context.Context, bc []byte) error
-      SetProgName(name string) error
-      SetArgs(args []string) error
-      SetLibPaths(paths []string) error
-  }
-  ```
-- **State Machine**:
-  `UNINITIALIZED` $\rightarrow$ `READY` $\rightarrow$ `RUNNING` $\rightarrow$ `TERMINATED` / `ERROR`.
-
-#### 3.1.2 CompUnit v7 Bytecode Emitter (`bytecode.go`, `opcodes.go`)
-- **Binary Format Layout**:
-  - 4-byte Magic Number: `MOAR` (`0x4D 0x4F 0x41 0x52`).
-  - 4-byte Version: `7` (CompUnit Format Version 7).
-  - String Heap: Length-prefixed UTF-8 string table.
-  - Serialization Context (SC) Section: Object graph references and type mappings.
-  - Frame Descriptors:
-    - Local register count and register types (`RegInt64`, `RegNum64`, `RegStr`, `RegObj`).
-    - Bytecode instruction stream (variable-length 16-bit opcode operands).
-- **Opcode Catalog**:
-  - Arithmetic: `OpConstI64`, `OpConstN64`, `OpConstS`, `OpAddI`, `OpSubI`, `OpMulI`, `OpDivI`, `OpModI`.
-  - Control Flow: `OpGoto`, `OpIfI`, `OpUnlessI`, `OpReturn`, `OpReturnI`, `OpReturnS`, `OpReturnO`.
-  - Object & Invocation: `OpCreate`, `OpFindMeth`, `OpInvokeV`, `OpInvokeO`.
-
-#### 3.1.3 6Model Metamodel Engine (`sixmodel.go`)
-- Implements the Raku/MoarVM 6Model object system:
-  - **`KnowHOW`**: The root boot metamodel capable of creating primitive types and classes.
-  - **`Class`**: Represents user-defined and built-in classes with attribute layout tables and method tables.
-  - **`ParametricRole`**: Parametric roles with composition, conflict detection, and attribute flattening.
-  - **Method Dispatch Tables**: Single and multiple dispatch resolution caching.
+**Invariant:** Go operations do not compute user-visible results for compiled commands. They emit `const_*`, arithmetic, compare, `goto` / `if_i` / `unless_i`, `say`, `concat_s`, `return_*`. The interpreter or VM produces output.
 
 ---
 
-### 3.2 `grammar` Subsystem (`moarvm-go/grammar/`)
+## 3. Engine bindings — what exists
 
-#### 3.2.1 Declarative Grammar Engine (`engine.go`, `match.go`, `context.go`)
-- **Grammar Primitives**:
-  - `rule`: Standard rule with implicit `:sigspace` whitespace skipping.
-  - `token`: Exact regex token without automatic whitespace skipping.
-  - `regex`: Backtracking pattern matcher.
-- **Combinators & Character Classes**:
-  - Character classes (`<[a..z0..9_]>`, `<-[0..9]>`).
-  - Zero-width assertions: positive lookahead (`<?before ...>`), negative lookahead (`<!before ...>`), positive lookbehind (`<?after ...>`), negative lookbehind (`<!after ...>`).
-  - Separated list combinators (`<elem> % <sep>`, `<elem> %% <sep>`).
-- **Match Object Model (`Match`)**:
-  - `Str`: Matched substring slice.
-  - `From` / `To`: Character indices in source text.
-  - `Named`: Named subrule captures map.
-  - `Pos`: Positional captures slice (`$0`, `$1`, ...).
-  - `Made`: AST payload produced by action methods (`make` / `$/.made`).
+### 3.1 Lifecycle (`vm_windows.go`)
 
-#### 3.2.2 Operator Precedence Climber (`expr_table.go`)
-- Precedence parsing table for declarative expressions:
-  - Precedence levels: tightest to loosest.
-  - Associativity: `left`, `right`, `non`, `list`, `chain`.
-  - Operator types: `prefix`, `postfix`, `infix`, `circumfix`, `postcircumfix`, `ternary`.
+| C symbol | Bound | Notes |
+| :--- | :---: | :--- |
+| `MVM_vm_create_instance` | yes | Pointer stored as `uintptr` |
+| `MVM_vm_destroy_instance` | yes | |
+| `MVM_vm_run_file` | yes | Return value ignored — failures are silent |
+| `MVM_vm_set_clargs` | yes | Optional; missing symbol is ignored |
+| `MVM_vm_set_prog_name` | yes | |
+| `MVM_vm_set_lib_path` | yes | |
 
-#### 3.2.3 Dynamic Grammar Loader (`loader.go`)
-- Parses standalone `.raku` grammar files into executable `*grammar.Grammar` instances at runtime.
-- Functions: `LoadGrammarFromString(source)` and `LoadGrammarFromFile(path)`.
+`RunBytecode` prefers `MVM_vm_run_bytecode` (in-memory). If that symbol is missing it writes a temp file and calls `MVM_vm_run_file`.
+
+### 3.2 CompUnit emitter (`bytecode.go`)
+
+Emits magic `MOARVM\r\n`, version 7, 96-byte header, frames (54-byte header + local types), string heap (UTF-8 flagged, 4-byte padded), empty SC / extop / callsite / annotation segments.
+
+Jump operands are **absolute offsets from the start of the frame bytecode**, matching `interp.c` (`cur_op = bytecode_start + GET_UI32(...)`).
+
+### 3.3 Opcodes (`opcodes.go`)
+
+Register kinds and core opcode numbers match `src/core/ops.h` for: `const_i64` (4), `const_s` (7), `set` (8), `goto` (23), `if_i`/`unless_i` (24/25), `return_*` (51–55), integer ALU/compare, `concat_s` (208), `print` (494), `say` (495).
+
+Execution is native: `FindMoarDLL` + `MVM_vm_run_bytecode` (in-process). `moar.exe` is only a fallback.
+
+### 3.5 6Model (`sixmodel.go`)
+
+In-Go KnowHOW / class / role tables. **Not** serialized into the CompUnit SC, so native MoarVM never sees these objects.
+
+### 3.6 Grammar (`../gcre`)
+
+**gcre** (Grammar Compatible Regular Expressions) is a sibling Go module: a **subset of Raku** grammar/regex notation that is **PEG-compatible**. Authors write `.raku` (no semantic actions). Tcl’s only grammar in this repo is [`tcl/tcl.raku`](tcl/tcl.raku). Other sample grammars live under [`../gcre/examples`](../gcre/examples). Parsing does **not** run on `moar.dll`.
 
 ---
 
-## 4. Verification & Testing Standards
+## 4. Binding gaps (audit)
 
-- **Unit Testing**: 100% test coverage across lifecycle, mock VM, CompUnit emitter, 6Model metamodel, and grammar combinators.
-- **Dynamic FFI Validation**: Dynamic library calls verified against native `moar.dll` in `build/moarvm/bin/moar.dll`.
+These are the important holes versus a production Moar embed:
+
+1. **No in-memory bytecode entry point.** Moar exposes richer instance setup than `run_file`. There is no bind for running a buffer, installing an HLL, or setting a deserialize/load frame beyond header integers.
+2. **`MVM_vm_run_file` errors discarded.** `Call()` HRESULT/errno is ignored; panics in the DLL can kill the process.
+3. **Incomplete CompUnit.** Missing serialization context (SC) object graph, code objects, callsites, handlers, annotations, local debug names. Native `moar` typically cannot treat our files as a real HLL mainline.
+4. **Opcode catalog is a subset** and was previously wrong for `say`/`print` (250/251 vs 495/494). Always regenerate numbers from `ops.h`.
+5. **No extops / HLL config.** Tcl helpers are fake opcodes, not registered MVM extops.
+6. **No GC / thread / dispatcher / spesh / JIT controls.**
+7. **No exception or I/O capture from the native VM** (stdout is whatever the DLL writes).
+8. **POSIX embed is a stub** relative to Windows `LoadDLL`.
+9. **Grammar is not NQP on Moar.** A future step is compiling `tcl.raku` to NQP/Moar and parsing inside the VM.
+10. **6Model not wired to SC.** Classes exist only in Go.
+11. **Temp-file race / cleanup** on `RunBytecode`.
+12. **Frame local types** are mostly `int64`; string ops reuse integer slots. Native validation may reject this.
+
+---
+
+## 5. Tcl frontend requirements
+
+- **Parse** must go through `ParseTclAST` / `tcl.raku` (no `strings.Fields` compiler).
+- **Operations** live in Go and emit frames via `CompUnitEmitter`.
+- **Execute** in-process via `moar.dll` (`RunNative`). Compile error if a command cannot be emitted.
+- `EvalHost` remains for FFI / `moar::*` only.
+- Milestone 1: `EmitSayString("42")` + `moar.exe` prints `42` (`TestNativeMoarSays42`).
+- Milestone 2–3, 5: `set` / `expr` / `puts` / `apply` (`getcode` + `takeclosure` + `dispatch_*` `boot-code`) / `proc` / `string` / lists run on `moar.exe`.
+- Milestone 4: `coroutine` / `yield` emit `continuationreset` / `continuationcontrol` / `continuationinvoke`; native validation of lexical slots is still incomplete (tests skipped).
+- Milestone 6: CLI and `Eval` no longer interpret in Go.
+- **Closures:** `getcode` + `takeclosure` + `dispatch_*` `boot-code`.
+- **Coroutines:** official continuation ops (native lexical layout still incomplete).
+
+---
+
+## 6. Verification
+
+```powershell
+go test ./...
+go run ./cmd/tcl examples/demo_tcl.tcl
+go run ./cmd/tcl -emit-only -o build/demo.moarvm examples/demo_tcl.tcl
+```
+
+Expected demo output:
+
+```
+Sum of 1..10 = 55
+List count: 3
+First item: Apple
+```
+
+Bytecode files must start with `MOARVM` and a little-endian version `7`.

@@ -4,6 +4,8 @@
 
 # Raptor
 
+**Backends:** `--go` (default), `--moar` (native MoarVM opcodes, interoperable with `../moarvm-go` Tcl), `--wasm` (TinyGo / browser FFI). Parsing is **[gcre](../gcre)** — Grammar Compatible Regular Expressions, a Raku subset that is PEG-compatible (`runtime/raptor.raku`). Docs: PodLit man pages in `docs/*.pod` (`raptor doc perlraptor`). Topic variable `$_` is fully supported.
+
 Raptor is a post-LLM dynamic language — a Perl 5 subset of Raku targeting **MoarVM** in Go. Engineered for AI-assisted software generation, it combines high token density, verification-first contracts, continuous assignment predicate invariants, Uniform Function Call Syntax (UFCS), backticks & shell execution (`` `...` ``, `qx{}`), dynamic grammars (`grammar`, `rule`, `token`, `regex`), standard contextual variables (`@*ARGS`, `%*ENV`, `$*RAPTOR`, `$*KERNEL`, `$*PID`, `$?`, `$!`), statement modifiers, heredocs, labels and goto, first-class references, dynamic `AUTOLOAD` dispatch, lexical and persistent variable scoping (`my`, `our`, `state`), package namespaces and symbol table metaprogramming (`%Package::`, `package_symbols`), pluggable regex engines (`samre`), C-ABI struct memory, Charmbracelet terminal styling, literate programming with PodLit, and standalone binary packaging (`raptor pack`).
 
 1. **Backtick & Shell Command Execution**:

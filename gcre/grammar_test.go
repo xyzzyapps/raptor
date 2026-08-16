@@ -1,10 +1,6 @@
-package grammar
+package gcre
 
 import (
-	"context"
-	"moarvm-go/engine"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -110,73 +106,6 @@ func TestGrammarActions(t *testing.T) {
 
 	if calc.Left != 100 || calc.Op != "+" || calc.Right != 42 {
 		t.Fatalf("unexpected AST: %+v", calc)
-	}
-}
-
-func resolveTestMoarDLL() string {
-	candidates := []string{
-		filepath.Join("..", "build", "moarvm", "bin", "moar.dll"),
-		filepath.Join("build", "moarvm", "bin", "moar.dll"),
-		filepath.Join("..", "..", "moarvm-go", "build", "moarvm", "bin", "moar.dll"),
-	}
-	for _, c := range candidates {
-		if abs, err := filepath.Abs(c); err == nil {
-			if _, err := os.Stat(abs); err == nil {
-				return abs
-			}
-		}
-	}
-	return ""
-}
-
-func TestMoarVMExecutionFromGrammar(t *testing.T) {
-	absPath := resolveTestMoarDLL()
-	if absPath == "" {
-		t.Skip("moar.dll not found, skipping MoarVM test")
-	}
-
-	vm, err := moargo.New(moargo.Config{
-		DLLPath:  absPath,
-		ProgName: "grammar_moar_test",
-	})
-
-	if err != nil {
-		t.Fatalf("failed creating MoarVM: %v", err)
-	}
-	ctx := context.Background()
-	if err := vm.Init(ctx); err != nil {
-		t.Fatalf("failed init MoarVM: %v", err)
-	}
-	defer vm.Destroy()
-
-	cu := moargo.NewCompUnitEmitter("grammar_hll")
-	f := cu.NewFrame("main", 4)
-	f.SetLocalType(0, moargo.RegInt64)
-	f.SetLocalType(1, moargo.RegInt64)
-	f.SetLocalType(2, moargo.RegInt64)
-
-	f.EmitOp(moargo.OpConstI64)
-	f.EmitReg(0)
-	f.EmitInt64(300)
-
-	f.EmitOp(moargo.OpConstI64)
-	f.EmitReg(1)
-	f.EmitInt64(12)
-
-	f.EmitOp(moargo.OpAddI)
-	f.EmitReg(2)
-	f.EmitReg(0)
-	f.EmitReg(1)
-
-	f.EmitOp(moargo.OpReturn)
-
-	bc, err := cu.Emit()
-	if err != nil {
-		t.Fatalf("failed emitting bytecode: %v", err)
-	}
-
-	if err := vm.RunBytecode(ctx, bc); err != nil {
-		t.Fatalf("failed running bytecode: %v", err)
 	}
 }
 

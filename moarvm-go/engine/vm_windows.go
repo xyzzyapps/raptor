@@ -25,6 +25,7 @@ type WindowsMoarVM struct {
 	procCreate   *syscall.Proc
 	procDestroy  *syscall.Proc
 	procRunFile  *syscall.Proc
+	procRunBC    *syscall.Proc
 	procSetArgs  *syscall.Proc
 	procSetProg  *syscall.Proc
 	procSetLib   *syscall.Proc
@@ -97,6 +98,7 @@ func (v *WindowsMoarVM) Init(ctx context.Context) error {
 	v.procCreate = procCreate
 	v.procDestroy = procDestroy
 	v.procRunFile = procRunFile
+	v.procRunBC, _ = dll.FindProc("MVM_vm_run_bytecode")
 	v.procSetArgs, _ = dll.FindProc("MVM_vm_set_clargs")
 	v.procSetProg, _ = dll.FindProc("MVM_vm_set_prog_name")
 	v.procSetLib, _ = dll.FindProc("MVM_vm_set_lib_path")
@@ -188,29 +190,41 @@ func (v *WindowsMoarVM) RunBytecode(ctx context.Context, bytecode []byte) error 
 	if v.state != StateReady {
 		return fmt.Errorf("%w: current state %s", ErrNotInitialized, v.state)
 	}
-
-	tmpFile, err := os.CreateTemp("", "moar_*.mvm")
-	if err != nil {
-		return fmt.Errorf("moarvm: failed creating temporary bytecode file: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.Write(bytecode); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("moarvm: failed writing bytecode to temp file: %w", err)
-	}
-	_ = tmpFile.Close()
-
-	cFilePath, err := syscall.BytePtrFromString(tmpFile.Name())
-	if err != nil {
-		return fmt.Errorf("moarvm: invalid filepath string: %w", err)
+	if len(bytecode) == 0 {
+		return fmt.Errorf("moarvm: empty bytecode")
 	}
 
 	v.state = StateRunning
-	v.logger.Info("executing temporary bytecode", slog.Int("bytes", len(bytecode)))
+	v.logger.Info("executing bytecode buffer", slog.Int("bytes", len(bytecode)))
 
+	if v.procRunBC != nil {
+		_, _, _ = v.procRunBC.Call(
+			v.instance,
+			uintptr(unsafe.Pointer(&bytecode[0])),
+			uintptr(uint32(len(bytecode))),
+		)
+		v.state = StateReady
+		return nil
+	}
+
+	tmpFile, err := os.CreateTemp("", "moar_*.mvm")
+	if err != nil {
+		v.state = StateReady
+		return fmt.Errorf("moarvm: failed creating temporary bytecode file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	if _, err := tmpFile.Write(bytecode); err != nil {
+		_ = tmpFile.Close()
+		v.state = StateReady
+		return fmt.Errorf("moarvm: failed writing bytecode to temp file: %w", err)
+	}
+	_ = tmpFile.Close()
+	cFilePath, err := syscall.BytePtrFromString(tmpFile.Name())
+	if err != nil {
+		v.state = StateReady
+		return err
+	}
 	_, _, _ = v.procRunFile.Call(v.instance, uintptr(unsafe.Pointer(cFilePath)))
-
 	v.state = StateReady
 	return nil
 }

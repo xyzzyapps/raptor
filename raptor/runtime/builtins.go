@@ -12,6 +12,18 @@ import (
 	"time"
 )
 
+func (in *Interp) topicValue() *Value {
+	if in.CurrentEnv != nil {
+		if v, ok := in.CurrentEnv.Lookup("$_"); ok && v != nil {
+			return v
+		}
+	}
+	if v, ok := in.GlobalEnv.Lookup("$_"); ok && v != nil {
+		return v
+	}
+	return NilValue()
+}
+
 func (in *Interp) registerBuiltins() {
 	// Predefined Globals: Environment & Process
 	envMap := make(map[string]*Value)
@@ -54,6 +66,8 @@ func (in *Interp) registerBuiltins() {
 	// Punctuation variables
 	in.GlobalEnv.Define("$?", IntValue(0))
 	in.GlobalEnv.Define("$!", NilValue())
+	in.GlobalEnv.Define("$_", NilValue())
+	in.GlobalEnv.Define("$/", NilValue())
 
 	var argsList []*Value
 	if len(os.Args) > 1 {
@@ -276,8 +290,10 @@ func (in *Interp) registerBuiltins() {
 	in.Builtins["Str"] = in.Builtins["str"]
 
 	in.Builtins["say"] = func(in *Interp, args []*Value) (*Value, error) {
-
-
+		if len(args) == 0 {
+			fmt.Fprintln(in.Stdout, in.topicValue().String())
+			return NilValue(), nil
+		}
 		var parts []string
 		for _, a := range args {
 			parts = append(parts, a.String())
@@ -287,6 +303,10 @@ func (in *Interp) registerBuiltins() {
 	}
 
 	in.Builtins["print"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) == 0 {
+			fmt.Fprint(in.Stdout, in.topicValue().String())
+			return NilValue(), nil
+		}
 		var parts []string
 		for _, a := range args {
 			parts = append(parts, a.String())

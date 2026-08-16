@@ -7,11 +7,20 @@ import (
 )
 
 // CompUnitEmitter builds a valid MoarVM version 7 Compilation Unit (.moarvm binary).
+// Callsite flags (MVM_CALLSITE_ARG_*).
+const (
+	CallArgObj uint8 = 1
+	CallArgInt uint8 = 2
+	CallArgNum uint8 = 4
+	CallArgStr uint8 = 8
+)
+
 type CompUnitEmitter struct {
-	HLLName   string
-	strings   []string
-	stringMap map[string]uint32
-	frames    []*FrameEmitter
+	HLLName    string
+	strings    []string
+	stringMap  map[string]uint32
+	frames     []*FrameEmitter
+	callsites  [][]uint8
 }
 
 // NewCompUnitEmitter creates a new compilation unit builder.
@@ -37,25 +46,96 @@ func (cu *CompUnitEmitter) AddString(s string) uint32 {
 }
 
 // FrameEmitter builds bytecode for an individual static frame.
+type lexicalSlot struct {
+	Name string
+	Type uint16
+}
+
 type FrameEmitter struct {
 	cu         *CompUnitEmitter
+	Index      int
 	Name       string
 	CUUID      string
 	NumLocals  uint32
 	LocalTypes []uint16
+	Lexicals   []lexicalSlot
+	Outer      int // frame index; -1 means self (no outer)
 	Bytecode   *bytes.Buffer
+}
+
+// NumFrames returns how many static frames are in the unit.
+func (cu *CompUnitEmitter) NumFrames() int {
+	return len(cu.frames)
+}
+
+// FrameAt returns the static frame at index i.
+func (cu *CompUnitEmitter) FrameAt(i int) *FrameEmitter {
+	return cu.frames[i]
+}
+
+// AddCallsite records a positional callsite and returns its index.
+func (cu *CompUnitEmitter) AddCallsite(flags []uint8) uint16 {
+	for i, f := range cu.callsites {
+		if len(f) != len(flags) {
+			continue
+		}
+		ok := true
+		for j := range f {
+			if f[j] != flags[j] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return uint16(i)
+		}
+	}
+	cu.callsites = append(cu.callsites, append([]uint8(nil), flags...))
+	return uint16(len(cu.callsites) - 1)
+}
+
+// EmitGetCode writes getcode $dst, frameIndex.
+func (fe *FrameEmitter) EmitGetCode(dst uint16, frameIndex uint16) {
+	fe.EmitOp(OpGetCode)
+	fe.EmitReg(dst)
+	fe.EmitReg(frameIndex)
+}
+
+// EmitDispatchS writes dispatch_s $dst, dispatcherName, callsite, args...
+func (fe *FrameEmitter) EmitDispatchS(dst uint16, dispatcher string, cs uint16, args ...uint16) {
+	fe.EmitOp(OpDispatchS)
+	fe.EmitReg(dst)
+	fe.EmitString(dispatcher)
+	fe.EmitReg(cs)
+	for _, a := range args {
+		fe.EmitReg(a)
+	}
+}
+
+// EmitDispatchI writes dispatch_i $dst, dispatcherName, callsite, args...
+func (fe *FrameEmitter) EmitDispatchI(dst uint16, dispatcher string, cs uint16, args ...uint16) {
+	fe.EmitOp(OpDispatchI)
+	fe.EmitReg(dst)
+	fe.EmitString(dispatcher)
+	fe.EmitReg(cs)
+	for _, a := range args {
+		fe.EmitReg(a)
+	}
 }
 
 // NewFrame creates a new static frame in the compilation unit.
 func (cu *CompUnitEmitter) NewFrame(name string, numLocals int) *FrameEmitter {
 	cu.AddString(name)
 	cu.AddString("cuuid_" + name)
+	idx := len(cu.frames)
 	fe := &FrameEmitter{
 		cu:         cu,
+		Index:      idx,
 		Name:       name,
 		CUUID:      "cuuid_" + name,
 		NumLocals:  uint32(numLocals),
 		LocalTypes: make([]uint16, numLocals),
+		Outer:      idx,
 		Bytecode:   new(bytes.Buffer),
 	}
 	for i := range fe.LocalTypes {
@@ -63,6 +143,18 @@ func (cu *CompUnitEmitter) NewFrame(name string, numLocals int) *FrameEmitter {
 	}
 	cu.frames = append(cu.frames, fe)
 	return fe
+}
+
+func (fe *FrameEmitter) LexicalCount() int { return len(fe.Lexicals) }
+
+func (fe *FrameEmitter) AddLexical(name string, typ uint16) uint16 {
+	fe.cu.AddString(name)
+	fe.Lexicals = append(fe.Lexicals, lexicalSlot{Name: name, Type: typ})
+	return uint16(len(fe.Lexicals) - 1)
+}
+
+func (fe *FrameEmitter) SetOuter(frameIndex int) {
+	fe.Outer = frameIndex
 }
 
 func (fe *FrameEmitter) SetLocalType(idx int, regKind uint16) {
@@ -110,6 +202,15 @@ func (cu *CompUnitEmitter) Emit() ([]byte, error) {
 		return nil, fmt.Errorf("compilation unit must have at least one frame")
 	}
 
+	// Register remaining frame/lexical names before packing the string heap.
+	for _, f := range cu.frames {
+		cu.AddString(f.CUUID)
+		cu.AddString(f.Name)
+		for _, lx := range f.Lexicals {
+			cu.AddString(lx.Name)
+		}
+	}
+
 	// 1. Pack string heap segment
 	var stringSeg bytes.Buffer
 	for _, s := range cu.strings {
@@ -145,11 +246,15 @@ func (cu *CompUnitEmitter) Emit() ([]byte, error) {
 		// Frame header (FRAME_HEADER_SIZE = 54 bytes)
 		binary.Write(&frameSeg, binary.LittleEndian, frameBCOffsets[i]) // 0..3 bytecode_pos
 		binary.Write(&frameSeg, binary.LittleEndian, frameBCSizes[i])   // 4..7 bytecode_size
-		binary.Write(&frameSeg, binary.LittleEndian, f.NumLocals)       // 8..11 num_locals
-		binary.Write(&frameSeg, binary.LittleEndian, uint32(0))         // 12..15 num_lexicals
-		binary.Write(&frameSeg, binary.LittleEndian, cuuidIdx)          // 16..19 cuuid string index
-		binary.Write(&frameSeg, binary.LittleEndian, nameIdx)           // 20..23 name string index
-		binary.Write(&frameSeg, binary.LittleEndian, uint16(i))         // 24..25 outer_fixup
+		outer := f.Outer
+		if outer < 0 {
+			outer = i
+		}
+		binary.Write(&frameSeg, binary.LittleEndian, f.NumLocals)                 // 8..11 num_locals
+		binary.Write(&frameSeg, binary.LittleEndian, uint32(len(f.Lexicals)))     // 12..15 num_lexicals
+		binary.Write(&frameSeg, binary.LittleEndian, cuuidIdx)                    // 16..19 cuuid string index
+		binary.Write(&frameSeg, binary.LittleEndian, nameIdx)                     // 20..23 name string index
+		binary.Write(&frameSeg, binary.LittleEndian, uint16(outer))               // 24..25 outer_fixup
 		binary.Write(&frameSeg, binary.LittleEndian, uint32(0))         // 26..29 annot_offset
 		binary.Write(&frameSeg, binary.LittleEndian, uint32(0))         // 30..33 num_annotations
 		binary.Write(&frameSeg, binary.LittleEndian, uint32(0))         // 34..37 num_handlers
@@ -163,12 +268,23 @@ func (cu *CompUnitEmitter) Emit() ([]byte, error) {
 		for _, lt := range f.LocalTypes {
 			binary.Write(&frameSeg, binary.LittleEndian, lt)
 		}
+		for _, lx := range f.Lexicals {
+			binary.Write(&frameSeg, binary.LittleEndian, lx.Type)
+			binary.Write(&frameSeg, binary.LittleEndian, cu.AddString(lx.Name))
+		}
 	}
 
 	// 4. Empty auxiliary segments
 	var scSeg bytes.Buffer
 	var extopSeg bytes.Buffer
 	var callsiteSeg bytes.Buffer
+	for _, flags := range cu.callsites {
+		binary.Write(&callsiteSeg, binary.LittleEndian, uint16(len(flags)))
+		callsiteSeg.Write(flags)
+		if len(flags)%2 != 0 {
+			callsiteSeg.WriteByte(0)
+		}
+	}
 	var scDataSeg bytes.Buffer
 	var annotationSeg bytes.Buffer
 
@@ -184,7 +300,7 @@ func (cu *CompUnitEmitter) Emit() ([]byte, error) {
 	frameCount := uint32(len(cu.frames))
 
 	callsiteOffset := frameOffset + uint32(frameSeg.Len())
-	callsiteCount := uint32(0)
+	callsiteCount := uint32(len(cu.callsites))
 
 	stringOffset := callsiteOffset + uint32(callsiteSeg.Len())
 	stringCount := uint32(len(cu.strings))
@@ -200,7 +316,7 @@ func (cu *CompUnitEmitter) Emit() ([]byte, error) {
 
 	hllNameIdx := uint32(0)
 	mainlineFrame := uint32(1) // 1-based index (frame 0 + 1)
-	mainFrame := uint32(0)
+	mainFrame := uint32(1)
 	loadFrame := uint32(0)
 	deserializeFrame := uint32(0)
 

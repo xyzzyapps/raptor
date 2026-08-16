@@ -1,0 +1,35 @@
+=begin pod
+
+=TITLE perlpodlit - literate PodLit
+
+=head1 NAME
+
+perlpodlit - weave, tangle, stitch
+
+=head1 SYNOPSIS
+
+    raptor weave file.pod -o doc.md
+    raptor tangle file.pod -o out/
+    raptor stitch file.pod changed.rp
+    raptor file.pod          # run the tangled main chunk
+
+=head1 DESCRIPTION
+
+A PodLit document is valid Pod 6 with named code chunks.
+
+    =begin pod
+
+    =head1 A program
+
+    =begin code :tangle<main.rp>
+    say "hello";
+    =end code
+
+    =end pod
+
+B<Weave> produces markdown for humans.  B<Tangle> extracts source
+files.  B<Stitch> writes edited source back into the Pod.
+
+The manuals in F<docs/*.pod> are themselves PodLit.
+
+=end pod

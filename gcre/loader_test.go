@@ -1,21 +1,11 @@
-package grammar
+package gcre
 
 import (
 	"testing"
 )
 
 func TestLoadGrammarFromString(t *testing.T) {
-	grammarSrc := `
-# Simple arithmetic grammar in Raku syntax
-grammar MiniCalc {
-    rule TOP { <statement> }
-    rule statement { <ident> '=' <number> ';' }
-    token ident { <\w+> }
-    token number { <\d+> }
-}
-`
-
-	g, err := LoadGrammarFromString(grammarSrc)
+	g, err := LoadGrammarFromFile("examples/minicalc.raku")
 	if err != nil {
 		t.Fatalf("failed loading grammar from string: %v", err)
 	}
@@ -38,5 +28,20 @@ grammar MiniCalc {
 	stmtMatch := match.Get("statement")
 	if !stmtMatch.Ok {
 		t.Fatalf("expected statement subrule to match")
+	}
+}
+
+func TestLoadIndependentJSONLikeGrammar(t *testing.T) {
+	g, err := LoadGrammarFromFile("examples/tinyjson.raku")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := g.Parse(`"hi"`, nil)
+	if err != nil || !m.Ok {
+		t.Fatalf("string value: %v ok=%v", err, m != nil && m.Ok)
+	}
+	m, err = g.Parse(`123`, nil)
+	if err != nil || !m.Ok {
+		t.Fatalf("number value: %v", err)
 	}
 }

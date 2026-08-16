@@ -59,6 +59,7 @@ type Interp struct {
 	CurrentPackage  string
 	StateVars       map[Stmt]*StateCell
 	Grammars        map[string]*GrammarDeclStmt
+	CurrentEnv      *Env
 }
 
 
@@ -113,6 +114,44 @@ func NewInterp() *Interp {
 	}
 	in.Builtins["e"] = func(in *Interp, args []*Value) (*Value, error) {
 		return FloatValue(math.E), nil
+	}
+	in.Builtins["∑"] = func(in *Interp, args []*Value) (*Value, error) {
+		var sum float64
+		for _, a := range args {
+			if a.Type == ValArray {
+				for _, e := range a.ArrayVal {
+					sum += in.toFloat(e)
+				}
+			} else {
+				sum += in.toFloat(a)
+			}
+		}
+		if sum == float64(int64(sum)) {
+			return IntValue(int64(sum)), nil
+		}
+		return FloatValue(sum), nil
+	}
+	in.Builtins["∏"] = func(in *Interp, args []*Value) (*Value, error) {
+		prod := 1.0
+		for _, a := range args {
+			if a.Type == ValArray {
+				for _, e := range a.ArrayVal {
+					prod *= in.toFloat(e)
+				}
+			} else {
+				prod *= in.toFloat(a)
+			}
+		}
+		if prod == float64(int64(prod)) {
+			return IntValue(int64(prod)), nil
+		}
+		return FloatValue(prod), nil
+	}
+	in.Builtins["√"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) == 0 {
+			return FloatValue(0), nil
+		}
+		return FloatValue(math.Sqrt(in.toFloat(args[0]))), nil
 	}
 
 	return in
@@ -260,25 +299,10 @@ func (in *Interp) lookupAutoload(funcName string, env *Env) (*Value, string, boo
 
 // Eval parses and evaluates a Raku5 source code string.
 func (in *Interp) Eval(source string) (*Value, error) {
-	lexer := NewLexer(source)
-	var tokens []Token
-	for {
-		tok := lexer.NextToken()
-		if tok.Type == TokError {
-			return nil, fmt.Errorf("lex error at line %d, col %d: %s", tok.Line, tok.Col, tok.Literal)
-		}
-		tokens = append(tokens, tok)
-		if tok.Type == TokEOF {
-			break
-		}
-	}
-
-	parser := NewParser(tokens)
-	prog, err := parser.Parse()
+	prog, err := ParseProgram(source)
 	if err != nil {
 		return nil, err
 	}
-
 	return in.EvalProgram(prog, in.GlobalEnv)
 }
 
@@ -706,9 +730,8 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		for _, item := range list {
 			if s.VarName != "" {
 				childEnv.Define(s.VarName, item)
-			} else {
-				childEnv.Define("$_", item)
 			}
+			childEnv.Define("$_", item)
 			bVal, err := in.evalBlock(s.Body, childEnv)
 			if err != nil {
 				if _, ok := err.(*BreakSignal); ok {
@@ -977,6 +1000,9 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 
 
 func (in *Interp) evalBlock(b *BlockStmt, env *Env) (*Value, error) {
+	prev := in.CurrentEnv
+	in.CurrentEnv = env
+	defer func() { in.CurrentEnv = prev }()
 	if b == nil || len(b.Stmts) == 0 {
 		return NilValue(), nil
 	}
@@ -2493,7 +2519,7 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 	}
 
 	switch op {
-	case "+":
+	case "+", "±":
 		if left.Type == ValFloat || right.Type == ValFloat {
 			return FloatValue(in.toFloat(left) + in.toFloat(right)), nil
 		}
@@ -2503,12 +2529,12 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 			return FloatValue(in.toFloat(left) - in.toFloat(right)), nil
 		}
 		return IntValue(in.toInt(left) - in.toInt(right)), nil
-	case "*":
+	case "*", "×":
 		if left.Type == ValFloat || right.Type == ValFloat {
 			return FloatValue(in.toFloat(left) * in.toFloat(right)), nil
 		}
 		return IntValue(in.toInt(left) * in.toInt(right)), nil
-	case "/":
+	case "/", "÷":
 		rF := in.toFloat(right)
 		if rF == 0.0 {
 			return nil, fmt.Errorf("division by zero")
@@ -2573,6 +2599,10 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 		}
 		return right, nil
 
+	case "∈":
+		return BoolValue(in.smartMatch(left, right)), nil
+	case "∉":
+		return BoolValue(!in.smartMatch(left, right)), nil
 	case "=~":
 		pattern := right.String()
 		matched, err := RegexMatch(pattern, left.String())

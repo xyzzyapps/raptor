@@ -15,6 +15,8 @@ import (
 
 func main() {
 	dllFlag := flag.String("dll", "", "Path to moar.dll")
+	outFlag := flag.String("o", "", "Write compiled CompUnit v7 bytecode to this .moarvm file")
+	emitOnly := flag.Bool("emit-only", false, "Parse and compile to bytecode, do not run")
 	flag.Parse()
 
 	args := flag.Args()
@@ -33,27 +35,34 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: could not read script %q: %v\n", scriptPath, err)
 		os.Exit(1)
 	}
+	script := string(content)
 
-	in := tcl.NewInterp()
+	compiler := tcl.NewCompiler()
+	bc, compileErr := compiler.CompileScript(script)
 
-	if dllPath != "" {
-		vm, err := moargo.New(moargo.Config{
-			DLLPath: dllPath,
-			Logger:  logger,
-		})
-		if err == nil {
-			tcl.NewBridge(in, vm)
-		}
-	}
-
-
-	res, err := in.Eval(string(content))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Tcl execution error: %v\n", err)
+	if compileErr != nil {
+		fmt.Fprintf(os.Stderr, "compile error: %v\n", compileErr)
 		os.Exit(1)
 	}
-	if res != "" {
-		fmt.Println(res)
+
+	if *outFlag != "" {
+		if err := tcl.WriteCompUnit(*outFlag, bc); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing %s: %v\n", *outFlag, err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "wrote %s (%d bytes)\n", *outFlag, len(bc))
+	}
+
+	if *emitOnly {
+		return
+	}
+
+	if dllPath != "" {
+		os.Setenv("MOAR_DLL", dllPath)
+	}
+	if err := moargo.ExecNative(bc); err != nil {
+		fmt.Fprintf(os.Stderr, "MoarVM: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -106,7 +115,12 @@ func resolveDLL(flagPath string) string {
 	if flagPath != "" {
 		return flagPath
 	}
+	if found := moargo.FindMoarDLL(); found != "" {
+		return found
+	}
 	candidates := []string{
+		"bin/moar.dll",
+		"vendor/MoarVM/moar.dll",
 		"build/moarvm/bin/moar.dll",
 		"../build/moarvm/bin/moar.dll",
 		"../../build/moarvm/bin/moar.dll",

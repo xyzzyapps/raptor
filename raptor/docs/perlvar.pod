@@ -1,0 +1,57 @@
+=begin pod
+
+=TITLE perlvar - Raptor predefined variables
+
+=head1 NAME
+
+perlvar - predefined variables
+
+=head1 DESCRIPTION
+
+=over 4
+
+=item $_
+
+The default topic.  C<for @list { ... }> and C<given $x { ... }> bind
+C<$_>.  C<say> and C<print> with no arguments print C<$_>.
+
+=item $/
+
+The last successful match object (when a grammar or regex match
+succeeds).
+
+=item $!
+
+The last error.
+
+=item $?
+
+The last exit status (shell / backticks).
+
+=item @*ARGS / @ARGV
+
+Command-line arguments to the script.
+
+=item %*ENV / %ENV
+
+The process environment.
+
+=item $*PID / $$
+
+Process id.
+
+=item $*CWD $*OS $*EXECUTABLE $*PROGRAM
+
+Runtime identity.
+
+=item $*RAPTOR $*KERNEL
+
+Hashes describing the compiler and host.
+
+=item $*WASM
+
+True when the C<--wasm> backend (or a WASM build) is active.
+
+=back
+
+=end pod

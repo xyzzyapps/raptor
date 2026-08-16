@@ -1,13 +1,17 @@
-# ==============================================================================
-# Tcl Declarative Grammar in Raku / NQP Notation
-# ==============================================================================
+# Tcl grammar — gcre (Grammar Compatible Regular Expressions):
+# a Raku subset that is PEG-compatible. Loaded via gcre.LoadGrammarFromString.
 
 grammar Tcl {
-    rule TOP {
-        <command_line>*
+    token TOP {
+        <.sep>*
+        [ <command_line> <.sep>* ]*
     }
 
-    rule command_line {
+    token sep {
+        [ ';' | \n | \r | ' ' | \t ]+
+    }
+
+    token command_line {
         | <comment>
         | <command>
     }
@@ -16,8 +20,8 @@ grammar Tcl {
         '#' <-[\n]>*
     }
 
-    rule command {
-        <word>+
+    token command {
+        <word> [ [ ' ' | \t ]+ <word> ]*
     }
 
     token word {
@@ -53,7 +57,7 @@ grammar Tcl {
     }
 
     token var_subst {
-        '$' [<ident> | '{' <ident> '}' | <ident> '(' <ident> ')']
+        '$' [ <ident> | '{' <ident> '}' | <ident> '(' <ident> ')' ]
     }
 
     token escape_seq {

@@ -63,21 +63,7 @@ func (c *Compiler) CompileAST(stmts []Stmt) ([]byte, error) {
 
 // CompileScript parses and compiles Raku5 source code into MoarVM bytecode.
 func (c *Compiler) CompileScript(source string) ([]byte, error) {
-	lexer := NewLexer(source)
-	var tokens []Token
-	for {
-		tok := lexer.NextToken()
-		if tok.Type == TokError {
-			return nil, fmt.Errorf("lex error at line %d, col %d: %s", tok.Line, tok.Col, tok.Literal)
-		}
-		tokens = append(tokens, tok)
-		if tok.Type == TokEOF {
-			break
-		}
-	}
-
-	parser := NewParser(tokens)
-	prog, err := parser.Parse()
+	prog, err := ParseProgram(source)
 	if err != nil {
 		return nil, fmt.Errorf("parse failed: %w", err)
 	}
@@ -219,6 +205,37 @@ func (c *Compiler) compileStmt(stmt Stmt) error {
 		c.frame = oldFrame
 
 	case *ExprStmt:
+		if call, ok := s.Expr.(*CallExpr); ok {
+			name := ""
+			if v, ok := call.Callee.(*VarExpr); ok {
+				name = v.Name
+			}
+			if name == "say" || name == "print" {
+				for i, a := range call.Args {
+					r, err := c.compileExpr(a)
+					if err != nil {
+						return err
+					}
+					if name == "say" && i == len(call.Args)-1 {
+						c.frame.EmitOp(moargo.OpSay)
+						c.frame.EmitReg(r)
+					} else {
+						c.frame.EmitOp(moargo.OpPrint)
+						c.frame.EmitReg(r)
+					}
+				}
+				if name == "say" && len(call.Args) == 0 {
+					r := c.tempReg()
+					c.frame.SetLocalType(int(r), moargo.RegStr)
+					c.frame.EmitOp(moargo.OpConstS)
+					c.frame.EmitReg(r)
+					c.frame.EmitString("")
+					c.frame.EmitOp(moargo.OpSay)
+					c.frame.EmitReg(r)
+				}
+				return nil
+			}
+		}
 		_, err := c.compileExpr(s.Expr)
 		return err
 

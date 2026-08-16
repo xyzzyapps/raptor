@@ -1,0 +1,56 @@
+{
+package gcre
+}
+
+// Tiny Raku grammar syntax = PEG subset spelled as valid Raku.
+// No semantic actions here. Translation lives in raku_walk.go.
+
+GrammarFile <- _ GrammarDecl _ EOF
+
+GrammarDecl <- "grammar" _ NameTok _ "{" _ RuleDecl* _ "}"
+
+RuleDecl <- RuleKind _ NameTok _ "{" _ RxAlt _ "}" _
+
+RuleKind <- "token" / "regex" / "rule"
+
+RxAlt <- (_ "|")? _ RxSeq (_ "|" _ RxSeq)*
+
+RxSeq <- RxAtom (_ RxAtom)*
+
+RxAtom <- RxPrimary Quant?
+
+Quant <- "*" / "+" / "?"
+
+RxPrimary <- RxGroup / RxAngle / RxSq / RxDq / RxEsc / "." / "#" / ";" / "$"
+
+RxGroup <- "[" _ RxAlt _ "]"
+
+RxAngle <- "<" DotOpt AngleBody ">"
+
+DotOpt <- "." / ""
+
+AngleBody <- ClassSpec / NameTok
+
+ClassSpec <- "-"? "[" ClassInner "]"
+
+ClassInner <- ClassPart*
+
+ClassPart <- "\\" . / !"]" .
+
+RxSq <- "'" SqChar* "'"
+
+SqChar <- "\\" . / !"'" .
+
+RxDq <- '"' DqChar* '"'
+
+DqChar <- "\\" . / !'"' .
+
+RxEsc <- "\\" [ntrsdwNTRSDW] / "\\" .
+
+NameTok <- [a-zA-Z_] [a-zA-Z0-9_-]*
+
+_ <- ( [ \t\r\n]+ / Comment )*
+
+Comment <- "#" (![\n] .)*
+
+EOF <- !.

@@ -1,0 +1,56 @@
+=begin pod
+
+=TITLE perlop - Raptor operators
+
+=head1 NAME
+
+perlop - operators
+
+=head1 DESCRIPTION
+
+Operators follow Raku precedence more than Perl 5, but the usual
+suspects work.
+
+=head2 Arithmetic
+
+    +  -  *  /  %  **  div  mod  %%
+
+Unicode aliases (they really are operators, not pretty comments):
+
+    ×   ÷   ±   √
+
+C<√$x> is prefix square root.  C<∑> and C<∏> are callable names
+(C<∑(1,2,3)>).
+
+=head2 String and list
+
+    ~   x   xx   ..
+
+=head2 Comparison
+
+    == != < <= > >=  eq ne lt gt le ge  <=>  cmp  ~~  =~  !~
+
+Chained comparisons: C<0 <= $x <= 10>.
+
+=head2 Logical
+
+    && || //  and or orelse
+    ?? !!     ? :
+
+C<//> is defined-or.  C<//=> assigns only when the left side is
+undefined.
+
+=head2 Bitwise (numeric)
+
+    +&  +|  +^  +<  +>
+
+=head2 Assignment
+
+    =  +=  -=  ~=  *=  /=  //=
+
+=head2 Custom operators
+
+    multi sub infix:<⊕>($a, $b) { $a + $b + 1 }
+    multi sub ∑(@xs) { ... }     # Unicode name
+
+=end pod

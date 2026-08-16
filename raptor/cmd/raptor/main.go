@@ -22,7 +22,24 @@ func main() {
 	outFlag := flag.String("o", "", "Output binary/bytecode file path")
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 	evalFlag := flag.String("e", "", "Evaluate inline code string")
+	goFlag := flag.Bool("go", false, "Use the Go interpreter backend")
+	moarFlag := flag.Bool("moar", false, "Use the native MoarVM opcode backend")
+	wasmFlag := flag.Bool("wasm", false, "Build/run via TinyGo WASM and enable WASM FFI helpers")
+	backendFlag := flag.String("backend", "", "Execution backend: go, moar, or wasm")
 	flag.Parse()
+
+	backend := "go"
+	if *backendFlag != "" {
+		backend = strings.ToLower(*backendFlag)
+	}
+	if *wasmFlag {
+		backend = "wasm"
+	} else if *moarFlag {
+		backend = "moar"
+	} else if *goFlag {
+		backend = "go"
+	}
+	raptor.SetDefaultBackend(backend)
 
 	logLevel := slog.LevelWarn
 	if *verboseFlag {
@@ -31,6 +48,12 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 
 	if *evalFlag != "" {
+		if backend == "wasm" {
+			if err := raptor.CompileToWASM(*outFlag); err != nil {
+				fmt.Fprintf(os.Stderr, "wasm build: %v\n", err)
+				os.Exit(1)
+			}
+		}
 		runInline(*evalFlag, *dllFlag, logger)
 		return
 	}
@@ -145,6 +168,7 @@ func printUsage() {
 	fmt.Println("  raptor init [package_name]           Initialize new raptor.json package")
 	fmt.Println("  raptor get <repo-url>[@tag]          Clone Git package into raptor_modules/")
 	fmt.Println("  raptor install                       Install dependencies from raptor.json")
+	fmt.Println("  raptor --go | --moar | --wasm        Select backend (Go interp, native MoarVM, TinyGo WASM)")
 	fmt.Println("  raptor serve [--port 8080]           Launch WebAssembly In-Browser REPL & Playground")
 	fmt.Println("  raptor weave <file.pod> [-o doc.md]   Weave literate POD to Markdown")
 	fmt.Println("  raptor tangle <file.pod> [-o out_dir] Tangle literate POD to source code files")
@@ -160,7 +184,7 @@ func printUsage() {
 
 func runInline(code, dllPath string, logger *slog.Logger) {
 	in := raptor.NewInterp()
-	val, err := in.Eval(code)
+	val, err := in.EvalOnBackend(code, raptor.DefaultBackend())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Runtime error: %v\n", err)
 		os.Exit(1)
@@ -220,7 +244,13 @@ func runScript(path string, scriptArgs []string, dllPath string, logger *slog.Lo
 	in.GlobalEnv.Define("@*ARGS", raptor.ArrayValue(argsList))
 	in.GlobalEnv.Define("@ARGV", raptor.ArrayValue(argsList))
 
-	val, err := in.Eval(sourceCode)
+	if raptor.DefaultBackend() == raptor.BackendWASM {
+		if err := raptor.CompileToWASM(""); err != nil {
+			fmt.Fprintf(os.Stderr, "wasm build: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	val, err := in.EvalOnBackend(sourceCode, raptor.DefaultBackend())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Runtime error: %v\n", err)
 		os.Exit(1)
@@ -483,7 +513,7 @@ func runTests(paths []string, logger *slog.Logger) {
 		}
 
 		in := raptor.NewInterp()
-		_, err = in.Eval(string(content))
+		_, err = in.EvalOnBackend(string(content), raptor.DefaultBackend())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Script error in %s: %v\n", tf, err)
 			totalFailedFiles++
@@ -522,8 +552,10 @@ func runDoc(topic string) {
 	}
 	docsDir := filepath.Join(findRaptorModuleRoot(), "docs")
 	candidates := []string{
+		filepath.Join(docsDir, topic+".pod"),
 		filepath.Join(docsDir, topic+".md"),
 		filepath.Join(docsDir, topic),
+		filepath.Join(docsDir, "perlraptor.pod"),
 		filepath.Join(docsDir, "01_introduction.md"),
 	}
 

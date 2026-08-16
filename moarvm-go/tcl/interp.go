@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"moarvm-go/engine"
 	"os"
 	"strings"
 	"sync"
@@ -18,7 +19,24 @@ type Interp struct {
 	scopes   []*Scope
 	stdout   io.Writer
 	logger   *slog.Logger
-	cffiMgr  *CFFIManager
+	cffiMgr   *CFFIManager
+	evalDepth int
+	coros     map[string]*goCoro
+	curCoro   string
+}
+
+// goCoro is a stackful Tcl coroutine hosted on a goroutine (Go fallback path).
+type goCoro struct {
+	name   string
+	toCo   chan string
+	fromCo chan goCoroMsg
+	dead   bool
+}
+
+type goCoroMsg struct {
+	val  string
+	done bool
+	err  error
 }
 
 // NewInterp creates a new initialized Tcl interpreter with all standard built-in commands and C/Go FFI.
@@ -29,6 +47,7 @@ func NewInterp() *Interp {
 		scopes:   []*Scope{NewScope()},
 		stdout:   os.Stdout,
 		logger:   slog.Default(),
+		coros:    make(map[string]*goCoro),
 	}
 
 	interp.registerBuiltins()
@@ -134,9 +153,56 @@ func (in *Interp) MarkGlobal(names ...string) {
 	}
 }
 
-// Eval parses and executes a Tcl script 100% through the Grammar engine.
+// Eval parses the script with the Tcl grammar (MoarVM parse constructs),
+// compiles supported operations to MoarVM bytecode in Go, and interprets
+// that bytecode. Scripts that use commands the compiler cannot emit
+// (proc, FFI, string, …) fall back to the Go command implementations.
 func (in *Interp) Eval(script string) (string, error) {
+	in.mu.Lock()
+	in.evalDepth++
+	depth := in.evalDepth
+	in.mu.Unlock()
+	defer func() {
+		in.mu.Lock()
+		in.evalDepth--
+		in.mu.Unlock()
+	}()
+
+	if depth == 1 {
+		return RunScriptOnMoar(script)
+	}
 	return ParseTclWithGrammar(in, script)
+}
+
+// EvalHost runs the Go command implementations (FFI, moar:: bridge).
+func (in *Interp) EvalHost(script string) (string, error) {
+	in.mu.Lock()
+	in.evalDepth += 2
+	in.mu.Unlock()
+	defer func() {
+		in.mu.Lock()
+		in.evalDepth -= 2
+		in.mu.Unlock()
+	}()
+	return ParseTclWithGrammar(in, script)
+}
+
+// RunScriptOnMoar compiles a Tcl script and executes it with moar.exe.
+func RunScriptOnMoar(script string) (string, error) {
+	c := NewCompiler()
+	bc, err := c.CompileScript(script)
+	if err != nil {
+		return "", err
+	}
+	out, err := moargo.RunNative(bc)
+	if err != nil {
+		return out, err
+	}
+	if out == "" {
+		return "", nil
+	}
+	lines := strings.Split(out, "\n")
+	return strings.TrimSpace(lines[len(lines)-1]), nil
 }
 
 // resolveWord applies strict standard Tcl substitution rules to a parsed word token.
@@ -148,12 +214,12 @@ func (in *Interp) resolveWord(str, raw string) (string, error) {
 
 	// 1. Braced string {raw content} -> No substitutions performed
 	if strings.HasPrefix(raw, "{") && strings.HasSuffix(raw, "}") && len(raw) >= 2 {
-		return str, nil
+		return raw[1 : len(raw)-1], nil
 	}
 
 	// 2. Quoted string "..." -> Substitutions performed, quotes stripped
 	if strings.HasPrefix(raw, "\"") && strings.HasSuffix(raw, "\"") && len(raw) >= 2 {
-		return in.substituteString(str)
+		return in.substituteString(raw[1 : len(raw)-1])
 	}
 
 	// 3. Command substitution [...]
@@ -314,6 +380,17 @@ func (in *Interp) EvalWords(words []string) (string, error) {
 
 	if isProc {
 		return in.invokeProc(proc, args)
+	}
+
+	in.mu.RLock()
+	co, isCoro := in.coros[cmdName]
+	in.mu.RUnlock()
+	if isCoro {
+		arg := ""
+		if len(args) > 0 {
+			arg = args[0]
+		}
+		return in.resumeCoro(co, arg)
 	}
 
 	return "", fmt.Errorf("%w: \"%s\"", ErrCommandNotFound, cmdName)

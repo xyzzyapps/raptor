@@ -1,0 +1,59 @@
+=begin pod
+
+=TITLE perlraptor - Raptor language overview (perl man-page tone)
+
+=head1 NAME
+
+perlraptor - the Raptor programming language, a Perl 5 subset of Raku
+
+=head1 SYNOPSIS
+
+    raptor script.rp
+    raptor --go script.rp
+    raptor --moar script.rp
+    raptor --wasm
+    raptor -e 'say 42;'
+    raptor test t/
+
+=head1 DESCRIPTION
+
+Raptor is a dynamic, strictly non-OO procedural language.  It takes
+the parts of Perl 5 people actually write -- sigils, C<$_>, statement
+modifiers, C<eval>, hashes and lists -- and spells them as valid Raku
+where the two traditions agree.
+
+There is no C<class>, no C<has>, no inheritance.  Records are C
+structs.  Types are optional refinements (C<subset>) checked on
+assignment.
+
+Parsing is done with B<gcre> (Grammar Compatible Regular Expressions):
+a Raku grammar subset that is PEG-compatible.  The grammar lives in
+F<runtime/raptor.raku>.  Semantics live in the Go evaluator or, when
+C<--moar> is given, in CompUnit v7 opcodes executed by C<moar.dll>.
+
+=head1 BACKENDS
+
+=over 4
+
+=item --go
+
+Default.  Tree-walk interpreter.  Runs the full test suite.
+
+=item --moar
+
+Emit real MoarVM opcodes (C<const_i64>, C<add_i>, C<say>, ...) and run
+them in-process.  Interoperates with the Tcl frontend in
+F<../moarvm-go>: same bytecode family.
+
+=item --wasm
+
+Build the playground with TinyGo (or C<GOOS=js GOARCH=wasm>) and
+enable the browser FFI helpers (canvas, DOM, WebAudio).
+
+=back
+
+=head1 SEE ALSO
+
+L<perlvar>, L<perlop>, L<perlfunc>, L<perlpodlit>, L<perlre>
+
+=end pod

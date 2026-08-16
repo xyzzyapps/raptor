@@ -33,8 +33,8 @@ func (p *Parser) Parse() (*Program, error) {
 	return &Program{Stmts: stmts}, nil
 }
 
-// ParseProgram tokenizes and parses a source code string into a Program AST.
-func ParseProgram(source string) (*Program, error) {
+// ParseProgramLegacy is the old hand-rolled parser (kept for comparison only).
+func ParseProgramLegacy(source string) (*Program, error) {
 	lexer := NewLexer(source)
 	var tokens []Token
 	for {

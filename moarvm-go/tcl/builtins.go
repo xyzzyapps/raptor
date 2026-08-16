@@ -41,6 +41,9 @@ func (in *Interp) registerBuiltins() {
 	in.RegisterCommand("format", builtinFormat)
 	in.RegisterCommand("break", builtinBreak)
 	in.RegisterCommand("continue", builtinContinue)
+	in.RegisterCommand("apply", builtinApply)
+	in.RegisterCommand("yield", builtinYield)
+	in.RegisterCommand("coroutine", builtinCoroutine)
 }
 
 // SplitTclList splits a Tcl list string into constituent element words respecting braces and quotes.
@@ -240,6 +243,123 @@ func builtinProc(in *Interp, args []string) (string, error) {
 	in.mu.Unlock()
 
 	return "", nil
+}
+
+func builtinApply(in *Interp, args []string) (string, error) {
+	if len(args) < 1 {
+		return "", fmt.Errorf("wrong # args: should be \"apply {arglist body} ?arg ...?\"")
+	}
+	parts := SplitTclList(args[0])
+	if len(parts) < 2 {
+		return "", fmt.Errorf("apply: lambda must be {arglist body}")
+	}
+	formals := SplitTclList(parts[0])
+	if len(formals) == 1 && formals[0] == "" {
+		formals = nil
+	}
+	body := parts[1]
+	actuals := args[1:]
+	if len(actuals) != len(formals) {
+		return "", fmt.Errorf("wrong # args: should be \"apply {%s %s} %s\"", parts[0], body, strings.Join(formals, " "))
+	}
+
+	in.PushScope()
+	defer in.PopScope()
+	for i, name := range formals {
+		in.SetVar(name, actuals[i])
+	}
+	res, err := in.Eval(body)
+	if err != nil {
+		if sig, ok := err.(*ReturnSignal); ok {
+			return sig.Value, nil
+		}
+		return "", err
+	}
+	return res, nil
+}
+
+func builtinYield(in *Interp, args []string) (string, error) {
+	val := ""
+	if len(args) > 0 {
+		val = args[0]
+	}
+	in.mu.RLock()
+	name := in.curCoro
+	co := in.coros[name]
+	in.mu.RUnlock()
+	if name == "" || co == nil {
+		return "", fmt.Errorf("yield called outside of a coroutine")
+	}
+	co.fromCo <- goCoroMsg{val: val}
+	resume, ok := <-co.toCo
+	if !ok {
+		return "", fmt.Errorf("coroutine \"%s\" is dead", name)
+	}
+	return resume, nil
+}
+
+func builtinCoroutine(in *Interp, args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("wrong # args: should be \"coroutine name command ?arg ...?\"")
+	}
+	name := args[0]
+	cmd := args[1:]
+
+	in.mu.Lock()
+	if existing, ok := in.coros[name]; ok && !existing.dead {
+		in.mu.Unlock()
+		return "", fmt.Errorf("coroutine \"%s\" already exists", name)
+	}
+	co := &goCoro{
+		name:   name,
+		toCo:   make(chan string, 1),
+		fromCo: make(chan goCoroMsg, 1),
+	}
+	in.coros[name] = co
+	in.mu.Unlock()
+
+	go func() {
+		in.mu.Lock()
+		prev := in.curCoro
+		in.curCoro = name
+		in.mu.Unlock()
+
+		res, err := in.EvalWords(cmd)
+
+		in.mu.Lock()
+		in.curCoro = prev
+		co.dead = true
+		in.mu.Unlock()
+		co.fromCo <- goCoroMsg{val: res, done: true, err: err}
+	}()
+
+	msg := <-co.fromCo
+	if msg.err != nil {
+		return "", msg.err
+	}
+	if msg.done {
+		in.mu.Lock()
+		delete(in.coros, name)
+		in.mu.Unlock()
+	}
+	return msg.val, nil
+}
+
+func (in *Interp) resumeCoro(co *goCoro, arg string) (string, error) {
+	if co.dead {
+		return "", fmt.Errorf("coroutine \"%s\" is dead", co.name)
+	}
+	co.toCo <- arg
+	msg := <-co.fromCo
+	if msg.err != nil {
+		return "", msg.err
+	}
+	if msg.done {
+		in.mu.Lock()
+		delete(in.coros, co.name)
+		in.mu.Unlock()
+	}
+	return msg.val, nil
 }
 
 func builtinReturn(in *Interp, args []string) (string, error) {
@@ -732,6 +852,11 @@ func builtinInfo(in *Interp, args []string) (string, error) {
 			vars = append(vars, k)
 		}
 		return strings.Join(vars, " "), nil
+	case "coroutine":
+		in.mu.RLock()
+		name := in.curCoro
+		in.mu.RUnlock()
+		return name, nil
 	case "procs":
 		in.mu.RLock()
 		defer in.mu.RUnlock()

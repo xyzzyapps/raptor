@@ -40,7 +40,7 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `for` / `foreach (@xs)` | `for @xs { }` or `for @xs -> $x { }` |
 | C-style `for (;;)` | `loop (my $i = 0; $i < n; $i++) { }` |
 | `say 1 if $ok` | same modifiers (`if` `unless` `while` `until` `for` `given`) |
-| `last` / `next` | same |
+| `last` / `next` / `redo` | same |
 | `given` / `when` / `default` | same (`when` uses `~~`) |
 | `goto LABEL` / `goto &sub` | same |
 | `sub foo { my $a = shift; }` | `sub foo($a) { }` signatures |
@@ -76,7 +76,7 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `threads` | `start` / `await` / `Channel` |
 | CGI / PSGI | RaptorHP `.phtml` — `raptor -S` (like `php -S`) |
 
-**Not implemented:** `local`, `redo`, `eval STRING` / `eval { }`, `bless` / `@ISA` / Moose / `class` / `has`, prototypes, `wantarray` (no list/scalar context), `s///` / `tr///`.
+**Not implemented:** `local`, `eval STRING` / `eval { }`, `bless` / `@ISA` / Moose / `class` / `has`, prototypes, `wantarray` (no list/scalar context), `s///` / `tr///`.
 
 ```perl
 my $name = "Raptor";
@@ -108,7 +108,7 @@ Licensed under the **Artistic License 2.0**.
 7. **`gather` / `take`** — lazy sequences.
 8. **Statement modifiers & heredocs** — postfix `if` / `unless` / `while` / `until` / `for` / `given`; `<<EOF` / `<<~EOF`.
 9. **References** — `\$s`, `\@a`, `\%h`, `\&sub`; `$$s`, `$a->[0]`, `$h->{"k"}`, `ref()`, `is_ref()`.
-10. **Labels & goto** — `LABEL:`, `goto LABEL;`, `goto &target_sub;`.
+10. **Labels & goto** — `LABEL:`, `goto LABEL;`, `goto &target_sub;`. `last` / `next` / `redo` in loops.
 11. **Scoping** — `my`, `our`, `state`.
 12. **Packages & AUTOLOAD** — `package Foo;`, `%Foo::`, `package_symbols` / `package_set` / `package_get` / `package_delete`; `$AUTOLOAD`.
 13. **Contextual vars** — `@*ARGS`, `%*ENV`, `$*PROGRAM`, `$*RAPTOR`, `$*KERNEL`, `$*PID`, `$?`, `$!`, `$$`, `$0`.

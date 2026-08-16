@@ -1,13 +1,57 @@
 # Raptor language grammar — gcre (Grammar Compatible Regular Expressions).
-# Subset of Raku that is PEG-compatible. No action blocks.
+# A PEG-compatible subset of Raku. Valid Raku spelling, 1-to-1 PEG reading.
+#
+# ---------------------------------------------------------------------------
+# Not written in this file — gcre cannot express them
+# ---------------------------------------------------------------------------
+# These are real Raku grammar/regex features. They are omitted on purpose
+# because gcre's .raku subset has no translation for them (see gcre/README.md
+# and gcre/raku.peg). Do not add them here; the loader will reject or ignore
+# the construct.
+#
+#   Action blocks          { make $/.ast }   { *code* }   <?{ ... }>
+#   Protoregexes           proto token infix {*}
+#                          token infix:sym<+> { <sym> }
+#   LTM                    Raku '|' is longest-token; gcre '|' is PEG
+#                          ordered choice (first alternative wins)
+#   '||' vs '|'            no separate sequential-alternation operator
+#   Predicates             &e  !e  <?before …>  <!before …>  <?after …>
+#   Counted quantifiers    ** 1..3   ** 2   {n,m}
+#   Separators             <expr>+ % ','    <expr>* %% ','
+#   Tilde / goal matching  '(' ~ ')' <expr>
+#   Optable decls          is tighter / is looser / is assoc<right>
+#   Named captures         $<foo>=<bar>   $0 / $1 backrefs
+#   Interpolation          <$var>   <{ code }>
+#   Adverbs                :ratchet  :sigspace  :P5  :my  :dba
+#   Unicode properties     <:Lu>  <:Digit>   (only <[a..z]> / <-[…]>)
+#   rule vs token          :sigspace is only approximated (rule skips
+#                          whitespace; it is not full Raku :sigspace)
+#
+# ---------------------------------------------------------------------------
+# Raptor syntax that therefore stays on HOST (Go lexer + Pratt)
+# ---------------------------------------------------------------------------
+# <HOST_stmt> / <HOST_expr> are gcre's hatch: the host consumes one
+# statement or expression. Pratt is not a second full-file parser.
+# These forms are implemented in runtime/lexer.go and runtime/parser.go
+# because a pure gcre rule would be wrong or impossible:
+#
+#   Heredocs               <<EOF  <<'EOF'  <<~EOF   (lexer state)
+#   Interpolated strings   "$x"  "a {$x} b"
+#   Interpolated qx        `echo $x`  qx{…} with vars
+#   Chained comparisons    1 < $x < 10   (must not re-evaluate $x)
+#   Longest operator lex   //= vs // vs /    ** vs *    ~~ vs ~
+#   Mixed assign/expr      $x = 1 vs $x == 1 vs $x += 1
+#   Tight postfix / UFCS   $x.foo(1) next to infix of the same dots
+#   Pod / PodLit           =begin pod …   (not part of this grammar)
+#
+# PEG alternatives below run only when HOST does not consume at that point.
 
 grammar Raptor {
     rule TOP { <statement>* }
 
     token comment { '#' <-[\n]>* }
 
-    # <HOST_stmt> calls the Go Pratt parser for one statement.
-    # PEG alternatives below run only when Pratt cannot consume here.
+    # Pratt first. Remaining alts are the PEG fallback.
     rule statement {
         | <comment>
         | <HOST_stmt>
@@ -29,6 +73,7 @@ grammar Raptor {
         | <return_stmt>
         | <last_stmt>
         | <next_stmt>
+        | <redo_stmt>
         | <goto_stmt>
         | <take_stmt>
         | <assert_stmt>
@@ -42,6 +87,7 @@ grammar Raptor {
     rule return_stmt { 'return' <expression>? <modifier>? ';'? }
     rule last_stmt { 'last' ';'? }
     rule next_stmt { 'next' ';'? }
+    rule redo_stmt { 'redo' <modifier>? ';'? }
     rule take_stmt { 'take' <expression> ';'? }
     rule goto_stmt { 'goto' <goto_target> ';'? }
     token goto_target { '&'? <name> }

@@ -186,6 +186,12 @@ type ContinueStmt struct{}
 func (c *ContinueStmt) node() {}
 func (c *ContinueStmt) stmt() {}
 
+// RedoStmt represents a 'redo' restart of the current loop iteration.
+type RedoStmt struct{}
+
+func (r *RedoStmt) node() {}
+func (r *RedoStmt) stmt() {}
+
 // UseStmt represents a module import (e.g. use Module:from<Perl5>).
 type UseStmt struct {
 	Module string

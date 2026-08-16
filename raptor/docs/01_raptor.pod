@@ -51,7 +51,7 @@ The implemented table is in F<README.md> (repo root and F<raptor/README.md>).
     open($path, "r");
     exists(%h, $k);
 
-B<Not implemented:> C<local>, C<redo>, C<eval STRING> / C<eval { }>,
+B<Not implemented:> C<local>, C<eval STRING> / C<eval { }>,
 C<bless> / C<@ISA> / Moose / C<class> / C<has>, prototypes,
 C<wantarray>, C<s///> / C<tr///>.
 

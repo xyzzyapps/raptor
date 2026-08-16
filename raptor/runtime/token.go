@@ -114,6 +114,7 @@ const (
 	TokEnum
 	TokLast // last (break)
 	TokNext // next (continue)
+	TokRedo // redo (restart current iteration)
 	TokStruct
 	TokUnion
 	TokWhere

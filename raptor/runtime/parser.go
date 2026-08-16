@@ -277,6 +277,15 @@ func (p *Parser) parseStatement() (Stmt, error) {
 		p.match(TokSemicolon)
 		return &ContinueStmt{}, nil
 
+	case TokRedo:
+		p.advance()
+		stmt, err := p.checkModifier(&RedoStmt{})
+		if err != nil {
+			return nil, err
+		}
+		p.match(TokSemicolon)
+		return stmt, nil
+
 	case TokLBrace:
 		return p.parseBlock()
 

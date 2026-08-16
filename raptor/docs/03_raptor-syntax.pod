@@ -77,10 +77,12 @@ say "  raptor  ".trim().uc();
 
 C<if>/C<elsif>/C<else>/C<unless>, C<while>/C<until>,
 C<for @xs { }> / C<for @xs -> $x { }>, C<loop ( ; ; ) { }>,
-C<given>/C<when>/C<default>, C<last>/C<next>, C<goto LABEL>,
+C<given>/C<when>/C<default>, C<last>/C<next>/C<redo>, C<goto LABEL>,
 C<goto &sub>. Statement modifiers: C<say 1 if $ok>.
 
-No C<redo>, no C<eval STRING>. C<die>, C<warn>, C<exit> exist.
+C<redo> restarts the current loop body without advancing the
+iterator or re-checking the condition (C<redo if $cond> works).
+No C<eval STRING>. C<die>, C<warn>, C<exit> exist.
 
 =head1 REFERENCES
 

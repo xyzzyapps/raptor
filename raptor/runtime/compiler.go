@@ -63,7 +63,8 @@ type compilerFrame struct {
 type loopCtx struct {
 	breaks []int32
 	conts  []int32
-	contAt int32
+	redos  []int32
+	redoAt int32
 }
 
 type mval struct {
@@ -551,6 +552,15 @@ func (c *Compiler) compileStmt(stmt Stmt) error {
 		c.loops[i].conts = append(c.loops[i].conts, off)
 		return nil
 
+	case *RedoStmt:
+		if len(c.loops) == 0 {
+			return fmt.Errorf("moar: redo outside loop")
+		}
+		off := c.emitGoto()
+		i := len(c.loops) - 1
+		c.loops[i].redos = append(c.loops[i].redos, off)
+		return nil
+
 	case *ReturnStmt:
 		if s.Value == nil {
 			c.frame.EmitOp(moargo.OpReturn)
@@ -739,6 +749,13 @@ func (c *Compiler) pushLoop() {
 	c.loops = append(c.loops, loopCtx{})
 }
 
+func (c *Compiler) markRedo() {
+	if len(c.loops) == 0 {
+		return
+	}
+	c.loops[len(c.loops)-1].redoAt = c.frame.CurrentOffset()
+}
+
 func (c *Compiler) popLoop(contAt, end int32) {
 	i := len(c.loops) - 1
 	lc := c.loops[i]
@@ -748,6 +765,13 @@ func (c *Compiler) popLoop(contAt, end int32) {
 	}
 	for _, p := range lc.conts {
 		c.patchU32(p, uint32(contAt))
+	}
+	redoAt := lc.redoAt
+	if redoAt == 0 {
+		redoAt = contAt
+	}
+	for _, p := range lc.redos {
+		c.patchU32(p, uint32(redoAt))
 	}
 }
 
@@ -764,6 +788,7 @@ func (c *Compiler) compileWhile(s *WhileStmt) error {
 	} else {
 		skip = c.emitUnless(cond.reg)
 	}
+	c.markRedo()
 	if err := c.compileStmt(s.Body); err != nil {
 		return err
 	}
@@ -791,6 +816,7 @@ func (c *Compiler) compileLoop(s *LoopStmt) error {
 		}
 		skip = c.emitUnless(cond.reg)
 	}
+	c.markRedo()
 	if err := c.compileStmt(s.Body); err != nil {
 		return err
 	}

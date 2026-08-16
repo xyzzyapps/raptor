@@ -879,6 +879,7 @@ func (c *Compiler) compileFor(s *ForStmt) error {
 			return err
 		}
 	}
+	c.markRedo()
 	if s.Body != nil {
 		if err := c.compileStmt(s.Body); err != nil {
 			return err

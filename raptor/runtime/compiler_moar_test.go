@@ -67,6 +67,7 @@ func TestMoarCompileLanguageSurface(t *testing.T) {
 		`like("hello", "ell", "like");`,
 		`say 3 <=> 1; say "b" cmp "a";`,
 		`$_ = 1; say $_ for 1..2;`,
+		`my $n = 0; my $h = 0; while $n < 2 { $h = $h + 1; $n = $n + 1; redo if $h == 1; } say $h;`,
 	}
 	for _, src := range srcs {
 		c := NewCompiler()

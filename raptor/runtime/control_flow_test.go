@@ -77,6 +77,30 @@ func TestComprehensiveControlFlow(t *testing.T) {
 	}
 }
 
+func TestRedoRestartsCurrentIteration(t *testing.T) {
+	code := `
+		my $sum = 0;
+		my $extra = 1;
+		for 1..3 {
+			$sum += $_;
+			if $extra && $_ == 2 {
+				$extra = 0;
+				redo;
+			}
+		}
+		say "SUM=" ~ $sum;
+	`
+	in := NewInterp()
+	var outBuf bytes.Buffer
+	in.SetStdout(&outBuf)
+	if _, err := in.Eval(code); err != nil {
+		t.Fatalf("redo eval failed: %v", err)
+	}
+	if got := outBuf.String(); !strings.Contains(got, "SUM=8") {
+		t.Errorf("expected SUM=8, got %s", got)
+	}
+}
+
 func TestChainedComparisonsAndCStyleLoop(t *testing.T) {
 	code := `
 		my $temp = 25;

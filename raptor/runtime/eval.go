@@ -31,6 +31,11 @@ type ContinueSignal struct{}
 
 func (c *ContinueSignal) Error() string { return "continue" }
 
+// RedoSignal restarts the current loop iteration on 'redo'.
+type RedoSignal struct{}
+
+func (r *RedoSignal) Error() string { return "redo" }
+
 // GotoSignal unwinds stack on 'goto'.
 type GotoSignal struct {
 	Target string
@@ -686,24 +691,32 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 	case *WhileStmt:
 		var lastVal *Value = NilValue()
 		childEnv := env.NewChild()
+		redo := false
 		for {
-			cVal, err := in.evalExpr(s.Condition, env)
-			if err != nil {
-				return nil, err
+			if !redo {
+				cVal, err := in.evalExpr(s.Condition, env)
+				if err != nil {
+					return nil, err
+				}
+				condIsTrue := cVal.IsTrue()
+				if s.IsUntil {
+					condIsTrue = !condIsTrue
+				}
+				if !condIsTrue {
+					break
+				}
 			}
-			condIsTrue := cVal.IsTrue()
-			if s.IsUntil {
-				condIsTrue = !condIsTrue
-			}
-			if !condIsTrue {
-				break
-			}
+			redo = false
 			bVal, err := in.evalBlock(s.Body, childEnv)
 			if err != nil {
 				if _, ok := err.(*BreakSignal); ok {
 					break
 				}
 				if _, ok := err.(*ContinueSignal); ok {
+					continue
+				}
+				if _, ok := err.(*RedoSignal); ok {
+					redo = true
 					continue
 				}
 				return nil, err
@@ -720,22 +733,27 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		var lastVal *Value = NilValue()
 		childEnv := env.NewChild()
 		runItem := func(item *Value) (stop bool, err error) {
-			if s.VarName != "" {
-				childEnv.Define(s.VarName, item)
-			}
-			childEnv.Define("$_", item)
-			bVal, err := in.evalBlock(s.Body, childEnv)
-			if err != nil {
-				if _, ok := err.(*BreakSignal); ok {
-					return true, nil
+			for {
+				if s.VarName != "" {
+					childEnv.Define(s.VarName, item)
 				}
-				if _, ok := err.(*ContinueSignal); ok {
-					return false, nil
+				childEnv.Define("$_", item)
+				bVal, err := in.evalBlock(s.Body, childEnv)
+				if err != nil {
+					if _, ok := err.(*BreakSignal); ok {
+						return true, nil
+					}
+					if _, ok := err.(*ContinueSignal); ok {
+						return false, nil
+					}
+					if _, ok := err.(*RedoSignal); ok {
+						continue
+					}
+					return true, err
 				}
-				return true, err
+				lastVal = bVal
+				return false, nil
 			}
-			lastVal = bVal
-			return false, nil
 		}
 		if iterVal.Type == ValArray && iterVal.Ints != nil && iterVal.ArrayVal == nil {
 			for _, n := range iterVal.Ints {
@@ -773,28 +791,36 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		}
 		var lastVal *Value = NilValue()
 		bodyEnv := loopEnv.NewChild()
+		redo := false
 		for {
-			if s.Cond != nil {
-				cVal, err := in.evalExpr(s.Cond, loopEnv)
-				if err != nil {
-					return nil, err
-				}
-				if !cVal.IsTrue() {
-					break
+			if !redo {
+				if s.Cond != nil {
+					cVal, err := in.evalExpr(s.Cond, loopEnv)
+					if err != nil {
+						return nil, err
+					}
+					if !cVal.IsTrue() {
+						break
+					}
 				}
 			}
+			redo = false
 			bVal, err := in.evalBlock(s.Body, bodyEnv)
 			if err != nil {
 				if _, ok := err.(*BreakSignal); ok {
 					break
 				}
 				if _, ok := err.(*ContinueSignal); ok {
-					// step will still run
+					// step still runs
+				} else if _, ok := err.(*RedoSignal); ok {
+					redo = true
+					continue
 				} else {
 					return nil, err
 				}
+			} else {
+				lastVal = bVal
 			}
-			lastVal = bVal
 			if s.Step != nil {
 				if _, err := in.evalExpr(s.Step, loopEnv); err != nil {
 					return nil, err
@@ -816,6 +842,9 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 
 	case *BreakStmt:
 		return nil, &BreakSignal{}
+
+	case *RedoStmt:
+		return nil, &RedoSignal{}
 
 	case *ContinueStmt:
 		return nil, &ContinueSignal{}
@@ -892,20 +921,28 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 
 		case ModWhile:
 			var lastVal *Value = NilValue()
+			redo := false
 			for {
-				cVal, err := in.evalExpr(s.Condition, env)
-				if err != nil {
-					return nil, err
+				if !redo {
+					cVal, err := in.evalExpr(s.Condition, env)
+					if err != nil {
+						return nil, err
+					}
+					if !cVal.IsTrue() {
+						break
+					}
 				}
-				if !cVal.IsTrue() {
-					break
-				}
+				redo = false
 				val, err := in.evalStmt(s.Target, env)
 				if err != nil {
 					if _, ok := err.(*BreakSignal); ok {
 						break
 					}
 					if _, ok := err.(*ContinueSignal); ok {
+						continue
+					}
+					if _, ok := err.(*RedoSignal); ok {
+						redo = true
 						continue
 					}
 					return nil, err
@@ -918,20 +955,28 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 
 		case ModUntil:
 			var lastVal *Value = NilValue()
+			redo := false
 			for {
-				cVal, err := in.evalExpr(s.Condition, env)
-				if err != nil {
-					return nil, err
+				if !redo {
+					cVal, err := in.evalExpr(s.Condition, env)
+					if err != nil {
+						return nil, err
+					}
+					if cVal.IsTrue() {
+						break
+					}
 				}
-				if cVal.IsTrue() {
-					break
-				}
+				redo = false
 				val, err := in.evalStmt(s.Target, env)
 				if err != nil {
 					if _, ok := err.(*BreakSignal); ok {
 						break
 					}
 					if _, ok := err.(*ContinueSignal); ok {
+						continue
+					}
+					if _, ok := err.(*RedoSignal); ok {
+						redo = true
 						continue
 					}
 					return nil, err
@@ -964,21 +1009,27 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			var lastVal *Value = NilValue()
 			var loopEnv *Env
 			for _, it := range items {
-				loopEnv = env.RecycleChild(loopEnv)
-				loopEnv.Define(varName, it)
-				loopEnv.Define("$_", it)
-				val, err := in.evalStmt(s.Target, loopEnv)
-				if err != nil {
-					if _, ok := err.(*BreakSignal); ok {
-						break
+				for {
+					loopEnv = env.RecycleChild(loopEnv)
+					loopEnv.Define(varName, it)
+					loopEnv.Define("$_", it)
+					val, err := in.evalStmt(s.Target, loopEnv)
+					if err != nil {
+						if _, ok := err.(*BreakSignal); ok {
+							return lastVal, nil
+						}
+						if _, ok := err.(*ContinueSignal); ok {
+							break
+						}
+						if _, ok := err.(*RedoSignal); ok {
+							continue
+						}
+						return nil, err
 					}
-					if _, ok := err.(*ContinueSignal); ok {
-						continue
+					if val != nil {
+						lastVal = val
 					}
-					return nil, err
-				}
-				if val != nil {
-					lastVal = val
+					break
 				}
 			}
 			return lastVal, nil

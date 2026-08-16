@@ -237,6 +237,9 @@ func walkStatement(m *gcre.Match) Stmt {
 	if s := m.Get("next_stmt"); s != nil && s.Ok {
 		return &ContinueStmt{}
 	}
+	if s := m.Get("redo_stmt"); s != nil && s.Ok {
+		return applyMod(&RedoStmt{}, s)
+	}
 	if s := m.Get("goto_stmt"); s != nil && s.Ok {
 		t := s.Get("goto_target")
 		name := ""

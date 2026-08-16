@@ -33,7 +33,7 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `for` / `foreach (@xs)` | `for @xs { }` or `for @xs -> $x { }` |
 | C-style `for (;;)` | `loop (my $i = 0; $i < n; $i++) { }` |
 | `say 1 if $ok` | same modifiers (`if` `unless` `while` `until` `for` `given`) |
-| `last` / `next` | same |
+| `last` / `next` / `redo` | same |
 | `given` / `when` / `default` | same (`when` uses `~~`) |
 | `goto LABEL` / `goto &sub` | same |
 | `sub foo { my $a = shift; }` | `sub foo($a) { }` signatures |
@@ -69,7 +69,7 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `threads` | `start` / `await` / `Channel` |
 | CGI / PSGI | RaptorHP `.phtml` — `raptor -S` (like `php -S`) |
 
-**Not implemented:** `local`, `redo`, `eval STRING` / `eval { }`, `bless` / `@ISA` / Moose / `class` / `has`, prototypes, `wantarray` (no list/scalar context), `s///` / `tr///`.
+**Not implemented:** `local`, `eval STRING` / `eval { }`, `bless` / `@ISA` / Moose / `class` / `has`, prototypes, `wantarray` (no list/scalar context), `s///` / `tr///`.
 
 ```
 cd raptor

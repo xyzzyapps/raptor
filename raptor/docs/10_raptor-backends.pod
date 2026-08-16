@@ -22,7 +22,7 @@ If the compiler cannot emit valid bytecode, it errors.
 Native today: scalars, arrays (C<@a[$i]>, C<elems>/C<push>/C<pop>/
 C<shift>, C<xx>), hashes (C<%h{"k"}>, C<exists>/C<delete>), C<for>
 (including postfix), C<given>/C<when>, C<~~>, C<goto LABEL>, C<enum>,
-named subs and closures, UFCS, C<subset>/C<multi>, C<struct> fields as
+named subs and closures, UFCS, C<last>/C<next>/C<redo>, C<subset>/C<multi>, C<struct> fields as
 hashes, junctions C<any>/C<all>, eager C<gather>/C<take>, substring
 regex via C<index>, C<use> (compile-time include), C<package>,
 NativeCall (C<nativecallbuild>/C<invoke>), C<system>/C<qx>,

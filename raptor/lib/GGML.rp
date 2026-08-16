@@ -1,0 +1,36 @@
+# ==============================================================================
+# GGML tensor API for Raptor — C ABI names from ggml.h
+# ==============================================================================
+#
+# Software backend is always registered as builtins (ggml_init, ggml_add, …).
+# When ggml.dll / libggml.so is present, ggml_native_available() returns the
+# path and NativeCall / ffi_load can call the real C library:
+#
+#   sub ggml_time_us() returns int64 is native('ggml') { * }
+#
+# Tensor compute below matches the C graph API:
+#   ggml_init / ggml_free / ggml_new_tensor_{1,2,3}d
+#   ggml_add, ggml_mul, ggml_mul_mat (A^T * B), ggml_relu, ggml_gelu,
+#   ggml_soft_max, ggml_scale, ggml_new_graph, ggml_build_forward_expand,
+#   ggml_graph_compute_with_ctx
+#
+
+sub GGML_TYPE_F32() { return 0; }
+sub GGML_TYPE_F16() { return 1; }
+sub GGML_TYPE_I8()  { return 16; }
+sub GGML_TYPE_I16() { return 17; }
+sub GGML_TYPE_I32() { return 18; }
+sub GGML_TYPE_I64() { return 19; }
+sub GGML_TYPE_F64() { return 20; }
+
+sub ggml_ok($ctx, $graph, $n_threads = 1) {
+    return ggml_graph_compute_with_ctx($ctx, $graph, $n_threads);
+}
+
+sub ggml_fill($tensor, @values) {
+    return ggml_set_data($tensor, @values);
+}
+
+sub ggml_to_list($tensor) {
+    return ggml_get_data($tensor);
+}

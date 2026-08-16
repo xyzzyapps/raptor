@@ -67,7 +67,16 @@ raptorhp -r '<h1><?= "Hello " ~ "from RaptorHP!" ?></h1>'
 Start a local HTTP server that parses and executes `.phtml`, `.rhtml`, `.rp`, `.raptor`, and `.html` templates dynamically:
 
 ```powershell
+# Same as php -S localhost:8000
+raptor -S localhost:8000
 raptorhp -S localhost:8000
+
+# Document root (php -S ... -t public)
+raptor -S localhost:8000 -t public
+raptorhp -S localhost:8000 -t public
+
+# Optional front-controller
+raptor -S localhost:8000 router.phtml
 ```
 
 ### Predefined Superglobals in Web Server Mode

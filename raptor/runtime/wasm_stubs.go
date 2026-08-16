@@ -5,6 +5,7 @@ package raptor
 import (
 	"fmt"
 	"syscall/js"
+	"time"
 )
 
 func wasmLog(prefix string, msg string) {
@@ -86,6 +87,8 @@ func (in *Interp) evalUse(u *UseStmt, env *Env) (*Value, error) {
 }
 
 func (in *Interp) registerWebBuiltins() {
+	ensureRaptorBridge()
+
 	// DOM Manipulation
 	in.Builtins["dom_get"] = func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) < 1 {
@@ -648,18 +651,272 @@ func (in *Interp) registerWebBuiltins() {
 		if len(args) > 1 {
 			stopTime = toFloat(args[1])
 		}
-		bridge := js.Global().Get("raptorBridge")
-		if !bridge.IsNull() && !bridge.IsUndefined() {
-			bridge.Call("audioOscStop", oscId, stopTime)
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioOscStop", oscId, stopTime)
 			wasmLog("WebAudio", fmt.Sprintf("audio_osc_stop(osc=%d, stopTime=%.3f)", oscId, stopTime))
 		}
 		return BoolValue(true), nil
 	}
 
+	in.Builtins["audio_create_compressor"] = func(in *Interp, args []*Value) (*Value, error) {
+		ctxId := 0
+		if len(args) > 0 {
+			ctxId = int(in.toInt(args[0]))
+		}
+		if b, ok := wasmBridge(); ok {
+			id := b.Call("audioCreateCompressor", ctxId).Int()
+			return IntValue(int64(id)), nil
+		}
+		return IntValue(0), nil
+	}
+	in.Builtins["audio_set_compressor"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return BoolValue(false), nil
+		}
+		id := int(in.toInt(args[0]))
+		thr, knee, ratio, atk, rel := -24.0, 30.0, 12.0, 0.003, 0.25
+		if len(args) > 1 {
+			thr = toFloat(args[1])
+		}
+		if len(args) > 2 {
+			knee = toFloat(args[2])
+		}
+		if len(args) > 3 {
+			ratio = toFloat(args[3])
+		}
+		if len(args) > 4 {
+			atk = toFloat(args[4])
+		}
+		if len(args) > 5 {
+			rel = toFloat(args[5])
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioSetCompressor", id, thr, knee, ratio, atk, rel)
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_create_delay"] = func(in *Interp, args []*Value) (*Value, error) {
+		ctxId := 0
+		maxD := 1.0
+		if len(args) > 0 {
+			ctxId = int(in.toInt(args[0]))
+		}
+		if len(args) > 1 {
+			maxD = toFloat(args[1])
+		}
+		if b, ok := wasmBridge(); ok {
+			return IntValue(int64(b.Call("audioCreateDelay", ctxId, maxD).Int())), nil
+		}
+		return IntValue(0), nil
+	}
+	in.Builtins["audio_set_delay_time"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return BoolValue(false), nil
+		}
+		t := 0.0
+		if len(args) > 2 {
+			t = toFloat(args[2])
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioSetDelayTime", int(in.toInt(args[0])), toFloat(args[1]), t)
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_create_panner"] = func(in *Interp, args []*Value) (*Value, error) {
+		ctxId := 0
+		if len(args) > 0 {
+			ctxId = int(in.toInt(args[0]))
+		}
+		if b, ok := wasmBridge(); ok {
+			return IntValue(int64(b.Call("audioCreatePanner", ctxId).Int())), nil
+		}
+		return IntValue(0), nil
+	}
+	in.Builtins["audio_set_pan"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return BoolValue(false), nil
+		}
+		t := 0.0
+		if len(args) > 2 {
+			t = toFloat(args[2])
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioSetPan", int(in.toInt(args[0])), toFloat(args[1]), t)
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_create_analyser"] = func(in *Interp, args []*Value) (*Value, error) {
+		ctxId := 0
+		if len(args) > 0 {
+			ctxId = int(in.toInt(args[0]))
+		}
+		if b, ok := wasmBridge(); ok {
+			return IntValue(int64(b.Call("audioCreateAnalyser", ctxId).Int())), nil
+		}
+		return IntValue(0), nil
+	}
+	in.Builtins["audio_set_fft_size"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return BoolValue(false), nil
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioSetFftSize", int(in.toInt(args[0])), int(in.toInt(args[1])))
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_get_spectrum"] = func(in *Interp, args []*Value) (*Value, error) {
+		id := 0
+		if len(args) > 0 {
+			id = int(in.toInt(args[0]))
+		}
+		if b, ok := wasmBridge(); ok {
+			arr := b.Call("audioGetSpectrum", id)
+			n := arr.Length()
+			out := make([]*Value, n)
+			for i := 0; i < n; i++ {
+				out[i] = FloatValue(arr.Index(i).Float())
+			}
+			return ArrayValue(out), nil
+		}
+		return ArrayValue(nil), nil
+	}
+	in.Builtins["audio_create_buffer"] = func(in *Interp, args []*Value) (*Value, error) {
+		ctxId, ch, length, sr := 0, 1, 44100, 44100.0
+		if len(args) > 0 {
+			ctxId = int(in.toInt(args[0]))
+		}
+		if len(args) > 1 {
+			ch = int(in.toInt(args[1]))
+		}
+		if len(args) > 2 {
+			length = int(in.toInt(args[2]))
+		}
+		if len(args) > 3 {
+			sr = toFloat(args[3])
+		}
+		if b, ok := wasmBridge(); ok {
+			return IntValue(int64(b.Call("audioCreateBuffer", ctxId, ch, length, sr).Int())), nil
+		}
+		return IntValue(0), nil
+	}
+	in.Builtins["audio_buffer_fill_sine"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return BoolValue(false), nil
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioBufferFillSine", int(in.toInt(args[0])), toFloat(args[1]))
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_create_buffer_source"] = func(in *Interp, args []*Value) (*Value, error) {
+		ctxId := 0
+		if len(args) > 0 {
+			ctxId = int(in.toInt(args[0]))
+		}
+		if b, ok := wasmBridge(); ok {
+			return IntValue(int64(b.Call("audioCreateBufferSource", ctxId).Int())), nil
+		}
+		return IntValue(0), nil
+	}
+	in.Builtins["audio_source_set_buffer"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return BoolValue(false), nil
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioSourceSetBuffer", int(in.toInt(args[0])), int(in.toInt(args[1])))
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_source_start"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return BoolValue(false), nil
+		}
+		t := 0.0
+		if len(args) > 1 {
+			t = toFloat(args[1])
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioSourceStart", int(in.toInt(args[0])), t)
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_set_detune"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return BoolValue(false), nil
+		}
+		t := 0.0
+		if len(args) > 2 {
+			t = toFloat(args[2])
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioSetDetune", int(in.toInt(args[0])), toFloat(args[1]), t)
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_set_filter_q"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return BoolValue(false), nil
+		}
+		t := 0.0
+		if len(args) > 2 {
+			t = toFloat(args[2])
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioSetFilterQ", int(in.toInt(args[0])), toFloat(args[1]), t)
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_freq_ramp"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 3 {
+			return BoolValue(false), nil
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioFreqRamp", int(in.toInt(args[0])), toFloat(args[1]), toFloat(args[2]))
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_connect_param"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 3 {
+			return BoolValue(false), nil
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioConnectParam", int(in.toInt(args[0])), int(in.toInt(args[1])), args[2].String())
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_disconnect"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return BoolValue(false), nil
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("audioDisconnect", int(in.toInt(args[0])))
+		}
+		return BoolValue(true), nil
+	}
+	in.Builtins["audio_destination"] = func(in *Interp, args []*Value) (*Value, error) {
+		ctxId := 0
+		if len(args) > 0 {
+			ctxId = int(in.toInt(args[0]))
+		}
+		if b, ok := wasmBridge(); ok {
+			return IntValue(int64(b.Call("audioDestination", ctxId).Int())), nil
+		}
+		return IntValue(0), nil
+	}
+	in.Builtins["audio_sample_rate"] = func(in *Interp, args []*Value) (*Value, error) {
+		ctxId := 0
+		if len(args) > 0 {
+			ctxId = int(in.toInt(args[0]))
+		}
+		if b, ok := wasmBridge(); ok {
+			return FloatValue(b.Call("audioSampleRate", ctxId).Float()), nil
+		}
+		return FloatValue(44100), nil
+	}
+
 	in.Builtins["audio_init"] = func(in *Interp, args []*Value) (*Value, error) {
-		bridge := js.Global().Get("raptorBridge")
-		if !bridge.IsNull() && !bridge.IsUndefined() {
-			bridge.Call("initAudio")
+		if b, ok := wasmBridge(); ok {
+			b.Call("initAudio")
 			wasmLog("WebAudio", "audio_init() ready")
 		}
 		return BoolValue(true), nil
@@ -678,37 +935,70 @@ func (in *Interp) registerWebBuiltins() {
 		if len(args) > 2 {
 			waveform = args[2].String()
 		}
-		bridge := js.Global().Get("raptorBridge")
-		if !bridge.IsNull() && !bridge.IsUndefined() {
-			bridge.Call("playTone", freq, dur, waveform)
+		if b, ok := wasmBridge(); ok {
+			// Build a one-shot osc -> gain -> dest on the AudioContext timeline.
+			ctx := b.Call("audioContextCreate").Int()
+			t0 := b.Call("audioGetCurrentTime", ctx).Float()
+			osc := b.Call("audioCreateOscillator", ctx).Int()
+			gain := b.Call("audioCreateGain", ctx).Int()
+			b.Call("audioSetOscType", osc, waveform)
+			b.Call("audioSetFrequency", osc, freq, t0)
+			b.Call("audioSetGain", gain, 0.18, t0)
+			b.Call("audioGainRampExp", gain, 0.0001, t0+dur)
+			b.Call("audioConnect", osc, gain)
+			b.Call("audioConnectDestination", gain, ctx)
+			b.Call("audioOscStart", osc, t0)
+			b.Call("audioOscStop", osc, t0+dur)
 			wasmLog("WebAudio", fmt.Sprintf("audio_play_tone(freq=%.2f, dur=%.2f, wave=%s)", freq, dur, waveform))
 		}
 		return BoolValue(true), nil
 	}
 
 	in.Builtins["audio_play_melody"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 {
+		if len(args) < 1 || args[0].Type != ValArray {
 			return BoolValue(false), nil
 		}
-		jsFreqs := js.Global().Get("Array").New()
-		if args[0].Type == ValArray {
-			for i, item := range args[0].ArrayVal {
-				jsFreqs.SetIndex(i, toFloat(item))
+		b, ok := wasmBridge()
+		if !ok {
+			return BoolValue(false), nil
+		}
+		ctx := b.Call("audioContextCreate").Int()
+		t0 := b.Call("audioGetCurrentTime", ctx).Float() + 0.03
+		filter := b.Call("audioCreateBiquadFilter", ctx, "lowpass").Int()
+		master := b.Call("audioCreateGain", ctx).Int()
+		comp := b.Call("audioCreateCompressor", ctx).Int()
+		b.Call("audioSetFilterFreq", filter, 2200.0, t0)
+		b.Call("audioSetFilterQ", filter, 2.5, t0)
+		b.Call("audioSetGain", master, 0.2, t0)
+		b.Call("audioSetCompressor", comp, -18.0, 12.0, 4.0, 0.003, 0.12)
+		b.Call("audioConnect", filter, master)
+		b.Call("audioConnect", master, comp)
+		b.Call("audioConnectDestination", comp, ctx)
+		t := t0
+		for i, item := range args[0].ArrayVal {
+			freq := toFloat(item)
+			dur := 0.18
+			if len(args) > 1 && args[1].Type == ValArray && i < len(args[1].ArrayVal) {
+				dur = toFloat(args[1].ArrayVal[i])
 			}
+			osc := b.Call("audioCreateOscillator", ctx).Int()
+			env := b.Call("audioCreateGain", ctx).Int()
+			b.Call("audioSetOscType", osc, "triangle")
+			b.Call("audioSetFrequency", osc, freq, t)
+			b.Call("audioSetGain", env, 0.0001, t)
+			b.Call("audioGainRampExp", env, 0.8, t+0.015)
+			b.Call("audioGainRampExp", env, 0.0001, t+dur)
+			b.Call("audioConnect", osc, env)
+			b.Call("audioConnect", env, filter)
+			b.Call("audioOscStart", osc, t)
+			b.Call("audioOscStop", osc, t+dur+0.02)
+			t += dur
 		}
-		jsDurs := js.Global().Get("Array").New()
-		if len(args) > 1 && args[1].Type == ValArray {
-			for i, item := range args[1].ArrayVal {
-				jsDurs.SetIndex(i, toFloat(item))
-			}
-		}
-		bridge := js.Global().Get("raptorBridge")
-		if !bridge.IsNull() && !bridge.IsUndefined() {
-			bridge.Call("playMelody", jsFreqs, jsDurs)
-			wasmLog("WebAudio", fmt.Sprintf("audio_play_melody(notes=%d)", jsFreqs.Length()))
-		}
+		wasmLog("WebAudio", fmt.Sprintf("audio_play_melody(notes=%d) via node graph", len(args[0].ArrayVal)))
 		return BoolValue(true), nil
 	}
+
+	registerWasmWebGPU(in)
 
 	// WebGL 3D Low-Level GPU Hardware Accelerated Bindings
 	in.Builtins["gl_init"] = func(in *Interp, args []*Value) (*Value, error) {
@@ -996,6 +1286,130 @@ func (in *Interp) registerWebBuiltins() {
 		if !bridge.IsNull() && !bridge.IsUndefined() {
 			bridge.Call("glStartAnimation")
 			wasmLog("WebGL", "gl_animate() start 60fps render loop")
+		}
+		return BoolValue(true), nil
+	}
+}
+
+func jsTimeout(ms int) <-chan time.Time {
+	return time.After(time.Duration(ms) * time.Millisecond)
+}
+
+func wasmBridge() (js.Value, bool) {
+	b := js.Global().Get("raptorBridge")
+	if b.IsNull() || b.IsUndefined() {
+		return b, false
+	}
+	return b, true
+}
+
+func jsFloatArray(v js.Value) []float32 {
+	n := v.Length()
+	out := make([]float32, n)
+	for i := 0; i < n; i++ {
+		out[i] = float32(v.Index(i).Float())
+	}
+	return out
+}
+
+func toJSFloatArray(xs []float32) js.Value {
+	arr := js.Global().Get("Array").New(len(xs))
+	for i, v := range xs {
+		arr.SetIndex(i, v)
+	}
+	return arr
+}
+
+func registerWasmWebGPU(in *Interp) {
+	tinyLMMatmulHook = func(m, n, k int, a, b []float32) []float32 {
+		br, ok := wasmBridge()
+		if !ok {
+			return nil
+		}
+		if !br.Get("webgpuReady").Truthy() {
+			return nil
+		}
+		ch := make(chan []float32, 1)
+		cb := js.FuncOf(func(this js.Value, args []js.Value) any {
+			if len(args) > 0 {
+				ch <- jsFloatArray(args[0])
+			} else {
+				ch <- nil
+			}
+			return nil
+		})
+		defer cb.Release()
+		br.Call("webgpuMatmulAsync", m, n, k, toJSFloatArray(a), toJSFloatArray(b), cb)
+		select {
+		case out := <-ch:
+			if len(out) == m*n {
+				return out
+			}
+		case <-jsTimeout(2000):
+		}
+		return nil
+	}
+
+	in.Builtins["webgpu_init"] = func(in *Interp, args []*Value) (*Value, error) {
+		id := "wasmWebGPUCanvas"
+		w, h := 640, 320
+		if len(args) > 0 {
+			id = args[0].String()
+		}
+		if len(args) > 2 {
+			w = int(in.toInt(args[1]))
+			h = int(in.toInt(args[2]))
+		}
+		if b, ok := wasmBridge(); ok {
+			okv := b.Call("webgpuInit", id, w, h)
+			wasmLog("WebGPU", fmt.Sprintf("webgpu_init(%s, %d, %d) -> %v", id, w, h, okv))
+			if okv.Truthy() {
+				return BoolValue(true), nil
+			}
+		}
+		return BoolValue(false), nil
+	}
+
+	in.Builtins["webgpu_available"] = func(in *Interp, args []*Value) (*Value, error) {
+		if b, ok := wasmBridge(); ok {
+			return BoolValue(b.Call("webgpuAvailable").Truthy()), nil
+		}
+		return BoolValue(false), nil
+	}
+
+	in.Builtins["webgpu_matmul"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 5 || args[3].Type != ValArray || args[4].Type != ValArray {
+			return ArrayValue(nil), fmt.Errorf("webgpu_matmul(m, n, k, a, b)")
+		}
+		m := int(in.toInt(args[0]))
+		n := int(in.toInt(args[1]))
+		k := int(in.toInt(args[2]))
+		a := make([]float32, len(args[3].ArrayVal))
+		b := make([]float32, len(args[4].ArrayVal))
+		for i, v := range args[3].ArrayVal {
+			a[i] = float32(toFloat(v))
+		}
+		for i, v := range args[4].ArrayVal {
+			b[i] = float32(toFloat(v))
+		}
+		out := tinyLMMatmul(m, n, k, a, b)
+		res := make([]*Value, len(out))
+		for i, v := range out {
+			res[i] = FloatValue(float64(v))
+		}
+		return ArrayValue(res), nil
+	}
+
+	in.Builtins["webgpu_draw_logits"] = func(in *Interp, args []*Value) (*Value, error) {
+		var logits []float32
+		if len(args) > 0 && args[0].Type == ValArray {
+			logits = make([]float32, len(args[0].ArrayVal))
+			for i, v := range args[0].ArrayVal {
+				logits[i] = float32(toFloat(v))
+			}
+		}
+		if b, ok := wasmBridge(); ok {
+			b.Call("webgpuDrawLogits", toJSFloatArray(logits), tinyLMVocabSrc)
 		}
 		return BoolValue(true), nil
 	}

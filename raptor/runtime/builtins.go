@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"sort"
 	"strings"
 	"time"
 )
@@ -111,7 +112,6 @@ func (in *Interp) registerBuiltins() {
 		}
 		return StringValue(GetRegexEngine().Name()), nil
 	}
-
 
 	in.Builtins["package_symbols"] = func(in *Interp, args []*Value) (*Value, error) {
 		pkg := in.CurrentPackage
@@ -226,7 +226,6 @@ func (in *Interp) registerBuiltins() {
 		return JunctionValue(JunctionNone, elements), nil
 	}
 
-
 	in.Builtins["chars"] = func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) < 1 {
 			return IntValue(0), nil
@@ -320,7 +319,7 @@ func (in *Interp) registerBuiltins() {
 			return IntValue(0), nil
 		}
 		if args[0].Type == ValArray {
-			return IntValue(int64(len(args[0].ArrayVal))), nil
+			return IntValue(int64(args[0].arrayLen())), nil
 		}
 		if args[0].Type == ValHash {
 			return IntValue(int64(len(args[0].HashVal))), nil
@@ -336,8 +335,10 @@ func (in *Interp) registerBuiltins() {
 		if arr.Type != ValArray {
 			return nil, fmt.Errorf("push requires array target")
 		}
-		arr.ArrayVal = append(arr.ArrayVal, args[1:]...)
-		return IntValue(int64(len(arr.ArrayVal))), nil
+		for _, x := range args[1:] {
+			arr.pushValue(x)
+		}
+		return IntValue(int64(arr.arrayLen())), nil
 	}
 
 	in.Builtins["pop"] = func(in *Interp, args []*Value) (*Value, error) {
@@ -561,9 +562,15 @@ func (in *Interp) registerBuiltins() {
 		} else {
 			return ArrayValue(nil), nil
 		}
-		sorted := make([]*Value, len(list.ArrayVal))
-		copy(sorted, list.ArrayVal)
-		// Simple insertion sort for stability
+		if list.Ints != nil && list.ArrayVal == nil {
+			cp := make([]int64, len(list.Ints))
+			copy(cp, list.Ints)
+			sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
+			return IntArrayValue(cp), nil
+		}
+		src := list.materializeArray()
+		sorted := make([]*Value, len(src))
+		copy(sorted, src)
 		for i := 1; i < len(sorted); i++ {
 			for j := i; j > 0; j-- {
 				cmp := in.compareValues(sorted[j-1], sorted[j])
@@ -1190,8 +1197,10 @@ func (in *Interp) registerBuiltins() {
 		if len(args) < 2 || args[0].Type != ValArray {
 			return NilValue(), nil
 		}
-		args[0].ArrayVal = append(args[0].ArrayVal, args[1:]...)
-		return IntValue(int64(len(args[0].ArrayVal))), nil
+		for _, x := range args[1:] {
+			args[0].pushValue(x)
+		}
+		return IntValue(int64(args[0].arrayLen())), nil
 	}
 
 	in.Builtins["pop"] = func(in *Interp, args []*Value) (*Value, error) {
@@ -1273,7 +1282,7 @@ func (in *Interp) registerBuiltins() {
 			return IntValue(0), nil
 		}
 		if args[0].Type == ValArray {
-			return IntValue(int64(len(args[0].ArrayVal))), nil
+			return IntValue(int64(args[0].arrayLen())), nil
 		}
 		if args[0].Type == ValHash {
 			return IntValue(int64(len(args[0].HashVal))), nil

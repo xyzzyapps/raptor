@@ -1,0 +1,34 @@
+# GGML C-API tensor graph (software backend; loads ggml.dll when present).
+say "ggml backend: ", ggml_backend();
+say "native lib: ", ggml_native_available();
+
+my $ctx = ggml_init(1024 * 1024);
+
+# 2x2 matrices, column-major like ggml.h
+my $a = ggml_new_tensor_2d($ctx, $GGML_TYPE_F32, 2, 2);
+my $b = ggml_new_tensor_2d($ctx, $GGML_TYPE_F32, 2, 2);
+ggml_set_name($a, "A");
+ggml_set_name($b, "B");
+
+ggml_set_data($a, [1.0, 2.0, 3.0, 4.0]);
+ggml_set_data($b, [5.0, 6.0, 7.0, 8.0]);
+
+# dest = A^T * B
+my $c = ggml_mul_mat($ctx, $a, $b);
+ggml_set_name($c, "C");
+
+my $shifted = ggml_add($ctx, $c, $a);
+my $act = ggml_relu($ctx, $shifted);
+my $scaled = ggml_scale($ctx, $act, 0.5);
+
+my $gf = ggml_new_graph($ctx);
+ggml_build_forward_expand($gf, $scaled);
+ggml_graph_compute_with_ctx($ctx, $gf, 1);
+
+say "C = A^T B  (then relu(C+A)*0.5)";
+say "nelements=", ggml_nelements($scaled), " nbytes=", ggml_nbytes($scaled);
+say "data=", ggml_get_data($scaled);
+say "used_mem=", ggml_used_mem($ctx);
+
+ggml_free($ctx);
+say "ggml graph ok";

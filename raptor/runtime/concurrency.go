@@ -8,11 +8,9 @@ import (
 	"unsafe"
 )
 
-
 func unsafePointer(u uintptr) unsafe.Pointer {
 	return unsafe.Pointer(u)
 }
-
 
 // NewPromise creates a pending Promise.
 func NewPromise() *Promise {
@@ -124,9 +122,10 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 			newVal := atomic.AddInt64(ptr, delta)
 			return IntValue(newVal), nil
 		}
-		old := args[0].IntVal
+		if isInternedInt(args[0]) {
+			return nil, fmt.Errorf("atomic_add: interned int is immutable")
+		}
 		newVal := atomic.AddInt64(&args[0].IntVal, delta)
-		_ = old
 		return IntValue(newVal), nil
 	}
 
@@ -139,6 +138,9 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 			ptr := (*int64)(unsafePointer(args[0].CStructVal.Ptr))
 			newVal := atomic.AddInt64(ptr, -delta)
 			return IntValue(newVal), nil
+		}
+		if isInternedInt(args[0]) {
+			return nil, fmt.Errorf("atomic_sub: interned int is immutable")
 		}
 		newVal := atomic.AddInt64(&args[0].IntVal, -delta)
 		return IntValue(newVal), nil
@@ -167,6 +169,9 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 			atomic.StoreInt64(ptr, val)
 			return IntValue(val), nil
 		}
+		if isInternedInt(args[0]) {
+			return nil, fmt.Errorf("atomic_store: interned int is immutable")
+		}
 		atomic.StoreInt64(&args[0].IntVal, val)
 		return IntValue(val), nil
 	}
@@ -182,6 +187,9 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 			ptr := (*int64)(unsafePointer(args[0].CStructVal.Ptr))
 			swapped = atomic.CompareAndSwapInt64(ptr, oldVal, newVal)
 		} else {
+			if isInternedInt(args[0]) {
+				return nil, fmt.Errorf("atomic_cas: interned int is immutable")
+			}
 			swapped = atomic.CompareAndSwapInt64(&args[0].IntVal, oldVal, newVal)
 		}
 		return BoolValue(swapped), nil

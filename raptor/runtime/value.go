@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"unsafe"
 )
 
 // ValueType identifies the runtime kind of a Value.
@@ -48,7 +49,6 @@ type Junction struct {
 type LazySeq struct {
 	Items []*Value
 }
-
 
 // Promise represents an asynchronous computation.
 type Promise struct {
@@ -102,6 +102,44 @@ type Value struct {
 	JunctionVal *Junction
 	LazySeqVal  *LazySeq
 	RefVal      *Value
+	// strBuf is a unique growable backing store for in-place ~= / concat.
+	strBuf []byte
+	// Ints is a packed homogeneous int64 lane for ValArray (sortnums / ranges).
+	Ints []int64
+}
+
+const (
+	intInternMin int64 = -256
+	intInternMax int64 = 256
+)
+
+var intIntern [intInternMax - intInternMin + 1]*Value
+
+func init() {
+	for i := intInternMin; i <= intInternMax; i++ {
+		intIntern[i-intInternMin] = &Value{Type: ValInt, IntVal: i}
+	}
+}
+
+func isInternedInt(v *Value) bool {
+	if v == nil || v.Type != ValInt {
+		return false
+	}
+	i := v.IntVal
+	if i < intInternMin || i > intInternMax {
+		return false
+	}
+	return intIntern[i-intInternMin] == v
+}
+
+func isFlyweight(v *Value) bool {
+	if v == nil {
+		return true
+	}
+	if v == valNil || v == valTrue || v == valFalse || v == valEmptyStr {
+		return true
+	}
+	return isInternedInt(v)
 }
 
 func JunctionValue(kind JunctionKind, vals []*Value) *Value {
@@ -123,9 +161,6 @@ func LazySeqValue(items []*Value) *Value {
 	}
 }
 
-
-
-
 var (
 	valNil      = &Value{Type: ValNil}
 	valTrue     = &Value{Type: ValBool, BoolVal: true}
@@ -145,7 +180,93 @@ func BoolValue(b bool) *Value {
 }
 
 func IntValue(i int64) *Value {
+	if i >= intInternMin && i <= intInternMax {
+		return intIntern[i-intInternMin]
+	}
 	return &Value{Type: ValInt, IntVal: i}
+}
+
+func IntArrayValue(ints []int64) *Value {
+	return &Value{Type: ValArray, Ints: ints}
+}
+
+func (v *Value) arrayLen() int {
+	if v == nil || v.Type != ValArray {
+		return 0
+	}
+	if v.Ints != nil && v.ArrayVal == nil {
+		return len(v.Ints)
+	}
+	return len(v.ArrayVal)
+}
+
+func (v *Value) arrayAt(i int) *Value {
+	if v == nil || v.Type != ValArray {
+		return NilValue()
+	}
+	if v.Ints != nil && v.ArrayVal == nil {
+		if i < 0 || i >= len(v.Ints) {
+			return NilValue()
+		}
+		return IntValue(v.Ints[i])
+	}
+	if i < 0 || i >= len(v.ArrayVal) {
+		return NilValue()
+	}
+	return v.ArrayVal[i]
+}
+
+func (v *Value) materializeArray() []*Value {
+	if v == nil || v.Type != ValArray {
+		return nil
+	}
+	if v.ArrayVal != nil {
+		return v.ArrayVal
+	}
+	if v.Ints == nil {
+		return nil
+	}
+	out := make([]*Value, len(v.Ints))
+	for i, n := range v.Ints {
+		out[i] = IntValue(n)
+	}
+	v.ArrayVal = out
+	return out
+}
+
+func (v *Value) pushValue(x *Value) {
+	if v == nil {
+		return
+	}
+	v.Type = ValArray
+	if x != nil && x.Type == ValInt && v.ArrayVal == nil {
+		v.Ints = append(v.Ints, x.IntVal)
+		return
+	}
+	if v.Ints != nil && v.ArrayVal == nil {
+		v.materializeArray()
+	}
+	v.ArrayVal = append(v.ArrayVal, x)
+}
+
+func (v *Value) appendString(suffix string) *Value {
+	if v == nil || isFlyweight(v) || v.Type != ValString {
+		return StringValue(v.String() + suffix)
+	}
+	if cap(v.strBuf) == 0 {
+		need := len(v.StrVal) + len(suffix)
+		capn := need + 32
+		if capn < 64 {
+			capn = 64
+		}
+		buf := make([]byte, len(v.StrVal), capn)
+		copy(buf, v.StrVal)
+		v.strBuf = buf
+	}
+	v.strBuf = append(v.strBuf, suffix...)
+	// Share backing store — string() would copy and restore quadratic churn.
+	v.StrVal = unsafe.String(unsafe.SliceData(v.strBuf), len(v.strBuf))
+	return v
 }
 
 func FloatValue(f float64) *Value {
@@ -350,7 +471,6 @@ func (v *Value) MatchesType(constraint string) bool {
 	}
 }
 
-
 func (v *Value) String() string {
 	if v == nil {
 		return "(nil)"
@@ -370,6 +490,13 @@ func (v *Value) String() string {
 	case ValString:
 		return v.StrVal
 	case ValArray:
+		if v.Ints != nil && v.ArrayVal == nil {
+			items := make([]string, len(v.Ints))
+			for i, n := range v.Ints {
+				items[i] = fmt.Sprintf("%d", n)
+			}
+			return "[" + strings.Join(items, " ") + "]"
+		}
 		var items []string
 		for _, e := range v.ArrayVal {
 			items = append(items, e.String())
@@ -471,8 +598,6 @@ func (v *Value) RefType() string {
 		return ""
 	}
 }
-
-
 
 // ToJSON marshals Value into standard JSON representation.
 func (v *Value) ToJSON() (string, error) {

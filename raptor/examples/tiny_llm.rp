@@ -1,0 +1,15 @@
+# Tiny character-level LLM. On the WASM tour this uses WebGPU matmul
+# when the adapter is ready; on desktop it runs the same tensors on CPU.
+
+my $model = llm_tiny_load();
+say "tiny LLM backend: ", llm_tiny_backend();
+say "vocab: ", llm_tiny_vocab();
+
+my $prompt = "raptor is ";
+my $out = llm_tiny_generate($model, $prompt, 48, 0.35);
+say $out;
+
+my @logits = llm_tiny_logits($model, $out);
+say "logits=", @logits.elems();
+my $ch = llm_tiny_sample(@logits, 0.5);
+say "next sample: ", $ch;

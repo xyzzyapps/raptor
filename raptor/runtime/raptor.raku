@@ -2,12 +2,15 @@
 # Subset of Raku that is PEG-compatible. No action blocks.
 
 grammar Raptor {
-    rule TOP { <statement>* <HOST_legacy_rest>? }
+    rule TOP { <statement>* }
 
     token comment { '#' <-[\n]>* }
 
+    # <HOST_stmt> calls the Go Pratt parser for one statement.
+    # PEG alternatives below run only when Pratt cannot consume here.
     rule statement {
         | <comment>
+        | <HOST_stmt>
         | <grammar_decl>
         | <package_decl>
         | <use_stmt>
@@ -122,7 +125,7 @@ grammar Raptor {
 
     rule block { '{' <statement>* '}' }
 
-    rule expression { <assign_expr> }
+    rule expression { <assign_expr> | <HOST_expr> }
 
     rule assign_expr { <postfix> <assign_op> <assign_expr> | <ternary> }
     token assign_op { '//=' | '+=' | '-=' | '~=' | '*=' | '/=' }

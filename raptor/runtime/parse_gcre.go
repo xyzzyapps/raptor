@@ -20,25 +20,89 @@ var (
 )
 
 func init() {
-	gcre.RegisterHost("legacy_rest", hostLegacyRest)
+	gcre.RegisterHost("stmt", hostStmt)
+	gcre.RegisterHost("expr", hostExpr)
 }
 
-func hostLegacyRest(_ *gcre.Grammar, ctx *gcre.Context, cap *gcre.Match) bool {
+type hostLex struct {
+	tokens []Token
+}
+
+func tokenIndexAt(tokens []Token, pos int) int {
+	for i, t := range tokens {
+		if t.To > pos || t.Type == TokEOF {
+			return i
+		}
+	}
+	if len(tokens) == 0 {
+		return 0
+	}
+	return len(tokens) - 1
+}
+
+func parseStmtAt(tokens []Token, pos int) (Stmt, int, error) {
+	i := tokenIndexAt(tokens, pos)
+	p := NewParser(tokens[i:])
+	stmt, err := p.parseStatement()
+	if err != nil {
+		return nil, 0, err
+	}
+	return stmt, lastConsumedEnd(p), nil
+}
+
+func parseExprAt(tokens []Token, pos int) (Expr, int, error) {
+	i := tokenIndexAt(tokens, pos)
+	p := NewParser(tokens[i:])
+	expr, err := p.parseExpression(0)
+	if err != nil {
+		return nil, 0, err
+	}
+	return expr, lastConsumedEnd(p), nil
+}
+
+func hostStmt(_ *gcre.Grammar, ctx *gcre.Context, cap *gcre.Match) bool {
 	if ctx == nil || ctx.Pos >= len(ctx.Src) {
 		return false
 	}
-	for ctx.Pos < len(ctx.Src) && (ctx.Src[ctx.Pos] == ' ' || ctx.Src[ctx.Pos] == '\t' || ctx.Src[ctx.Pos] == '\n' || ctx.Src[ctx.Pos] == '\r') {
-		ctx.Pos++
+	if hl, ok := ctx.Host.(*hostLex); ok && hl != nil && len(hl.tokens) > 0 {
+		stmt, end, err := parseStmtAt(hl.tokens, ctx.Pos)
+		if err != nil || end <= ctx.Pos {
+			return false
+		}
+		ctx.Pos = end
+		cap.Make(stmt)
+		return true
 	}
-	if ctx.Pos >= len(ctx.Src) {
+	rest := string(ctx.Src[ctx.Pos:])
+	stmt, n, err := ParseOneStatement(rest)
+	if err != nil || n <= 0 {
 		return false
 	}
-	prog, err := ParseProgramLegacy(string(ctx.Src[ctx.Pos:]))
-	if err != nil || prog == nil {
+	ctx.Pos += n
+	cap.Make(stmt)
+	return true
+}
+
+func hostExpr(_ *gcre.Grammar, ctx *gcre.Context, cap *gcre.Match) bool {
+	if ctx == nil || ctx.Pos >= len(ctx.Src) {
 		return false
 	}
-	ctx.Pos = len(ctx.Src)
-	cap.Make(prog)
+	if hl, ok := ctx.Host.(*hostLex); ok && hl != nil && len(hl.tokens) > 0 {
+		expr, end, err := parseExprAt(hl.tokens, ctx.Pos)
+		if err != nil || end <= ctx.Pos {
+			return false
+		}
+		ctx.Pos = end
+		cap.Make(expr)
+		return true
+	}
+	rest := string(ctx.Src[ctx.Pos:])
+	expr, n, err := ParseOneExpression(rest)
+	if err != nil || n <= 0 {
+		return false
+	}
+	ctx.Pos += n
+	cap.Make(expr)
 	return true
 }
 
@@ -49,37 +113,10 @@ func raptorGrammar() (*gcre.Grammar, error) {
 	return raptorG, raptorGErr
 }
 
-// ParseProgram runs gcre (Pigeon-compatible Raku subset) and the Go
-// Pratt parser together. There is no environment switch.
-//
-// Both always run. If the Go parser succeeds it is the language
-// authority; gcre is used when it is the only successful parse.
+// ParseProgram is the only entry: gcre loads raptor.raku.
+// Pratt runs only when the grammar names <HOST_stmt> or <HOST_expr>.
 func ParseProgram(source string) (*Program, error) {
-	gcreProg, gcreErr := parseProgramGcre(source)
-	legacyProg, legacyErr := ParseProgramLegacy(source)
-
-	gcreOK := gcreErr == nil && gcreProg != nil
-	legacyOK := legacyErr == nil && legacyProg != nil
-
-	switch {
-	case gcreOK && legacyOK:
-		// Both parsed. The Go Pratt tree is the full-language partner;
-		// gcre is the declarative PEG reading. Prefer Go when it succeeds
-		// so LTM-like operators, subsets, and interpolation stay correct.
-		return legacyProg, nil
-	case gcreOK:
-		return gcreProg, nil
-	case legacyOK:
-		return legacyProg, nil
-	default:
-		if gcreErr != nil && legacyErr != nil {
-			return nil, fmt.Errorf("gcre: %v; go parser: %w", gcreErr, legacyErr)
-		}
-		if legacyErr != nil {
-			return nil, legacyErr
-		}
-		return nil, gcreErr
-	}
+	return parseProgramGcre(source)
 }
 
 func parseProgramGcre(source string) (*Program, error) {
@@ -88,6 +125,9 @@ func parseProgramGcre(source string) (*Program, error) {
 		return nil, fmt.Errorf("load raptor grammar: %w", err)
 	}
 	ctx := &gcre.Context{Src: []rune(source), Pos: 0}
+	if toks, lexErr := lexAll(source); lexErr == nil {
+		ctx.Host = &hostLex{tokens: toks}
+	}
 	m := g.Subrule("TOP", ctx)
 	if m == nil || !m.Ok {
 		return nil, fmt.Errorf("parse error at position %d", ctx.Pos)
@@ -102,14 +142,6 @@ func parseProgramGcre(source string) (*Program, error) {
 		if st != nil {
 			stmts = append(stmts, st)
 		}
-	}
-	if hm := m.Get("HOST_legacy_rest"); hm != nil && hm.Ok {
-		if prog, ok := hm.Made.(*Program); ok {
-			stmts = append(stmts, prog.Stmts...)
-		}
-	}
-	if prog, ok := m.Made.(*Program); ok && prog != nil {
-		stmts = append(stmts, prog.Stmts...)
 	}
 	return &Program{Stmts: stmts}, nil
 }
@@ -147,6 +179,11 @@ func firstNamed(m *gcre.Match, names ...string) (*gcre.Match, string) {
 func walkStatement(m *gcre.Match) Stmt {
 	if m == nil || !m.Ok {
 		return nil
+	}
+	if hs := m.Get("HOST_stmt"); hs != nil && hs.Ok {
+		if st, ok := hs.Made.(Stmt); ok {
+			return st
+		}
 	}
 	if c := m.Get("comment"); c != nil && c.Ok && !hasOtherStmt(m) {
 		return nil
@@ -689,6 +726,11 @@ func walkBlock(m *gcre.Match) *BlockStmt {
 func walkExpr(m *gcre.Match) Expr {
 	if m == nil || !m.Ok {
 		return nil
+	}
+	if he := m.Get("HOST_expr"); he != nil && he.Ok {
+		if e, ok := he.Made.(Expr); ok {
+			return e
+		}
 	}
 	if a := m.Get("assign_expr"); a != nil && a.Ok {
 		return walkAssign(a)

@@ -5,10 +5,8 @@
 let audioCtx = null;
 window.audioCtx = null;
 let canvasContexts = [];
-let audioContexts = [];
-let audioOscillators = [];
-let audioGains = [];
-let audioFilters = [];
+let audioNodeSeq = 1;
+let audioNodes = {}; // id -> { kind, node, ctx, extra }
 
 let gl = null;
 let glShaders = [];
@@ -116,179 +114,269 @@ window.raptorBridge = {
     if (ctx) ctx.fillText(text, x, y);
   },
 
-  // --- Low-Level WebAudio DSP Node Built-ins ---
+  // --- Low-Level WebAudio DSP (1:1 AudioContext / AudioNode wrappers) ---
+  _audioAlloc: function(kind, node, ctx, extra) {
+    const id = audioNodeSeq++;
+    audioNodes[id] = { kind, node, ctx, extra: extra || null };
+    return id;
+  },
+  _audioEntry: function(id) {
+    return audioNodes[id] || null;
+  },
+  _audioNode: function(id) {
+    const e = audioNodes[id];
+    return e ? e.node : null;
+  },
+  _audioCtx: function(id) {
+    const e = audioNodes[id];
+    if (e && e.kind === 'context') return e.node;
+    if (e && e.ctx) return e.ctx;
+    return audioCtx;
+  },
+  _audioResume: function(ctx) {
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+  },
+
   initAudio: function() {
     if (!audioCtx) {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      audioCtx = new AudioContext();
+      const AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      window.audioCtx = audioCtx;
     }
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume().catch(() => {});
-    }
+    this._audioResume(audioCtx);
     console.log("[raptorBridge] initAudio() state:", audioCtx.state);
   },
 
   playTone: function(frequency, durationSec, waveType) {
-    window.raptorBridge.initAudio();
+    // Kept as a thin timeline helper; tour lesson 13 builds the graph in Raptor.
+    this.initAudio();
     if (!audioCtx) return;
-
+    const t0 = audioCtx.currentTime;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-
     osc.type = waveType || 'triangle';
-    osc.frequency.setValueAtTime(frequency || 440, audioCtx.currentTime);
-
-    gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + (durationSec || 0.25));
-
+    osc.frequency.setValueAtTime(frequency || 440, t0);
+    gain.gain.setValueAtTime(0.18, t0);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + (durationSec || 0.25));
     osc.connect(gain);
     gain.connect(audioCtx.destination);
-
-    osc.start();
-    osc.stop(audioCtx.currentTime + (durationSec || 0.25));
-  },
-
-  playMelody: function(frequencies, durations) {
-    window.raptorBridge.initAudio();
-    if (!audioCtx) return;
-    const freqs = Array.isArray(frequencies) ? frequencies : Array.from(frequencies);
-    const durs = (durations && (Array.isArray(durations) || durations.length !== undefined)) ? Array.from(durations) : [];
-
-    let timeOffset = 0;
-    freqs.forEach((freq, idx) => {
-      const dur = (durs && durs[idx]) ? durs[idx] : 0.18;
-      setTimeout(() => {
-        window.raptorBridge.playTone(freq, dur, 'triangle');
-      }, timeOffset * 1000);
-      timeOffset += dur;
-    });
+    osc.start(t0);
+    osc.stop(t0 + (durationSec || 0.25));
   },
 
   audioContextCreate: function() {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    const ctx = new AudioContext();
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
-    }
-    audioContexts = [ctx];
-    audioOscillators = [];
-    audioGains = [];
-    audioFilters = [];
-    console.log("[raptorBridge] WebAudio AudioContext created on state:", ctx.state, "sampleRate:", ctx.sampleRate);
-    return 0;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    this._audioResume(ctx);
+    audioCtx = ctx;
+    window.audioCtx = ctx;
+    const destId = this._audioAlloc('destination', ctx.destination, ctx);
+    const ctxId = this._audioAlloc('context', ctx, ctx, { destId });
+    console.log("[raptorBridge] AudioContext", ctx.state, "sampleRate", ctx.sampleRate, "id", ctxId);
+    return ctxId;
   },
 
   audioGetCurrentTime: function(ctxId) {
-    const ctx = audioContexts[ctxId] || audioContexts[0];
+    const ctx = this._audioCtx(ctxId);
     return ctx ? ctx.currentTime : 0.0;
   },
 
+  audioSampleRate: function(ctxId) {
+    const ctx = this._audioCtx(ctxId);
+    return ctx ? ctx.sampleRate : 44100;
+  },
+
+  audioDestination: function(ctxId) {
+    const e = this._audioEntry(ctxId);
+    if (e && e.extra && e.extra.destId) return e.extra.destId;
+    const ctx = this._audioCtx(ctxId);
+    if (!ctx) return 0;
+    return this._audioAlloc('destination', ctx.destination, ctx);
+  },
+
   audioCreateOscillator: function(ctxId) {
-    const ctx = audioContexts[ctxId] || audioContexts[0];
+    const ctx = this._audioCtx(ctxId);
     if (!ctx) return 0;
-    const osc = ctx.createOscillator();
-    audioOscillators.push(osc);
-    return audioOscillators.length - 1;
+    return this._audioAlloc('oscillator', ctx.createOscillator(), ctx);
   },
-
   audioCreateGain: function(ctxId) {
-    const ctx = audioContexts[ctxId] || audioContexts[0];
+    const ctx = this._audioCtx(ctxId);
     if (!ctx) return 0;
-    const gain = ctx.createGain();
-    audioGains.push(gain);
-    return audioGains.length - 1;
+    return this._audioAlloc('gain', ctx.createGain(), ctx);
   },
-
   audioCreateBiquadFilter: function(ctxId, filterType) {
-    const ctx = audioContexts[ctxId] || audioContexts[0];
+    const ctx = this._audioCtx(ctxId);
     if (!ctx) return 0;
     const filter = ctx.createBiquadFilter();
     filter.type = filterType || 'lowpass';
-    audioFilters.push(filter);
-    return audioFilters.length - 1;
+    return this._audioAlloc('filter', filter, ctx);
+  },
+  audioCreateCompressor: function(ctxId) {
+    const ctx = this._audioCtx(ctxId);
+    if (!ctx) return 0;
+    return this._audioAlloc('compressor', ctx.createDynamicsCompressor(), ctx);
+  },
+  audioCreateDelay: function(ctxId, maxDelay) {
+    const ctx = this._audioCtx(ctxId);
+    if (!ctx) return 0;
+    return this._audioAlloc('delay', ctx.createDelay(maxDelay || 1.0), ctx);
+  },
+  audioCreatePanner: function(ctxId) {
+    const ctx = this._audioCtx(ctxId);
+    if (!ctx) return 0;
+    return this._audioAlloc('panner', ctx.createStereoPanner(), ctx);
+  },
+  audioCreateAnalyser: function(ctxId) {
+    const ctx = this._audioCtx(ctxId);
+    if (!ctx) return 0;
+    const an = ctx.createAnalyser();
+    an.fftSize = 256;
+    return this._audioAlloc('analyser', an, ctx);
+  },
+  audioCreateBuffer: function(ctxId, channels, length, sampleRate) {
+    const ctx = this._audioCtx(ctxId);
+    if (!ctx) return 0;
+    const buf = ctx.createBuffer(channels || 1, length || ctx.sampleRate, sampleRate || ctx.sampleRate);
+    return this._audioAlloc('buffer', buf, ctx);
+  },
+  audioCreateBufferSource: function(ctxId) {
+    const ctx = this._audioCtx(ctxId);
+    if (!ctx) return 0;
+    return this._audioAlloc('source', ctx.createBufferSource(), ctx);
   },
 
   audioConnect: function(srcId, dstId) {
-    const src = audioOscillators[srcId] || audioGains[srcId] || audioFilters[srcId];
-    const dst = audioGains[dstId] || audioFilters[dstId] || audioOscillators[dstId];
-    if (src && dst) {
-      src.connect(dst);
+    const src = this._audioNode(srcId);
+    const dst = this._audioNode(dstId);
+    if (src && dst && src.connect) {
+      try { src.connect(dst); } catch (err) { console.warn("audioConnect", err); }
     }
   },
-
+  audioConnectParam: function(srcId, dstId, paramName) {
+    const src = this._audioNode(srcId);
+    const dst = this._audioNode(dstId);
+    if (src && dst && dst[paramName]) {
+      try { src.connect(dst[paramName]); } catch (err) { console.warn("audioConnectParam", err); }
+    }
+  },
   audioConnectDestination: function(srcId, ctxId) {
-    const src = audioOscillators[srcId] || audioGains[srcId] || audioFilters[srcId];
-    const ctx = audioContexts[ctxId] || audioContexts[0];
+    const src = this._audioNode(srcId);
+    const ctx = this._audioCtx(ctxId);
     if (src && ctx) {
-      src.connect(ctx.destination);
+      try { src.connect(ctx.destination); } catch (err) { console.warn("audioConnectDestination", err); }
+    }
+  },
+  audioDisconnect: function(srcId) {
+    const src = this._audioNode(srcId);
+    if (src && src.disconnect) {
+      try { src.disconnect(); } catch (err) { console.warn("audioDisconnect", err); }
     }
   },
 
   audioSetOscType: function(oscId, waveType) {
-    const osc = audioOscillators[oscId];
+    const osc = this._audioNode(oscId);
     if (osc) osc.type = waveType || 'sine';
   },
-
   audioSetFrequency: function(oscId, freq, timeOffset) {
-    const osc = audioOscillators[oscId];
-    if (osc) {
-      const t = timeOffset || 0.0;
-      osc.frequency.setValueAtTime(freq, t);
-    }
+    const osc = this._audioNode(oscId);
+    if (osc && osc.frequency) osc.frequency.setValueAtTime(freq, timeOffset || 0.0);
   },
-
+  audioFreqRamp: function(oscId, freq, endTime) {
+    const osc = this._audioNode(oscId);
+    if (osc && osc.frequency) osc.frequency.exponentialRampToValueAtTime(Math.max(freq, 1), endTime);
+  },
+  audioSetDetune: function(oscId, cents, timeOffset) {
+    const osc = this._audioNode(oscId);
+    if (osc && osc.detune) osc.detune.setValueAtTime(cents, timeOffset || 0.0);
+  },
   audioSetGain: function(gainId, gainVal, timeOffset) {
-    const gain = audioGains[gainId];
-    if (gain) {
-      const t = timeOffset || 0.0;
-      gain.gain.setValueAtTime(gainVal, t);
-    }
+    const gain = this._audioNode(gainId);
+    if (gain && gain.gain) gain.gain.setValueAtTime(gainVal, timeOffset || 0.0);
   },
-
   audioGainRampExp: function(gainId, targetVal, endTime) {
-    const gain = audioGains[gainId];
-    if (gain) {
-      const v = Math.max(targetVal, 0.00001);
-      gain.gain.exponentialRampToValueAtTime(v, endTime);
+    const gain = this._audioNode(gainId);
+    if (gain && gain.gain) {
+      gain.gain.exponentialRampToValueAtTime(Math.max(targetVal, 0.00001), endTime);
     }
   },
-
   audioGainRampLinear: function(gainId, targetVal, endTime) {
-    const gain = audioGains[gainId];
-    if (gain) {
-      gain.gain.linearRampToValueAtTime(targetVal, endTime);
-    }
+    const gain = this._audioNode(gainId);
+    if (gain && gain.gain) gain.gain.linearRampToValueAtTime(targetVal, endTime);
   },
-
   audioSetFilterFreq: function(filterId, freq, timeOffset) {
-    const filter = audioFilters[filterId];
-    if (filter) {
-      filter.frequency.setValueAtTime(freq, timeOffset || 0.0);
+    const filter = this._audioNode(filterId);
+    if (filter && filter.frequency) filter.frequency.setValueAtTime(freq, timeOffset || 0.0);
+  },
+  audioSetFilterQ: function(filterId, q, timeOffset) {
+    const filter = this._audioNode(filterId);
+    if (filter && filter.Q) filter.Q.setValueAtTime(q, timeOffset || 0.0);
+  },
+  audioSetCompressor: function(id, thresh, knee, ratio, attack, release) {
+    const c = this._audioNode(id);
+    if (!c || !c.threshold) return;
+    const t = c.context ? c.context.currentTime : 0;
+    c.threshold.setValueAtTime(thresh, t);
+    c.knee.setValueAtTime(knee, t);
+    c.ratio.setValueAtTime(ratio, t);
+    c.attack.setValueAtTime(attack, t);
+    c.release.setValueAtTime(release, t);
+  },
+  audioSetDelayTime: function(id, sec, timeOffset) {
+    const d = this._audioNode(id);
+    if (d && d.delayTime) d.delayTime.setValueAtTime(sec, timeOffset || 0.0);
+  },
+  audioSetPan: function(id, pan, timeOffset) {
+    const p = this._audioNode(id);
+    if (p && p.pan) p.pan.setValueAtTime(pan, timeOffset || 0.0);
+  },
+  audioSetFftSize: function(id, n) {
+    const a = this._audioNode(id);
+    if (a) a.fftSize = n || 256;
+  },
+  audioGetSpectrum: function(id) {
+    const a = this._audioNode(id);
+    if (!a || !a.getByteFrequencyData) return [];
+    const buf = new Uint8Array(a.frequencyBinCount);
+    a.getByteFrequencyData(buf);
+    return Array.from(buf);
+  },
+  audioBufferFillSine: function(id, freq) {
+    const buf = this._audioNode(id);
+    if (!buf || !buf.getChannelData) return;
+    const data = buf.getChannelData(0);
+    const sr = buf.sampleRate;
+    const f = freq || 440;
+    for (let i = 0; i < data.length; i++) {
+      data[i] = Math.sin(2 * Math.PI * f * i / sr) * 0.3;
     }
   },
-
+  audioSourceSetBuffer: function(srcId, bufId) {
+    const src = this._audioNode(srcId);
+    const buf = this._audioNode(bufId);
+    if (src && buf) src.buffer = buf;
+  },
+  audioSourceStart: function(srcId, startTime) {
+    const src = this._audioNode(srcId);
+    const e = this._audioEntry(srcId);
+    if (e) this._audioResume(e.ctx);
+    if (src && src.start) {
+      try { src.start(startTime || 0.0); } catch (err) { console.warn("audioSourceStart", err); }
+    }
+  },
   audioOscStart: function(oscId, startTime) {
-    const osc = audioOscillators[oscId];
-    if (osc) {
-      audioContexts.forEach(c => {
-        if (c.state === 'suspended') c.resume().catch(() => {});
-      });
-      try {
-        osc.start(startTime || 0.0);
-      } catch (err) {
-        console.warn("audioOscStart:", err);
-      }
+    const osc = this._audioNode(oscId);
+    const e = this._audioEntry(oscId);
+    if (e) this._audioResume(e.ctx);
+    if (osc && osc.start) {
+      try { osc.start(startTime || 0.0); } catch (err) { console.warn("audioOscStart", err); }
     }
   },
-
   audioOscStop: function(oscId, stopTime) {
-    const osc = audioOscillators[oscId];
-    if (osc) {
-      try {
-        osc.stop(stopTime || 0.0);
-      } catch (err) {
-        console.warn("audioOscStop:", err);
-      }
+    const osc = this._audioNode(oscId);
+    if (osc && osc.stop) {
+      try { osc.stop(stopTime || 0.0); } catch (err) { console.warn("audioOscStop", err); }
     }
   },
 
@@ -510,11 +598,251 @@ window.raptorBridge = {
     window.addEventListener('mouseup', () => {
       isWebglDragging = false;
     });
+  },
+
+  // --- WebGPU compute + logit bars (tiny LLM) ---
+  webgpuReady: false,
+  _gpu: null,
+
+  webgpuInit: function(canvasId, width, height, silent) {
+    const self = this;
+    const canvas = document.getElementById(canvasId) || document.getElementById('wasmWebGPUCanvas');
+    if (canvas) {
+      if (width) canvas.width = width;
+      if (height) canvas.height = height;
+      if (!silent) switchToTab('tabWebGPU', 'webgpuView');
+    }
+    if (self._gpu && self._gpu.pending) return 1;
+    if (!navigator.gpu) {
+      console.warn("[raptorBridge] WebGPU not available");
+      self.webgpuReady = false;
+      return 0;
+    }
+    self._gpu = self._gpu || { pending: true };
+    (async () => {
+      try {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+          self.webgpuReady = false;
+          self._gpu.pending = false;
+          return;
+        }
+        const device = await adapter.requestDevice();
+        const format = navigator.gpu.getPreferredCanvasFormat();
+        let ctx = null;
+        if (canvas) {
+          ctx = canvas.getContext('webgpu');
+          if (ctx) {
+            ctx.configure({ device, format, alphaMode: 'opaque' });
+          }
+        }
+        const matmulShader = device.createShaderModule({
+          code: `
+            struct Dims { m: u32, n: u32, k: u32, _pad: u32 }
+            @group(0) @binding(0) var<storage, read> A: array<f32>;
+            @group(0) @binding(1) var<storage, read> B: array<f32>;
+            @group(0) @binding(2) var<storage, read_write> C: array<f32>;
+            @group(0) @binding(3) var<uniform> dims: Dims;
+            @compute @workgroup_size(8, 8)
+            fn main(@builtin(global_invocation_id) gid: vec3u) {
+              let row = gid.x;
+              let col = gid.y;
+              if (row >= dims.m || col >= dims.n) { return; }
+              var acc = 0.0;
+              for (var t = 0u; t < dims.k; t++) {
+                acc += A[row * dims.k + t] * B[t * dims.n + col];
+              }
+              C[row * dims.n + col] = acc;
+            }
+          `
+        });
+        const pipeline = device.createComputePipeline({
+          layout: 'auto',
+          compute: { module: matmulShader, entryPoint: 'main' }
+        });
+        self._gpu = { device, canvas, ctx, format, pipeline, pending: false };
+        self.webgpuReady = true;
+        console.log("[raptorBridge] WebGPU ready", format);
+      } catch (err) {
+        console.warn("[raptorBridge] WebGPU init failed", err);
+        self.webgpuReady = false;
+        if (self._gpu) self._gpu.pending = false;
+      }
+    })();
+    return 1;
+  },
+
+  webgpuAvailable: function() {
+    return !!(this.webgpuReady && this._gpu && this._gpu.device);
+  },
+
+  webgpuMatmul: function(m, n, k, a, b) {
+    const A = Array.isArray(a) ? a : Array.from(a || []);
+    const B = Array.isArray(b) ? b : Array.from(b || []);
+    return this._cpuMatmul ? this._cpuMatmul(m, n, k, A, B) : (function () {
+      const C = new Array(m * n).fill(0);
+      for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) {
+        let acc = 0; for (let t = 0; t < k; t++) acc += A[i * k + t] * B[t * n + j];
+        C[i * n + j] = acc;
+      }
+      return C;
+    })();
+  },
+
+  webgpuMatmulAsync: function(m, n, k, a, b, cb) {
+    const self = this;
+    const A = Array.isArray(a) ? a : Array.from(a || []);
+    const B = Array.isArray(b) ? b : Array.from(b || []);
+    const cpu = function () {
+      const C = new Array(m * n).fill(0);
+      for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) {
+        let acc = 0; for (let t = 0; t < k; t++) acc += A[i * k + t] * B[t * n + j];
+        C[i * n + j] = acc;
+      }
+      return C;
+    };
+    if (!self.webgpuAvailable() || !self._webgpuMatmulRead) {
+      cb(cpu());
+      return;
+    }
+    self._webgpuMatmulRead(m, n, k, A, B).then(function (C) { cb(C); }).catch(function () { cb(cpu()); });
+  },
+
+  _webgpuMatmulRead: async function(m, n, k, A, B) {
+    const device = this._gpu.device;
+    const aBuf = device.createBuffer({ size: A.length * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    const bBuf = device.createBuffer({ size: B.length * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    const cBuf = device.createBuffer({ size: m * n * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const uBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const rBuf = device.createBuffer({ size: m * n * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(aBuf, 0, new Float32Array(A));
+    device.queue.writeBuffer(bBuf, 0, new Float32Array(B));
+    device.queue.writeBuffer(uBuf, 0, new Uint32Array([m, n, k, 0]));
+    const bind = device.createBindGroup({
+      layout: this._gpu.pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: aBuf } },
+        { binding: 1, resource: { buffer: bBuf } },
+        { binding: 2, resource: { buffer: cBuf } },
+        { binding: 3, resource: { buffer: uBuf } }
+      ]
+    });
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this._gpu.pipeline);
+    pass.setBindGroup(0, bind);
+    pass.dispatchWorkgroups(Math.ceil(m / 8), Math.ceil(n / 8));
+    pass.end();
+    enc.copyBufferToBuffer(cBuf, 0, rBuf, 0, m * n * 4);
+    device.queue.submit([enc.finish()]);
+    await rBuf.mapAsync(GPUMapMode.READ);
+    const copy = Array.from(new Float32Array(rBuf.getMappedRange().slice(0)));
+    rBuf.unmap();
+    return copy;
+  },
+
+  webgpuDrawLogits: function(logits, vocab) {
+    const arr = Array.isArray(logits) ? logits : Array.from(logits || []);
+    const canvas = (this._gpu && this._gpu.canvas) || document.getElementById('wasmWebGPUCanvas');
+    if (!canvas) return;
+    switchToTab('tabWebGPU', 'webgpuView');
+
+    // Softmax + top-16
+    let maxv = -Infinity;
+    for (const v of arr) if (v > maxv) maxv = v;
+    const probs = arr.map(v => Math.exp(v - maxv));
+    let sum = 0;
+    for (const p of probs) sum += p;
+    const norm = probs.map(p => (sum ? p / sum : 0));
+    const idx = norm.map((p, i) => i).sort((a, b) => norm[b] - norm[a]).slice(0, 16);
+
+    if (this.webgpuAvailable() && this._gpu.ctx) {
+      this._webgpuDrawBars(idx, norm, vocab || '');
+      return;
+    }
+    if (this._gpu && this._gpu.ctx) {
+      return;
+    }
+    const ctx2d = canvas.getContext('2d');
+    if (!ctx2d) return;
+    const w = canvas.width, h = canvas.height;
+    ctx2d.fillStyle = '#0b1220';
+    ctx2d.fillRect(0, 0, w, h);
+    ctx2d.fillStyle = '#94a3b8';
+    ctx2d.font = "14px 'Fira Code', monospace";
+    ctx2d.fillText('tiny LLM next-char probs' + (this.webgpuReady ? ' (WebGPU)' : ' (2D fallback)'), 16, 24);
+    const barW = Math.max(8, (w - 40) / idx.length - 6);
+    idx.forEach((vi, i) => {
+      const bh = norm[vi] * (h - 70);
+      const x = 20 + i * (barW + 6);
+      ctx2d.fillStyle = '#007d9c';
+      ctx2d.fillRect(x, h - 28 - bh, barW, bh);
+      ctx2d.fillStyle = '#e2e8f0';
+      ctx2d.font = "12px 'Fira Code', monospace";
+      const ch = (vocab && vocab[vi]) ? vocab[vi] : String(vi);
+      ctx2d.fillText(ch === ' ' ? '␣' : ch, x, h - 10);
+    });
+  },
+
+  _webgpuDrawBars: function(idx, norm, vocab) {
+    const gpu = this._gpu;
+    const w = gpu.canvas.width, h = gpu.canvas.height;
+    const verts = [];
+    const barW = 2 / idx.length * 0.7;
+    idx.forEach((vi, i) => {
+      const x0 = -0.92 + i * (1.84 / idx.length);
+      const y0 = -0.75;
+      const y1 = y0 + norm[vi] * 1.5;
+      const x1 = x0 + barW;
+      verts.push(x0, y0, x1, y0, x0, y1, x0, y1, x1, y0, x1, y1);
+    });
+    const device = gpu.device;
+    const module = device.createShaderModule({
+      code: `
+        @vertex fn vs(@location(0) pos: vec2f) -> @builtin(position) vec4f {
+          return vec4f(pos, 0.0, 1.0);
+        }
+        @fragment fn fs() -> @location(0) vec4f {
+          return vec4f(0.0, 0.49, 0.61, 1.0);
+        }
+      `
+    });
+    const pipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module,
+        entryPoint: 'vs',
+        buffers: [{ arrayStride: 8, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }] }]
+      },
+      fragment: { module, entryPoint: 'fs', targets: [{ format: gpu.format }] }
+    });
+    const vbo = device.createBuffer({
+      size: verts.length * 4,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+    });
+    device.queue.writeBuffer(vbo, 0, new Float32Array(verts));
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [{
+        view: gpu.ctx.getCurrentTexture().createView(),
+        clearValue: { r: 0.043, g: 0.071, b: 0.125, a: 1 },
+        loadOp: 'clear',
+        storeOp: 'store'
+      }]
+    });
+    pass.setPipeline(pipeline);
+    pass.setVertexBuffer(0, vbo);
+    pass.draw(verts.length / 2);
+    pass.end();
+    device.queue.submit([enc.finish()]);
+
+    // Labels via 2D overlay would require a second canvas; skip — bars are the GPU path.
+    console.log("[raptorBridge] WebGPU drew", idx.length, "logit bars");
   }
 };
 
 // ==============================================================================
-// Comprehensive 13-Lesson Interactive Go Tour Content
+// Interactive tour — language + web surfaces
 // ==============================================================================
 const tourLessons = [
   {
@@ -1108,30 +1436,85 @@ say " - Continuous 60fps hardware rotation loop active!";
   },
 
   {
-    title: "13. WebAudio Waveform Synthesizer",
+    title: "13. WebAudio Node Graph & Timeline",
     desc: `
-      <p>Generate audio waveforms, musical arpeggios, and synthesizers in real-time through the browser's WebAudio API directly from pure Raptor.</p>
-      <p>Click <strong>Run</strong> to listen to the generated musical sequence.</p>
+      <p>This lesson builds a real <strong>Web Audio</strong> graph in Raptor: oscillators, ADSR gains, a low-pass filter, an LFO into <code>frequency</code>, a compressor, and a delay send.</p>
+      <p>Notes are scheduled on <code>AudioContext.currentTime</code> — no <code>setTimeout</code>. The melody is the same C4–E4–G4–B4–C5 major-7th arpeggio.</p>
+      <p>The JS bridge only exposes 1:1 AudioNode / AudioParam calls. Click <strong>Run</strong> (click once if the browser gated audio) to hear it.</p>
     `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
-    code: `# ==============================================================================
-# Pure Raptor WebAudio Sound Synthesizer & Arpeggio
-# ==============================================================================
+    code: `# WebAudio graph: osc -> ADSR -> lowpass(+LFO) -> compressor -> delay mix -> dest
+# Melody: C4 E4 G4 B4 C5 on AudioContext.currentTime
 
-# 1. Initialize WebAudio Context
-audio_init();
+my $ctx = audio_context_create();
+my $t0 = audio_get_current_time($ctx);
+say "sample rate ", audio_sample_rate($ctx), " Hz  t0=", $t0;
 
-say "--- Synthesizing WebAudio Major 7th Arpeggio ---";
+my $master = audio_create_gain($ctx);
+audio_set_gain($master, 0.2, $t0);
 
-# Frequencies in Hz: C4, E4, G4, B4, C5 (Major 7th Arpeggio)
+my $filter = audio_create_biquad_filter($ctx, "lowpass");
+audio_set_filter_freq($filter, 1800.0, $t0);
+audio_set_filter_q($filter, 4.0, $t0);
+
+my $lfo = audio_create_oscillator($ctx);
+audio_set_osc_type($lfo, "sine");
+audio_set_frequency($lfo, 4.5, $t0);
+my $lfoGain = audio_create_gain($ctx);
+audio_set_gain($lfoGain, 550.0, $t0);
+audio_connect($lfo, $lfoGain);
+audio_connect_param($lfoGain, $filter, "frequency");
+audio_osc_start($lfo, $t0);
+
+my $comp = audio_create_compressor($ctx);
+audio_set_compressor($comp, -18.0, 12.0, 4.0, 0.003, 0.12);
+
+my $delay = audio_create_delay($ctx, 0.28);
+audio_set_delay_time($delay, 0.2, $t0);
+my $fb = audio_create_gain($ctx);
+audio_set_gain($fb, 0.22, $t0);
+
+my $pan = audio_create_panner($ctx);
+audio_set_pan($pan, -0.15, $t0);
+
+audio_connect($filter, $master);
+audio_connect($master, $comp);
+audio_connect($comp, $pan);
+audio_connect($pan, $delay);
+audio_connect($delay, $fb);
+audio_connect($fb, $comp);
+audio_connect_destination($pan, $ctx);
+
+my $an = audio_create_analyser($ctx);
+audio_set_fft_size($an, 256);
+audio_connect($master, $an);
+
 my @melody = [261.63, 329.63, 392.00, 493.88, 523.25];
-my @durations = [0.15, 0.15, 0.15, 0.15, 0.35];
+my @durations = [0.18, 0.18, 0.18, 0.18, 0.42];
+my @waves = ["triangle", "triangle", "sine", "triangle", "sine"];
 
-# 2. Play musical sequence in pure Raptor
-audio_play_melody(@melody, @durations);
+my $t = $t0 + 0.05;
+my $i = 0;
+while $i < 5 {
+    my $osc = audio_create_oscillator($ctx);
+    my $env = audio_create_gain($ctx);
+    audio_set_osc_type($osc, @waves[$i]);
+    audio_set_frequency($osc, @melody[$i], $t);
+    audio_set_detune($osc, ($i - 2) * 3.0, $t);
+    audio_set_gain($env, 0.0001, $t);
+    audio_gain_ramp_exp($env, 0.85, $t + 0.02);
+    audio_gain_ramp_exp($env, 0.0001, $t + @durations[$i]);
+    audio_connect($osc, $env);
+    audio_connect($env, $filter);
+    audio_osc_start($osc, $t);
+    audio_osc_stop($osc, $t + @durations[$i] + 0.03);
+    $t = $t + @durations[$i];
+    $i = $i + 1;
+}
 
-say "WebAudio Arpeggio playing via browser WebAudio API!";
+say "graph: osc+ADSR -> LFO-mod lowpass -> compressor -> panner+delay";
+say "scheduled C4 E4 G4 B4 C5 on the AudioContext timeline";
 `
   },
 
@@ -1171,13 +1554,36 @@ canvas_set_font($c2d, "bold 14px 'Fira Code', monospace");
 canvas_set_fill_style($c2d, "#007d9c");
 canvas_fill_text($c2d, "SYSTEM READY", 270, 165);
 
-# 3. Trigger Confirmation WebAudio Synthesis Arpeggio (same melody)
-audio_init();
+# 3. Same C4–C5 melody, scheduled on the AudioContext timeline
+my $actx = audio_context_create();
+my $now = audio_get_current_time($actx) + 0.03;
+my $flt = audio_create_biquad_filter($actx, "lowpass");
+audio_set_filter_freq($flt, 2000.0, $now);
+my $bus = audio_create_gain($actx);
+audio_set_gain($bus, 0.2, $now);
+audio_connect($flt, $bus);
+audio_connect_destination($bus, $actx);
 my @melody = [261.63, 329.63, 392.00, 493.88, 523.25];
 my @durations = [0.15, 0.15, 0.15, 0.15, 0.35];
-audio_play_melody(@melody, @durations);
+my $t = $now;
+my $ni = 0;
+while $ni < 5 {
+    my $osc = audio_create_oscillator($actx);
+    my $env = audio_create_gain($actx);
+    audio_set_osc_type($osc, "triangle");
+    audio_set_frequency($osc, @melody[$ni], $t);
+    audio_set_gain($env, 0.0001, $t);
+    audio_gain_ramp_exp($env, 0.8, $t + 0.012);
+    audio_gain_ramp_exp($env, 0.0001, $t + @durations[$ni]);
+    audio_connect($osc, $env);
+    audio_connect($env, $flt);
+    audio_osc_start($osc, $t);
+    audio_osc_stop($osc, $t + @durations[$ni] + 0.02);
+    $t = $t + @durations[$ni];
+    $ni = $ni + 1;
+}
 
-say "Full-stack application initialized: DOM, Canvas, and WebAudio active!";
+say "Full-stack application initialized: DOM, Canvas, and WebAudio graph active!";
 `
   },
 
@@ -1206,6 +1612,7 @@ say "prod ", ∏(2, 3, 7);
 
   {
     title: "16. JSON, HTTP surface, and \$_ pipelines",
+    disabled: true,
     desc: `
       <p>JSON is built in. Format HTTP responses. Pipe values through C<$_>.</p>
     `,
@@ -1223,8 +1630,197 @@ say $http;
 $_ = %back{"lang"};
 say "topic still ", $_;
 `
+  },
+
+  {
+    title: "17. Scoping: my, our, state",
+    desc: `
+      <p>Same three Perl 5 declarators:</p>
+      <ul>
+        <li><code>my</code> — lexical to the block</li>
+        <li><code>our</code> — package-visible alias</li>
+        <li><code>state</code> — persistent across calls</li>
+      </ul>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `sub counter() {
+    state $n = 0;
+    $n = $n + 1;
+    return $n;
+}
+say counter();
+say counter();
+say counter();
+
+my $lex = "only here";
+our $shared = "package";
+say $lex, " / ", $shared;
+`
+  },
+
+  {
+    title: "18. Statement modifiers, labels, goto",
+    desc: `
+      <p>Postfix <code>if</code> / <code>unless</code> / <code>for</code>, plus labels and <code>goto</code> (including <code>goto &amp;sub</code>).</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `my $ok = True;
+say "ok" if $ok;
+say "hidden" unless $ok;
+
+my $sum = 0;
+$sum = $sum + $_ for 1..5;
+say "sum ", $sum;
+
+my $n = 0;
+LOOP:
+$n = $n + 1;
+if $n < 3 { goto LOOP; }
+say "n=", $n;
+`
+  },
+
+  {
+    title: "19. Contextual variables",
+    desc: `
+      <p>Raku-style dynamics: <code>@*ARGS</code>, <code>%*ENV</code>, <code>$*PID</code>, <code>$*RAPTOR</code>, <code>$*KERNEL</code>, <code>$?</code>, <code>$!</code>.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `say "name    ", $*RAPTOR{"name"};
+say "version ", $*RAPTOR{"version"};
+say "os      ", $*KERNEL{"name"};
+say "arch    ", $*KERNEL{"arch"};
+say "pid     ", $*PID;
+say "status  ", $?;
+say "env keys exist: ", %*ENV.elems() > 0;
+`
+  },
+
+  {
+    title: "20. References",
+    desc: `
+      <p>Take references with <code>\\</code> and dereference with <code>$$</code>, <code>@$</code>, arrows.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `my $val = 41;
+my $sref = \\$val;
+say "ref type ", ref($sref);
+$$sref = 42;
+say "via ref ", $val;
+
+my @nums = [10, 20, 30];
+my $aref = \\@nums;
+say "first ", $aref->[0];
+`
+  },
+
+  {
+    title: "21. Packages and AUTOLOAD",
+    desc: `
+      <p>Namespaces, qualified calls, and fallback <code>AUTOLOAD</code> when a name is missing.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `package MathUtil;
+sub add($a, $b) { return $a + $b; }
+sub AUTOLOAD($x) {
+    return "missing " ~ $AUTOLOAD ~ " arg=" ~ $x;
+}
+
+say MathUtil::add(2, 40);
+say MathUtil::nope(7);
+`
+  },
+
+  {
+    title: "22. Grammars (gcre)",
+    desc: `
+      <p>Declarative <code>grammar</code> / <code>rule</code> / <code>token</code> objects. The language itself is parsed by <strong>gcre</strong> (a PEG-compatible Raku subset) with <code>&lt;HOST_stmt&gt;</code> calling the Pratt parser.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `grammar PointGrammar {
+    token TOP { <num> ',' <num> }
+    token num { \\d+ }
+}
+say "grammar name: ", PointGrammar{"name"};
+say "TOP pattern stored: ", PointGrammar{"TOP"};
+`
+  },
+
+  {
+    title: "23. TAP tests",
+    desc: `
+      <p>Test Anything Protocol builtins — the same ones <code>raptor test t/</code> runs. No <code>use Test::More</code> needed.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `plan(4);
+ok(1 + 1 == 2, "one plus one");
+is(2 ** 10, 1024, "pow");
+is("ab" x 2, "abab", "repeat");
+ok(True, "done");
+done_testing();
+`
+  },
+
+  {
+    title: "24. Lists, hashes, and backends",
+    desc: `
+      <p>Everyday list/hash ops. Backends (not switchable inside the browser): <code>--go</code> interpreter, <code>--moar</code> CompUnit v7, <code>raptor serve</code> for this WASM tour.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `my @xs = [3, 1, 2];
+push(@xs, 4);
+say "elems ", @xs.elems(), " sorted ", @xs.sort();
+
+my %h = { "a" => 1, "b" => 2 };
+say "keys ", keys(%h);
+say "json ", to_json(%h);
+
+say "this tour is the WASM backend (cmd/wasm)";
+`
+  },
+
+  {
+    title: "25. WebGPU tiny LLM",
+    disabled: true,
+    desc: `
+      <p>Raptor loads a <strong>tiny character-level language model</strong> (n-gram mix + a linear layer) and runs next-token prediction from the script.</p>
+      <p><code>webgpu_init</code> requests a GPU adapter. Linear-layer matmuls kick a WGSL compute pipeline when WebGPU is available; generation still returns immediately. Last-step logits are drawn as bars on the WebGPU viewport.</p>
+      <p>The same <code>llm_tiny_*</code> builtins run on desktop via the CPU / GGML-shaped tensor path.</p>
+    `,
+    defaultTab: "tabWebGPU",
+    defaultView: "webgpuView",
+    code: `# Tiny char LM via Raptor. WebGPU compute for the linear layer
+# when the adapter is ready; otherwise the same tensors on CPU.
+
+webgpu_init("wasmWebGPUCanvas", 640, 320);
+say "webgpu available: ", webgpu_available();
+
+my $model = llm_tiny_load();
+say "tiny LLM backend: ", llm_tiny_backend();
+
+my $prompt = "raptor is ";
+my $out = llm_tiny_generate($model, $prompt, 48, 0.35);
+say $out;
+
+my @logits = llm_tiny_logits($model, $out);
+webgpu_draw_logits(@logits);
+say "drew ", @logits.elems(), " logits  vocab=", llm_tiny_vocab();
+`
   }
 ];
+
+// Disabled lessons stay in source but are skipped in the stepper/dropdown.
+for (let i = tourLessons.length - 1; i >= 0; i--) {
+  if (tourLessons[i].disabled) tourLessons.splice(i, 1);
+}
 
 // Current State
 let currentLessonIdx = 0;
@@ -1249,7 +1845,16 @@ const btnNextLesson = document.getElementById('btnNextLesson');
 const pageIndicator = document.getElementById('pageIndicator');
 
 // Initialize Tour
+function rebuildLessonSelect() {
+  if (!lessonSelect) return;
+  lessonSelect.innerHTML = tourLessons.map((l, i) => {
+    const label = String(l.title || '').replace(/&/g, '&amp;');
+    return `<option value="${i}">${label}</option>`;
+  }).join('');
+}
+
 function initTour() {
+  rebuildLessonSelect();
   loadLesson(0);
   setupEventListeners();
   setupPaneResizers();
@@ -1455,10 +2060,12 @@ function setupEventListeners() {
   const tc = document.getElementById('tabConsole');
   const tcv = document.getElementById('tabCanvas');
   const tw = document.getElementById('tabWebGL');
+  const tg = document.getElementById('tabWebGPU');
   const td = document.getElementById('tabDom');
   if (tc) tc.addEventListener('click', () => switchToTab('tabConsole', 'consoleView'));
   if (tcv) tcv.addEventListener('click', () => switchToTab('tabCanvas', 'canvasView'));
   if (tw) tw.addEventListener('click', () => switchToTab('tabWebGL', 'webglView'));
+  if (tg) tg.addEventListener('click', () => switchToTab('tabWebGPU', 'webgpuView'));
   if (td) td.addEventListener('click', () => switchToTab('tabDom', 'domView'));
 }
 

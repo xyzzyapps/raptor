@@ -12,7 +12,6 @@ import (
 	"unsafe"
 )
 
-
 // ReturnSignal unwinds the stack upon reaching 'return'.
 type ReturnSignal struct {
 	Value *Value
@@ -62,7 +61,6 @@ type Interp struct {
 	CurrentEnv      *Env
 }
 
-
 // BuiltinFunc is a standard library function signature in Raku5.
 type BuiltinFunc func(in *Interp, args []*Value) (*Value, error)
 
@@ -101,6 +99,8 @@ func NewInterp() *Interp {
 	registerVerificationBuiltins(in)
 	in.registerPodLitBuiltins()
 	in.registerWebBuiltins()
+	in.registerGGMLBuiltins()
+	in.registerTinyLLMBuiltins()
 	in.registerMoarVMModuleBuiltins()
 	in.registerEmbeddedBuiltins()
 
@@ -156,8 +156,6 @@ func NewInterp() *Interp {
 
 	return in
 }
-
-
 
 func (in *Interp) SetStdout(w io.Writer) {
 	in.Stdout = w
@@ -306,16 +304,17 @@ func (in *Interp) Eval(source string) (*Value, error) {
 	return in.EvalProgram(prog, in.GlobalEnv)
 }
 
-
-
 // EvalProgram evaluates all top-level statements.
 func (in *Interp) EvalProgram(prog *Program, env *Env) (*Value, error) {
 	if prog == nil || len(prog.Stmts) == 0 {
 		return NilValue(), nil
 	}
-	labelMap := make(map[string]int)
+	var labelMap map[string]int
 	for idx, s := range prog.Stmts {
 		if lStmt, ok := s.(*LabelStmt); ok {
+			if labelMap == nil {
+				labelMap = make(map[string]int)
+			}
 			labelMap[lStmt.Name] = idx
 		}
 	}
@@ -529,6 +528,9 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		return initVal, nil
 
 	case *AssignStmt:
+		if v, ok, err := in.tryInPlaceAssign(s, env); ok {
+			return v, err
+		}
 		val, err := in.evalExpr(s.Value, env)
 		if err != nil {
 			return nil, err
@@ -586,8 +588,6 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			}
 		}
 		return NilValue(), nil
-
-
 
 	case *NativeSubDeclStmt:
 		normName := normalizeOpName(s.Name)
@@ -650,7 +650,6 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			in.AroundHooks[normTarget] = append(in.AroundHooks[normTarget], s)
 		}
 		return NilValue(), nil
-
 
 	case *IfStmt:
 		condVal, err := in.evalExpr(s.Condition, env)
@@ -718,16 +717,9 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		var list []*Value
-		if iterVal.Type == ValArray {
-			list = iterVal.ArrayVal
-		} else {
-			list = []*Value{iterVal}
-		}
-
 		var lastVal *Value = NilValue()
 		childEnv := env.NewChild()
-		for _, item := range list {
+		runItem := func(item *Value) (stop bool, err error) {
 			if s.VarName != "" {
 				childEnv.Define(s.VarName, item)
 			}
@@ -735,14 +727,40 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			bVal, err := in.evalBlock(s.Body, childEnv)
 			if err != nil {
 				if _, ok := err.(*BreakSignal); ok {
-					break
+					return true, nil
 				}
 				if _, ok := err.(*ContinueSignal); ok {
-					continue
+					return false, nil
 				}
-				return nil, err
+				return true, err
 			}
 			lastVal = bVal
+			return false, nil
+		}
+		if iterVal.Type == ValArray && iterVal.Ints != nil && iterVal.ArrayVal == nil {
+			for _, n := range iterVal.Ints {
+				stop, err := runItem(IntValue(n))
+				if err != nil {
+					return nil, err
+				}
+				if stop {
+					break
+				}
+			}
+		} else {
+			list := []*Value{iterVal}
+			if iterVal.Type == ValArray {
+				list = iterVal.materializeArray()
+			}
+			for _, item := range list {
+				stop, err := runItem(item)
+				if err != nil {
+					return nil, err
+				}
+				if stop {
+					break
+				}
+			}
 		}
 		return lastVal, nil
 
@@ -840,7 +858,6 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			}
 		}
 		return NilValue(), nil
-
 
 	case *LabelStmt:
 		if s.Stmt != nil {
@@ -945,8 +962,9 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 				varName = "$_"
 			}
 			var lastVal *Value = NilValue()
+			var loopEnv *Env
 			for _, it := range items {
-				loopEnv := env.NewChild()
+				loopEnv = env.RecycleChild(loopEnv)
 				loopEnv.Define(varName, it)
 				loopEnv.Define("$_", it)
 				val, err := in.evalStmt(s.Target, loopEnv)
@@ -998,7 +1016,6 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 	}
 }
 
-
 func (in *Interp) evalBlock(b *BlockStmt, env *Env) (*Value, error) {
 	prev := in.CurrentEnv
 	in.CurrentEnv = env
@@ -1006,9 +1023,12 @@ func (in *Interp) evalBlock(b *BlockStmt, env *Env) (*Value, error) {
 	if b == nil || len(b.Stmts) == 0 {
 		return NilValue(), nil
 	}
-	labelMap := make(map[string]int)
+	var labelMap map[string]int
 	for idx, s := range b.Stmts {
 		if lStmt, ok := s.(*LabelStmt); ok {
+			if labelMap == nil {
+				labelMap = make(map[string]int)
+			}
 			labelMap[lStmt.Name] = idx
 		}
 	}
@@ -1086,6 +1106,100 @@ func (in *Interp) validateTypeAndWhere(name string, val *Value, env *Env) error 
 		}
 	}
 	return nil
+}
+
+func (in *Interp) tryInPlaceAssign(s *AssignStmt, env *Env) (*Value, bool, error) {
+	ve, ok := s.Target.(*VarExpr)
+	if !ok {
+		return nil, false, nil
+	}
+	cur, has := env.Lookup(ve.Name)
+
+	// $n += $k / $n += 1 — mutate a unique int box.
+	if s.Op == "+=" || s.Op == "-=" {
+		rhs, err := in.evalExpr(s.Value, env)
+		if err != nil {
+			return nil, true, err
+		}
+		if has && cur.Type == ValInt && rhs.Type == ValInt {
+			delta := rhs.IntVal
+			if s.Op == "-=" {
+				delta = -delta
+			}
+			if isInternedInt(cur) {
+				nv := IntValue(cur.IntVal + delta)
+				_ = env.Assign(ve.Name, nv)
+				return nv, true, nil
+			}
+			cur.IntVal += delta
+			return cur, true, nil
+		}
+		return nil, false, nil
+	}
+
+	// $n = $n + k  /  $n = $n - k  (same as += / -=)
+	if s.Op == "=" {
+		if be, ok := s.Value.(*BinaryExpr); ok && (be.Op == "+" || be.Op == "-") {
+			if lv, ok := be.Left.(*VarExpr); ok && lv.Name == ve.Name && has && cur.Type == ValInt {
+				rhs, err := in.evalExpr(be.Right, env)
+				if err != nil {
+					return nil, true, err
+				}
+				if rhs.Type == ValInt {
+					delta := rhs.IntVal
+					if be.Op == "-" {
+						delta = -delta
+					}
+					if isInternedInt(cur) {
+						nv := detachInt(IntValue(cur.IntVal + delta))
+						_ = env.Assign(ve.Name, nv)
+						return nv, true, nil
+					}
+					cur.IntVal += delta
+					return cur, true, nil
+				}
+			}
+		}
+	}
+
+	// $s ~= "x"  or  $s = $s ~ "x"
+	var suffix string
+	switch s.Op {
+	case "~=":
+		rhs, err := in.evalExpr(s.Value, env)
+		if err != nil {
+			return nil, true, err
+		}
+		suffix = rhs.String()
+	case "=":
+		be, ok := s.Value.(*BinaryExpr)
+		if !ok || be.Op != "~" {
+			return nil, false, nil
+		}
+		lv, ok := be.Left.(*VarExpr)
+		if !ok || lv.Name != ve.Name {
+			return nil, false, nil
+		}
+		rhs, err := in.evalExpr(be.Right, env)
+		if err != nil {
+			return nil, true, err
+		}
+		suffix = rhs.String()
+	default:
+		return nil, false, nil
+	}
+	if !has || cur.Type != ValString || isFlyweight(cur) {
+		base := ""
+		if has {
+			base = cur.String()
+		}
+		nv := StringValue(base + suffix)
+		if err := env.Assign(ve.Name, nv); err != nil {
+			env.Define(ve.Name, nv)
+		}
+		return nv, true, nil
+	}
+	return cur.appendString(suffix), true, nil
 }
 
 func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Value, error) {
@@ -1170,12 +1284,21 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 			return nil, err
 		}
 		idx := int(in.toInt(idxVal))
+		n := arrVal.arrayLen()
 		if idx < 0 {
-			idx = len(arrVal.ArrayVal) + idx
+			idx = n + idx
 		}
 		if idx < 0 {
 			return nil, fmt.Errorf("array index out of bounds: %d", idx)
 		}
+		if arrVal.Ints != nil && arrVal.ArrayVal == nil && val.Type == ValInt {
+			for len(arrVal.Ints) <= idx {
+				arrVal.Ints = append(arrVal.Ints, 0)
+			}
+			arrVal.Ints[idx] = val.IntVal
+			return val, nil
+		}
+		arrVal.materializeArray()
 		for len(arrVal.ArrayVal) <= idx {
 			arrVal.ArrayVal = append(arrVal.ArrayVal, NilValue())
 		}
@@ -1406,7 +1529,6 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		}
 		return NilValue(), nil
 
-
 	case *TernaryExpr:
 		condVal, err := in.evalExpr(e.Cond, env)
 		if err != nil {
@@ -1539,6 +1661,9 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		}
 
 	case *BinaryExpr:
+		if v, ok := in.evalBinaryFast(e, env); ok {
+			return v, nil
+		}
 		if e.Op == "//" {
 			lVal, err := in.evalExpr(e.Left, env)
 			if err != nil {
@@ -1600,7 +1725,6 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		}
 		return in.evalUnaryOp(e.Op, rVal, env)
 
-
 	case *ArrayLiteralExpr:
 		var elems []*Value
 		for _, elExpr := range e.Elements {
@@ -1645,14 +1769,14 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			return NilValue(), nil
 		}
 		idx := int(in.toInt(idxVal))
+		n := arrVal.arrayLen()
 		if idx < 0 {
-			idx = len(arrVal.ArrayVal) + idx
+			idx = n + idx
 		}
-		if idx < 0 || idx >= len(arrVal.ArrayVal) {
+		if idx < 0 || idx >= n {
 			return NilValue(), nil
 		}
-		return arrVal.ArrayVal[idx], nil
-
+		return arrVal.arrayAt(idx), nil
 
 	case *HashAccessExpr:
 		hVal, err := in.evalExpr(e.Hash, env)
@@ -1883,7 +2007,6 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			}
 		}
 
-
 		if invocantVal.Type == ValHash && invocantVal.HashVal != nil {
 			if v, ok := invocantVal.HashVal[e.Method]; ok && len(e.Args) == 0 {
 				return v, nil
@@ -1929,8 +2052,6 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		}
 
 		return nil, fmt.Errorf("method or sub %q not found for invocant type %s", e.Method, invocantVal.TypeName())
-
-
 
 	case *SmartMatchExpr:
 		lVal, err := in.evalExpr(e.Left, env)
@@ -2057,7 +2178,16 @@ func (in *Interp) smartMatch(topic *Value, matcher *Value) bool {
 			return topic.Type == ValString && topic.StrVal == matcher.StrVal
 		}
 	case ValArray:
-		// Check if topic is contained in the array
+		if matcher.Ints != nil && matcher.ArrayVal == nil {
+			if topic.Type == ValInt {
+				for _, n := range matcher.Ints {
+					if topic.IntVal == n {
+						return true
+					}
+				}
+			}
+			return false
+		}
 		for _, elem := range matcher.ArrayVal {
 			if in.smartMatch(topic, elem) {
 				return true
@@ -2113,7 +2243,6 @@ func (in *Interp) smartMatch(topic *Value, matcher *Value) bool {
 		return false
 	}
 }
-
 
 // InvokeCallable resolves candidate dispatch and invokes the closure with advice hooks.
 func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
@@ -2306,7 +2435,6 @@ func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 		}
 	}
 
-
 	val, err := in.evalBlock(closure.Body, callEnv)
 	if err != nil {
 		if ret, ok := err.(*ReturnSignal); ok {
@@ -2345,7 +2473,6 @@ func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 			}
 		}
 	}
-
 
 	return val, nil
 }
@@ -2421,6 +2548,104 @@ func (in *Interp) resolveMultiCandidate(candidates []*Closure, args []*Value) (*
 	return bestCand, nil
 }
 
+func (in *Interp) evalBinaryFast(e *BinaryExpr, env *Env) (*Value, bool) {
+	if len(in.CustomInfixOps) > 0 {
+		return nil, false
+	}
+	lv, ok := e.Left.(*VarExpr)
+	if !ok {
+		return nil, false
+	}
+	left, ok := env.Lookup(lv.Name)
+	if !ok || left == nil {
+		return nil, false
+	}
+	switch e.Op {
+	case "+", "-", "*", "div", "%", "mod", "<=", ">=", "<", ">", "==", "!=":
+		if left.Type != ValInt {
+			return nil, false
+		}
+		var ri int64
+		switch r := e.Right.(type) {
+		case *LiteralExpr:
+			if r.Type != TokInt {
+				return nil, false
+			}
+			ri = r.Value.(int64)
+		case *VarExpr:
+			rv, ok := env.Lookup(r.Name)
+			if !ok || rv.Type != ValInt {
+				return nil, false
+			}
+			ri = rv.IntVal
+		default:
+			return nil, false
+		}
+		li := left.IntVal
+		switch e.Op {
+		case "+":
+			return IntValue(li + ri), true
+		case "-":
+			return IntValue(li - ri), true
+		case "*":
+			return IntValue(li * ri), true
+		case "div":
+			if ri == 0 {
+				return nil, false
+			}
+			return IntValue(li / ri), true
+		case "%", "mod":
+			if ri == 0 {
+				return nil, false
+			}
+			return IntValue(li % ri), true
+		case "<=":
+			return BoolValue(li <= ri), true
+		case ">=":
+			return BoolValue(li >= ri), true
+		case "<":
+			return BoolValue(li < ri), true
+		case ">":
+			return BoolValue(li > ri), true
+		case "==":
+			return BoolValue(li == ri), true
+		case "!=":
+			return BoolValue(li != ri), true
+		}
+	case "eq", "ne", "lt", "gt":
+		if left.Type != ValString {
+			return nil, false
+		}
+		var rs string
+		switch r := e.Right.(type) {
+		case *LiteralExpr:
+			if r.Type != TokString {
+				return nil, false
+			}
+			rs = r.Value.(string)
+		case *VarExpr:
+			rv, ok := env.Lookup(r.Name)
+			if !ok || rv.Type != ValString {
+				return nil, false
+			}
+			rs = rv.StrVal
+		default:
+			return nil, false
+		}
+		ls := left.StrVal
+		switch e.Op {
+		case "eq":
+			return BoolValue(ls == rs), true
+		case "ne":
+			return BoolValue(ls != rs), true
+		case "lt":
+			return BoolValue(ls < rs), true
+		case "gt":
+			return BoolValue(ls > rs), true
+		}
+	}
+	return nil, false
+}
 
 func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, error) {
 	// Junction autothreading
@@ -2459,9 +2684,6 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 			}
 		}
 	}
-
-
-
 
 	// 2. Unicode Set operators
 	switch op {
@@ -2679,13 +2901,14 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 		start := in.toInt(left)
 		end := in.toInt(right)
 		if start > end {
-			return ArrayValue(nil), nil
+			return IntArrayValue(nil), nil
 		}
-		elems := make([]*Value, 0, end-start+1)
-		for i := start; i <= end; i++ {
-			elems = append(elems, IntValue(i))
+		n := end - start + 1
+		ints := make([]int64, n)
+		for i := int64(0); i < n; i++ {
+			ints[i] = start + i
 		}
-		return ArrayValue(elems), nil
+		return IntArrayValue(ints), nil
 
 	default:
 		// Check for custom operator in GlobalEnv
@@ -2874,7 +3097,6 @@ func (in *Interp) toFloat(v *Value) float64 {
 	}
 }
 
-
 func (in *Interp) interpolateString(template string, env *Env) string {
 	var sb strings.Builder
 	runes := []rune(template)
@@ -2999,4 +3221,3 @@ func extractRawOperatorName(name string) string {
 	norm = strings.TrimPrefix(norm, "postfix:")
 	return norm
 }
-

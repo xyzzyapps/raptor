@@ -103,7 +103,7 @@ func TestConcurrentGoroutineAtomics(t *testing.T) {
 	in := NewInterp()
 	// Test high concurrency atomic additions
 	var wg sync.WaitGroup
-	countVal := IntValue(0)
+	countVal := &Value{Type: ValInt, IntVal: 0} // unique box; interned ints are immutable
 
 	for i := 0; i < 20; i++ {
 		wg.Add(1)

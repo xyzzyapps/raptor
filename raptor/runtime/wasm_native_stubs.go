@@ -32,21 +32,36 @@ func (in *Interp) registerWebBuiltins() {
 	in.Builtins["canvas_stroke"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
 	in.Builtins["canvas_fill"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
 	in.Builtins["canvas_fill_text"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
-	in.Builtins["audio_context_create"] = func(in *Interp, args []*Value) (*Value, error) { return IntValue(1), nil }
-	in.Builtins["audio_get_current_time"] = func(in *Interp, args []*Value) (*Value, error) { return FloatValue(0.0), nil }
-	in.Builtins["audio_create_oscillator"] = func(in *Interp, args []*Value) (*Value, error) { return IntValue(1), nil }
-	in.Builtins["audio_create_gain"] = func(in *Interp, args []*Value) (*Value, error) { return IntValue(1), nil }
-	in.Builtins["audio_create_biquad_filter"] = func(in *Interp, args []*Value) (*Value, error) { return IntValue(1), nil }
-	in.Builtins["audio_connect"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
-	in.Builtins["audio_connect_destination"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
-	in.Builtins["audio_set_osc_type"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
-	in.Builtins["audio_set_frequency"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
-	in.Builtins["audio_set_gain"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
-	in.Builtins["audio_gain_ramp_exp"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
-	in.Builtins["audio_gain_ramp_linear"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
-	in.Builtins["audio_set_filter_freq"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
-	in.Builtins["audio_osc_start"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
-	in.Builtins["audio_osc_stop"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
+	stubTrue := func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
+	stubOne := func(in *Interp, args []*Value) (*Value, error) { return IntValue(1), nil }
+	stubZero := func(in *Interp, args []*Value) (*Value, error) { return FloatValue(0.0), nil }
+	for _, name := range []string{
+		"audio_connect", "audio_connect_destination", "audio_set_osc_type",
+		"audio_set_frequency", "audio_set_gain", "audio_gain_ramp_exp",
+		"audio_gain_ramp_linear", "audio_set_filter_freq", "audio_osc_start",
+		"audio_osc_stop", "audio_init", "audio_play_tone", "audio_play_melody",
+		"audio_set_compressor", "audio_set_delay_time", "audio_set_pan",
+		"audio_set_fft_size", "audio_buffer_fill_sine", "audio_source_set_buffer",
+		"audio_source_start", "audio_set_detune", "audio_set_filter_q",
+		"audio_freq_ramp", "audio_connect_param", "audio_disconnect",
+		"webgpu_draw_logits",
+	} {
+		in.Builtins[name] = stubTrue
+	}
+	for _, name := range []string{
+		"audio_context_create", "audio_create_oscillator", "audio_create_gain",
+		"audio_create_biquad_filter", "audio_create_compressor", "audio_create_delay",
+		"audio_create_panner", "audio_create_analyser", "audio_create_buffer",
+		"audio_create_buffer_source", "audio_destination",
+	} {
+		in.Builtins[name] = stubOne
+	}
+	in.Builtins["audio_get_current_time"] = stubZero
+	in.Builtins["audio_sample_rate"] = func(in *Interp, args []*Value) (*Value, error) { return FloatValue(44100), nil }
+	in.Builtins["audio_get_spectrum"] = func(in *Interp, args []*Value) (*Value, error) { return ArrayValue(nil), nil }
+	in.Builtins["webgpu_init"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(false), nil }
+	in.Builtins["webgpu_available"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(false), nil }
+	in.Builtins["webgpu_matmul"] = func(in *Interp, args []*Value) (*Value, error) { return ArrayValue(nil), nil }
 	in.Builtins["gl_init"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
 	in.Builtins["gl_clear_color"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }
 	in.Builtins["gl_clear"] = func(in *Interp, args []*Value) (*Value, error) { return BoolValue(true), nil }

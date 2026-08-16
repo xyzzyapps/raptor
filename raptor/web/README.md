@@ -73,7 +73,20 @@ The runtime interacts with browser APIs through `window.raptorBridge`:
 - `canvasBeginPath(ctxId)`, `canvasArc(ctxId, x, y, r, sa, ea)`, `canvasFill(ctxId)`
 - `canvasDrawText(ctxId, text, x, y, font, color)`
 
-### B. Hardware WebGL 3D
+### B. WebAudio (AudioNode graph)
+
+1:1 wrappers: `audioContextCreate`, `audioCreateOscillator`, `audioCreateGain`,
+`audioCreateBiquadFilter`, `audioCreateCompressor`, `audioCreateDelay`,
+`audioCreatePanner`, `audioCreateAnalyser`, `audioConnect`, `audioConnectParam`,
+`audioSetFrequency` / `audioGainRampExp` on `AudioParam` at `currentTime`.
+Handles live in one table. Melody scheduling is Raptor/Go, not `setTimeout`.
+
+### C. WebGPU + tiny LLM
+
+`webgpuInit`, `webgpuMatmul` (WGSL compute), `webgpuDrawLogits`. Raptor calls
+`llm_tiny_generate` / `llm_tiny_logits`.
+
+### D. Hardware WebGL 3D
 - `webglInit(canvasId)`: Initializes hardware 3D context.
 - `webglCreateShader(glId, type, source)`: Compiles GLSL vertex and fragment shaders.
 - `webglCreateProgram(glId, vsId, fsId)`: Links shader pipeline program.

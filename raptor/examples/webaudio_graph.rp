@@ -1,0 +1,50 @@
+# WebAudio node graph — C4 E4 G4 B4 C5 major-7th on the AudioContext timeline.
+# Desktop stubs return handles; the WASM tour plays through the real Web Audio API.
+
+my $ctx = audio_context_create();
+my $t0 = audio_get_current_time($ctx);
+
+my $master = audio_create_gain($ctx);
+audio_set_gain($master, 0.22, $t0);
+
+my $filter = audio_create_biquad_filter($ctx, "lowpass");
+audio_set_filter_freq($filter, 1800.0, $t0);
+audio_set_filter_q($filter, 3.5, $t0);
+
+my $comp = audio_create_compressor($ctx);
+audio_set_compressor($comp, -18.0, 12.0, 4.0, 0.003, 0.12);
+
+my $delay = audio_create_delay($ctx, 0.25);
+audio_set_delay_time($delay, 0.18, $t0);
+my $fb = audio_create_gain($ctx);
+audio_set_gain($fb, 0.2, $t0);
+
+audio_connect($filter, $master);
+audio_connect($master, $comp);
+audio_connect($comp, $delay);
+audio_connect($delay, $fb);
+audio_connect($fb, $comp);
+audio_connect_destination($comp, $ctx);
+
+my @melody = [261.63, 329.63, 392.00, 493.88, 523.25];
+my @durations = [0.18, 0.18, 0.18, 0.18, 0.42];
+
+my $t = $t0 + 0.04;
+my $i = 0;
+while $i < 5 {
+    my $osc = audio_create_oscillator($ctx);
+    my $env = audio_create_gain($ctx);
+    audio_set_osc_type($osc, "triangle");
+    audio_set_frequency($osc, @melody[$i], $t);
+    audio_set_gain($env, 0.0001, $t);
+    audio_gain_ramp_exp($env, 0.8, $t + 0.02);
+    audio_gain_ramp_exp($env, 0.0001, $t + @durations[$i]);
+    audio_connect($osc, $env);
+    audio_connect($env, $filter);
+    audio_osc_start($osc, $t);
+    audio_osc_stop($osc, $t + @durations[$i] + 0.02);
+    $t = $t + @durations[$i];
+    $i = $i + 1;
+}
+
+say "webaudio graph scheduled C4-E4-G4-B4-C5";

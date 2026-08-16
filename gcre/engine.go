@@ -99,6 +99,8 @@ type Context struct {
 	Src     []rune
 	Pos     int
 	Actions any
+	// Host is an opaque pointer for HOST_* matchers (e.g. a shared token cursor).
+	Host any
 }
 
 func (c *Context) IsAtEnd() bool {

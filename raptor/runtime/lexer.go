@@ -15,6 +15,9 @@ type Lexer struct {
 	pending []Token
 }
 
+// Pos is the current rune offset (after the last token).
+func (l *Lexer) Pos() int { return l.pos }
+
 // NewLexer creates a new Lexer instance.
 func NewLexer(input string) *Lexer {
 	return &Lexer{

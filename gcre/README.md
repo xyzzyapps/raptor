@@ -54,18 +54,18 @@ a grammar rule. It is a hook the Go host registers:
 
 ```raku
 grammar Raptor {
-    rule TOP { <statement>* <HOST_legacy_rest>? }
-    rule statement { <var_decl> | <if_stmt> | ... }
+    rule TOP { <statement>* }
+    rule statement { <comment> | <HOST_stmt> | <var_decl> | ... }
+    rule expression { <assign_expr> | <HOST_expr> }
 }
 ```
 
 ```go
-gcre.RegisterHost("legacy_rest", func(g *gcre.Grammar, ctx *gcre.Context, cap *gcre.Match) bool {
-    // parse leftover input; advance ctx.Pos; optionally cap.Make(ast)
-    return true
-})
+gcre.RegisterHost("stmt", parseOneStatement)
+gcre.RegisterHost("expr", parseOneExpression)
 ```
 
 That is still PEG (ordered choice) and still valid Raku angle syntax
-(`<HOST_legacy_rest>`). Pigeon does not need action blocks. The host
-supplies LTM-like or Pratt parsing only where the grammar names it.
+(`<HOST_stmt>`). Pigeon does not need action blocks. The host supplies
+Pratt parsing only where the grammar names it. There is no second
+full-file parser pass.

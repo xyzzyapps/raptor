@@ -3,7 +3,78 @@
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](raptor/t/)
 [![License: Artistic-2.0](https://img.shields.io/badge/License-Artistic_2.0-0298c3.svg)](https://opensource.org/licenses/Artistic-2.0)
 
-Raptor is engineered specifically for the Post-LLM paradigm:
+Raptor is a **Perl 5–shaped language** (the dynamic, non-OO subset of Raku) with a Go host and optional **MoarVM** backend. If you know Perl 5, you already know Raptor.
+
+## For Perl 5 users
+
+| Perl 5 | Raptor |
+| :--- | :--- |
+| `my $x`, `my @a`, `my %h` | same |
+| `$_` topic | same (`for`, `given`, bare `say`) |
+| `.` concat | `~` |
+| `x` repeat | same |
+| `//` defined-or | same (`//=` too) |
+| `eq ne lt gt` | same; also `==` numeric |
+| `$obj->method` | `$obj.method()` **UFCS** (any `sub method($obj, …)`) |
+| `bless` / `@ISA` | no classes — use `struct` + `multi sub` |
+| `package Foo;` | same; `%Foo::` stash |
+| `use Module;` | same; `use "path.rp"` |
+| TAP `ok` / `is` | built in (`raptor test t/`) |
+| regex | `~~`, `samre` engine available |
+| XS | `is native('lib.dll')` NativeCall |
+
+```perl
+my $name = "Raptor";
+my @nums = [1, 2, 3];
+my %cfg  = { "port" => 8080 };
+$_ = $name;
+say;                          # prints topic
+say 2 ** 10;                  # 1024
+say 6 × 7;                    # unicode ops
+say $cfg{"port"} // 80;
+```
+
+**No** `class`, `has`, or inheritance. Records:
+
+```perl
+struct Point { num64 $x; num64 $y; }
+my $p = Point.new();
+$p.x = 1.0;
+```
+
+Refinements (checked on every assignment):
+
+```perl
+subset Positive where { $_ > 0 };
+my Positive $n = 10;
+```
+
+### gcre — Grammar Compatible Regular Expressions
+
+Parsing is **[gcre](gcre/README.md)**: a **subset of Raku** that is **PEG-compatible** (1-to-1 with [Pigeon](https://github.com/mna/pigeon)). Authors write `.raku` (no action blocks).
+
+- Tcl: [`moarvm-go/tcl/tcl.raku`](moarvm-go/tcl/tcl.raku)
+- Raptor: [`raptor/runtime/raptor.raku`](raptor/runtime/raptor.raku)
+
+Raptor’s grammar names **`<HOST_stmt>`** / **`<HOST_expr>`** so the Go Pratt parser runs *from inside the grammar* for full-language statements. That hatch is a gcre feature (`<HOST_name>`), not a second hidden parser pass.
+
+### How you run it
+
+```
+cd raptor
+go build -mod=mod -o bin/raptor.exe ./cmd/raptor
+raptor script.rp          # --go interpreter (default)
+raptor --moar script.rp   # CompUnit v7 on moar.dll
+raptor test t/            # TAP like prove
+raptor pack app.rp -o app.exe
+raptor weave docs/perlraptor.pod
+raptor doc perlraptor
+raptor serve              # WASM tour at :8080
+```
+
+Sibling trees: **[raptor/](raptor/README.md)**, **[moarvm-go/](moarvm-go/README.md)** (Tcl + Moar embed), **[gcre/](gcre/README.md)**.
+
+Raptor is also engineered for the Post-LLM paradigm:
 
 1. **High Token Density & Brief Syntax**: By adopting the concise syntax of Perl 5 and modern Raku (variables using `$` `@` `%` sigils, canonical `Nil`, built-in operators) while completely omitting `class`, `has`, and `is` boilerplate, Raptor maximizes LLM context window efficiency and reduces model hallucinations.
 2. **Verification-First by Default**: LLMs generate code rapidly, but need tight, verifiable guardrails. Raptor builds formal Design-by-Contract (`PRE`, `POST`, `INVARIANT`), inline testing (`TEST`), and randomized property-based quickcheck fuzzing (`PROPERTY`) directly into the core grammar.
@@ -20,9 +91,6 @@ Raptor's predicate type, continuous contract, and literate programming systems a
 - **Predicate Dispatching**: A Unified Theory of Dispatch* (with Craig Kaplan & Craig Chambers). Introduced the formal model for evaluating arbitrary user-defined boolean predicates over variables and parameter values to drive runtime dispatch and enforce state invariants.
 - **Patrick Maxim Rondon (PhD Thesis, UC San Diego, 2012)**: *Liquid Types* (supervised by Ranjit Jhala, built on Frank Pfenning's 1991 *Refinement Types for ML*). Refinement types via predicate subtyping where standard base types are enriched with logical predicates evaluated against values and assignments.
 - **Johan Hidding (Netherlands eScience Center, 2023)**: *Entangled, a Bidirectional System for Sustainable Literate Programming*, 2023 IEEE 19th International Conference on e-Science (e-Science), pp. 1-10, [DOI: 10.1109/e-Science58273.2023.10254816](https://doi.org/10.1109/e-Science58273.2023.10254816). Formulated the model and grammar for bidirectional, round-trip literate programming where external code modifications are synchronized and reverse-stitched back into literate narrative documents without disturbing narrative prose.
-
-### 3. [gcre (`gcre/`)](gcre/README.md)
-**Grammar Compatible Regular Expressions** — a **subset of Raku** that is **PEG-compatible** (1-to-1 with Pigeon). Authors write `.raku` (no action blocks). Unique feature: organic host hatches `<HOST_name>` so a grammar can name a Go matcher (for example Pratt / LTM leftovers) without breaking Pigeon.
 
 ## Core Subprojects
 
@@ -43,6 +111,9 @@ A high-performance Go host and FFI binding for **MoarVM** (64-bit 6Model JIT vir
 - **Metamodel (6Model)**: Pluggable object representations (`P6opaque`, `MVMArray`, `MVMHash`).
 - **gcre grammars**: Tcl (`tcl/tcl.raku`) is loaded via gcre; CompUnit v7 runs on `moar.dll`.
 - **Tcl Reference Frontend**: Tcl frontend that parses with gcre and emits real MoarVM opcodes.
+
+### 3. [gcre (`gcre/`)](gcre/README.md)
+Grammar Compatible Regular Expressions: Raku-subset / PEG-compatible grammars, Pigeon `raku.peg`, and `<HOST_name>` hooks.
 
 ## Quickstart Feature Tutorial
 

@@ -100,12 +100,21 @@ Raptor compiles to pure WebAssembly (`web/raptor.wasm`) running 100% client-side
 ```powershell
 raptor serve --port 8080
 # Opens in-browser REPL and playground at http://localhost:8080/
+
+# WASM build: TinyGo if available, else Go. Stubs (raptor_bridge.js, wasm_exec.js) written beside the .wasm.
+raptor --wasm --wasm-compiler=go -o web/raptor.wasm
+raptor --wasm --wasm-compiler=tinygo -o web/raptor.wasm
+
+# PHP-style RaptorHP server
+raptor -S localhost:8000 -t .
 ```
 
 ### Web Built-ins:
 - **Canvas 2D**: `canvas_init`, `canvas_clear`, `canvas_draw_rect`, `canvas_draw_circle`, `canvas_draw_line`, `canvas_draw_text`.
 - **DOM Engine**: `dom_get`, `dom_set_text`, `dom_set_html`, `dom_create`.
-- **WebAudio API**: `audio_init`, `audio_play_tone`, `audio_play_melody`.
+- **WebAudio API**: `audio_context_create`, `audio_create_oscillator`, `audio_create_gain`, `audio_create_biquad_filter`, `audio_create_compressor`, `audio_create_delay`, `audio_connect`, `audio_connect_param`, `audio_gain_ramp_exp`, `audio_osc_start` — schedule on `audio_get_current_time`. `audio_play_melody` composes that graph (C4–C5 major 7th in the tour).
+- **WebGPU tiny LLM**: `webgpu_init`, `llm_tiny_load`, `llm_tiny_generate`, `llm_tiny_logits`, `webgpu_draw_logits`.
+- **GGML C API**: `ggml_init`, `ggml_new_tensor_2d`, `ggml_mul_mat` (`A^T * B`), `ggml_graph_compute_with_ctx` (software; optional `ggml.dll`).
 
 ## 5. Verification: Contracts & QuickCheck Fuzzing
 

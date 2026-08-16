@@ -28,8 +28,31 @@ assignment.
 
 Parsing is done with B<gcre> (Grammar Compatible Regular Expressions):
 a Raku grammar subset that is PEG-compatible.  The grammar lives in
-F<runtime/raptor.raku>.  Semantics live in the Go evaluator or, when
-C<--moar> is given, in CompUnit v7 opcodes executed by C<moar.dll>.
+F<runtime/raptor.raku>.  C<ParseProgram> loads that file only.  The Go
+Pratt parser is reached when the grammar writes C<E<lt>HOST_stmtE<gt>>
+or C<E<lt>HOST_exprE<gt>> -- not as a second full-file pass.
+
+Semantics live in the Go evaluator or, when C<--moar> is given, in
+CompUnit v7 opcodes executed by C<moar.dll>.
+
+=head1 FOR PERL 5 USERS
+
+    my $x = 1;           # same
+    my @a = [1, 2, 3];   # arrays are literals in [ ]
+    my %h = { "k" => 1 };
+    say $_;              # topic
+    say 1 if $ok;        # statement modifiers
+    $s ~ $t;             # concat (Perl's .)
+    $s x 3;              # repeat
+    $a // $b;            # defined-or
+    $obj.foo();          # UFCS, not a method table
+
+There is no C<bless>, C<@ISA>, or C<package> inheritance.  Use C<struct>
+and C<multi sub>.
+
+=begin code :tangle<main.rp>
+say "Raptor docs weave";
+=end code
 
 =head1 BACKENDS
 
@@ -48,12 +71,13 @@ F<../moarvm-go>: same bytecode family.
 =item --wasm
 
 Build the playground with TinyGo (or C<GOOS=js GOARCH=wasm>) and
-enable the browser FFI helpers (canvas, DOM, WebAudio).
+enable the browser helpers (canvas, DOM, WebAudio node graph,
+WebGPU tiny LLM).
 
 =back
 
 =head1 SEE ALSO
 
-L<perlvar>, L<perlop>, L<perlfunc>, L<perlpodlit>, L<perlre>
+L<perlvar>, L<perlop>, L<perlfunc>, L<perlpodlit>, L<perlre>, L<index>
 
 =end pod

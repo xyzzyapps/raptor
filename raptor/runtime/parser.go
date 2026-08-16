@@ -33,7 +33,7 @@ func (p *Parser) Parse() (*Program, error) {
 	return &Program{Stmts: stmts}, nil
 }
 
-// ParseProgramLegacy is the old hand-rolled parser (kept for comparison only).
+// ParseProgramLegacy is the Go Pratt parser used by HOST_stmt / HOST_expr.
 func ParseProgramLegacy(source string) (*Program, error) {
 	lexer := NewLexer(source)
 	var tokens []Token
@@ -49,6 +49,73 @@ func ParseProgramLegacy(source string) (*Program, error) {
 	}
 	parser := NewParser(tokens)
 	return parser.Parse()
+}
+
+// lexAll tokenizes source and records the rune end offset of each token.
+func lexAll(source string) ([]Token, error) {
+	lexer := NewLexer(source)
+	var tokens []Token
+	for {
+		tok := lexer.NextToken()
+		tok.To = lexer.Pos()
+		if tok.Type == TokError {
+			return nil, fmt.Errorf("lex error at line %d, col %d: %s", tok.Line, tok.Col, tok.Literal)
+		}
+		tokens = append(tokens, tok)
+		if tok.Type == TokEOF {
+			break
+		}
+	}
+	return tokens, nil
+}
+
+func lastConsumedEnd(p *Parser) int {
+	idx := p.pos - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(p.tokens) {
+		idx = len(p.tokens) - 1
+	}
+	if idx < 0 {
+		return 0
+	}
+	return p.tokens[idx].To
+}
+
+// ParseOneStatement parses a single statement from the start of source.
+// Returns the statement and the rune offset just after it.
+func ParseOneStatement(source string) (Stmt, int, error) {
+	tokens, err := lexAll(source)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(tokens) == 0 || tokens[0].Type == TokEOF {
+		return nil, 0, fmt.Errorf("no statement")
+	}
+	p := NewParser(tokens)
+	stmt, err := p.parseStatement()
+	if err != nil {
+		return nil, 0, err
+	}
+	return stmt, lastConsumedEnd(p), nil
+}
+
+// ParseOneExpression parses a single expression from the start of source.
+func ParseOneExpression(source string) (Expr, int, error) {
+	tokens, err := lexAll(source)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(tokens) == 0 || tokens[0].Type == TokEOF {
+		return nil, 0, fmt.Errorf("no expression")
+	}
+	p := NewParser(tokens)
+	expr, err := p.parseExpression(0)
+	if err != nil {
+		return nil, 0, err
+	}
+	return expr, lastConsumedEnd(p), nil
 }
 
 

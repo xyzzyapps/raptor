@@ -1,0 +1,19 @@
+=begin pod
+
+=TITLE perlre - regex in Raptor
+
+=head1 NAME
+
+perlre - matching
+
+=head1 DESCRIPTION
+
+Smartmatch C<~~> and C<=~> use the active regex engine (Go
+C<regexp> by default, or C<samre> via C<regex_engine("samre")>).
+
+    if $s ~~ "\\d+" { ... }
+
+Grammars (C<grammar Name { token TOP { ... } }>) are declarative
+schemas; host parsing of Raptor itself is gcre + C<HOST_stmt>.
+
+=end pod

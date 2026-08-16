@@ -151,12 +151,14 @@ const (
 
 
 
-// Token represents a single lexical token.
+// Token represents a single lexical token. From/To are rune offsets.
 type Token struct {
 	Type    TokenType
 	Literal string
 	Line    int
 	Col     int
+	From    int
+	To      int
 }
 
 func (t Token) String() string {

@@ -1,0 +1,59 @@
+=begin pod
+
+=TITLE perlfunc - selected built-in functions
+
+=head1 NAME
+
+perlfunc - Raptor builtins (Perl 5 tone)
+
+=head1 DESCRIPTION
+
+A short map from familiar Perl names to Raptor.
+
+=over 4
+
+=item say, print
+
+C<say> adds a newline.  With no arguments both print C<$_>.
+
+=item elems, push, pop, shift, unshift, join, split, sort, map, grep
+
+List ops.  Also via UFCS: C<@a.elems()>, C<@a.map(...)>.
+
+=item to_json / from_json / json_encode / json_decode
+
+JSON.
+
+=item sqlite_open, sqlite_exec, sqlite_query, sqlite_close
+
+SQLite.
+
+=item http_get, http_post, http_server_start, http_format_response
+
+HTTP over sockets.
+
+=item tcp_listen, tcp_connect, tcp_send, tcp_recv, udp_bind
+
+Sockets.
+
+=item plan, ok, is, is_deeply, like, done_testing
+
+TAP (Test::More-shaped).  Prefer these over C<use Test::More> (that
+module file is a thin wrapper).
+
+=item audio_context_create, audio_create_oscillator, audio_create_gain, audio_connect, audio_osc_start
+
+Web Audio graph (WASM).  Schedule on C<audio_get_current_time>.  Also
+compressor, delay, panner, analyser, C<audio_connect_param>.
+
+=item webgpu_init, llm_tiny_load, llm_tiny_generate, llm_tiny_logits
+
+Tiny character LM.  WebGPU compute when the adapter is ready.
+
+=item ggml_init, ggml_new_tensor_2d, ggml_mul_mat, ggml_graph_compute_with_ctx
+
+GGML C API (F<ggml.h> names).  Software backend; optional C<ggml.dll>.
+
+=back
+
+=end pod

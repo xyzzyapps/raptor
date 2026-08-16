@@ -4,7 +4,11 @@
 
 # Raptor
 
-**Backends:** `--go` (default), `--moar` (native MoarVM opcodes, interoperable with `../moarvm-go` Tcl), `--wasm` (TinyGo / browser FFI). Parsing is **[gcre](../gcre)** — Grammar Compatible Regular Expressions, a Raku subset that is PEG-compatible (`runtime/raptor.raku`). Docs: PodLit man pages in `docs/*.pod` (`raptor doc perlraptor`). Topic variable `$_` is fully supported.
+**Parse:** [gcre](../gcre) loads [`runtime/raptor.raku`](runtime/raptor.raku). Pratt is only `<HOST_stmt>` / `<HOST_expr>` inside that grammar — not a second full-file parser.
+
+**Backends:** `--go` (default interpreter), `--moar` (CompUnit v7 on `moar.dll`, same opcode family as Tcl), `--wasm` (TinyGo if available, else `GOOS=js`; `--wasm-compiler=go|tinygo`). `raptor -S localhost:8000` is the PHP-style RaptorHP server.
+
+**Docs:** PodLit in `docs/` — `raptor doc perlraptor`, `raptor weave docs/index.pod`, numbered `01_*.md` chapters. Topic `$_` is supported. `raptor pack` embeds gcre + the runtime (`replace gcre => ../gcre`).
 
 Raptor is a post-LLM dynamic language — a Perl 5 subset of Raku targeting **MoarVM** in Go. Engineered for AI-assisted software generation, it combines high token density, verification-first contracts, continuous assignment predicate invariants, Uniform Function Call Syntax (UFCS), backticks & shell execution (`` `...` ``, `qx{}`), dynamic grammars (`grammar`, `rule`, `token`, `regex`), standard contextual variables (`@*ARGS`, `%*ENV`, `$*RAPTOR`, `$*KERNEL`, `$*PID`, `$?`, `$!`), statement modifiers, heredocs, labels and goto, first-class references, dynamic `AUTOLOAD` dispatch, lexical and persistent variable scoping (`my`, `our`, `state`), package namespaces and symbol table metaprogramming (`%Package::`, `package_symbols`), pluggable regex engines (`samre`), C-ABI struct memory, Charmbracelet terminal styling, literate programming with PodLit, and standalone binary packaging (`raptor pack`).
 
@@ -83,7 +87,7 @@ These DLLs are copied into `bin/` so every executable is zero-dependency. At run
 ### Prerequisites
 
 - **Go 1.22+** (developed and verified on Go 1.22–1.26 across Windows and Linux/WSL)
-- **Local Module Link**: `go.mod` declares `replace moarvm-go => ../moarvm-go`, so `moarvm-go/` must reside adjacent to `raptor/`.
+- **Local Module Links**: `go.mod` has `replace moarvm-go => ../moarvm-go` and `replace gcre => ../gcre`. Build with `go test -mod=mod` / `go build -mod=mod` (do not `go mod vendor` — `vendor/` is MoarVM C, not Go modules).
 
 #### Package Dependencies by Operating System:
 - **Alpine Linux / WSL**:
@@ -127,8 +131,12 @@ GOOS=js GOARCH=wasm go build -o web/raptor.wasm ./cmd/wasm
 # Run all Go unit test suites
 go test -v ./...
 
-# Run the complete TAP test harness (6 test files, 47 assertions)
+# Run the complete TAP test harness (21 files)
 ./bin/raptor test t/
+
+# Weave manuals (PodLit)
+./bin/raptor weave docs/perlraptor.pod
+./bin/raptor doc perlraptor
 
 # Run the comprehensive feature showcase
 ./bin/raptor run examples/demo_showcase.rp
@@ -244,7 +252,7 @@ go test ./...                      # Go unit test suites
 .\bin\raptorhp.exe -r '<h1><?= "Hello from RaptorHP" ?></h1>'
 .\bin\raptorhp.exe -S localhost:8000
 
-# 12. Run the Interactive WebAssembly Playground & 13-Lesson Go Tour
+# 12. Run the Interactive WebAssembly Playground (25-lesson tour, WebAudio + WebGPU)
 .\bin\raptor.exe serve 8085
 
 # 13. Run full Go test suite across all subsystems
@@ -254,8 +262,8 @@ go test -v ./...
 ## Interactive WebAssembly Tour & In-Browser Execution
 
 Raptor includes a 1:1 Go Tour-style interactive WebAssembly environment (`web/index.html`):
-- **13 Interactive Chapters**: Covering basic operators, dynamic subsets, C-structs, UFCS pipelines, autothreading quantum junctions, destructuring, generators, verification contracts, PodLit literate programming, HTML5 Canvas 2D, WebGL 3D, and WebAudio.
-- **Pure Raptor Graphics & Audio**: The GLSL shaders, 3D cube vertex geometry, 4x4 matrix math (`sin`, `cos`, `tan`, `$pi`), procedural 2D radar HUD, and ADSR audio envelopes are authored **100% in pure Raptor code**. The C and JS layers strictly provide low-level zero-overhead primitives (`gl_*`, `canvas_*`, `audio_*`, `ffi_*`).
+- **25 Interactive Chapters**: Language tour plus Canvas 2D, WebGL 3D, a WebAudio **node graph** (oscillator / filter / compressor / delay / LFO, scheduled on `AudioContext.currentTime`), and a WebGPU tiny character-level LLM.
+- **Pure Raptor Graphics, Audio & Tensors**: GLSL, 4x4 math, ADSR envelopes, and the tiny-LM loop are authored in Raptor. The JS layer is 1:1 Web Audio / WebGPU / Canvas. Desktop tensors use the GGML C API (`ggml_*`, optional `ggml.dll`).
 - **Resizable Multi-Pane Workspace**: Drag-to-resize split gutters and 2-axis scrollbar canvas viewport.
 
 ## Embedded Systems, ESP32 Microcontrollers & TinyGo

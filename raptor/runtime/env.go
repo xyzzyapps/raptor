@@ -19,22 +19,44 @@ type Env struct {
 // NewEnv creates a new top-level environment.
 func NewEnv() *Env {
 	return &Env{
-		bindings:      make(map[string]*Value),
-		types:         make(map[string]string),
-		wheres:        make(map[string]Expr),
-		stateBindings: make(map[string]*StateCell),
+		bindings: make(map[string]*Value),
 	}
 }
 
 // NewChild creates a new child environment frame.
+// types / wheres / stateBindings are allocated only if used.
 func (e *Env) NewChild() *Env {
 	return &Env{
-		parent:        e,
-		bindings:      make(map[string]*Value),
-		types:         make(map[string]string),
-		wheres:        make(map[string]Expr),
-		stateBindings: make(map[string]*StateCell),
+		parent:   e,
+		bindings: make(map[string]*Value, 4),
 	}
+}
+
+// Reset clears this frame's bindings so it can be reused for the next loop iteration.
+func (e *Env) Reset() {
+	if e == nil {
+		return
+	}
+	clear(e.bindings)
+	if e.types != nil {
+		clear(e.types)
+	}
+	if e.wheres != nil {
+		clear(e.wheres)
+	}
+	if e.stateBindings != nil {
+		clear(e.stateBindings)
+	}
+}
+
+// RecycleChild reuses child (or allocates one) as a fresh frame under e.
+func (e *Env) RecycleChild(child *Env) *Env {
+	if child == nil {
+		return e.NewChild()
+	}
+	child.Reset()
+	child.parent = e
+	return child
 }
 
 // DefineState binds a state variable cell to the environment frame.
@@ -47,7 +69,15 @@ func (e *Env) DefineState(name string, cell *StateCell) {
 }
 
 // Define declares a new variable in the current frame.
+func detachInt(v *Value) *Value {
+	if isInternedInt(v) {
+		return &Value{Type: ValInt, IntVal: v.IntVal}
+	}
+	return v
+}
+
 func (e *Env) Define(name string, val *Value) {
+	val = detachInt(val)
 	e.bindings[name] = val
 	if e.stateBindings != nil {
 		if cell, ok := e.stateBindings[name]; ok {
@@ -58,11 +88,18 @@ func (e *Env) Define(name string, val *Value) {
 
 // DefineTyped declares a variable with an invariant type and optional predicate constraint.
 func (e *Env) DefineTyped(name string, val *Value, typeName string, where Expr) {
+	val = detachInt(val)
 	e.bindings[name] = val
 	if typeName != "" {
+		if e.types == nil {
+			e.types = make(map[string]string)
+		}
 		e.types[name] = typeName
 	}
 	if where != nil {
+		if e.wheres == nil {
+			e.wheres = make(map[string]Expr)
+		}
 		e.wheres[name] = where
 	}
 }
@@ -70,8 +107,14 @@ func (e *Env) DefineTyped(name string, val *Value, typeName string, where Expr) 
 // LookupType finds a variable's type and where constraint looking up the lexical chain.
 func (e *Env) LookupType(name string) (string, Expr, bool) {
 	if _, ok := e.bindings[name]; ok {
-		t := e.types[name]
-		w := e.wheres[name]
+		var t string
+		var w Expr
+		if e.types != nil {
+			t = e.types[name]
+		}
+		if e.wheres != nil {
+			w = e.wheres[name]
+		}
 		return t, w, true
 	}
 	if e.parent != nil {
@@ -117,6 +160,7 @@ func (e *Env) RegisterMulti(name string, cand *Closure) {
 // Assign updates an existing variable looking up the lexical chain.
 func (e *Env) Assign(name string, val *Value) error {
 	if _, ok := e.bindings[name]; ok {
+		val = detachInt(val)
 		e.bindings[name] = val
 		if e.stateBindings != nil {
 			if cell, ok := e.stateBindings[name]; ok {
@@ -150,8 +194,12 @@ func (e *Env) Lookup(name string) (*Value, bool) {
 // Delete removes a variable binding from the environment.
 func (e *Env) Delete(name string) {
 	delete(e.bindings, name)
-	delete(e.types, name)
-	delete(e.wheres, name)
+	if e.types != nil {
+		delete(e.types, name)
+	}
+	if e.wheres != nil {
+		delete(e.wheres, name)
+	}
 	if e.stateBindings != nil {
 		delete(e.stateBindings, name)
 	}

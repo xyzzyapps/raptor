@@ -74,7 +74,7 @@ func ParsePodDoc(source string) (*PodDoc, error) {
 			cmd := parts[0]
 
 			switch {
-			case cmd == "=pod":
+			case cmd == "=pod" || (cmd == "=begin" && len(parts) > 1 && parts[1] == "pod"):
 				inPod = true
 				continue
 
@@ -142,11 +142,46 @@ func ParsePodDoc(source string) (*PodDoc, error) {
 				continue
 
 			case cmd == "=end":
+				if len(parts) > 1 && parts[1] == "pod" {
+					inPod = false
+				}
 				if currentChunk != nil {
 					doc.Chunks[currentChunk.Name] = currentChunk
 					currentChunk = nil
 				}
 				currentSection = nil
+				continue
+
+			case cmd == "=TITLE" || cmd == "=title":
+				inPod = true
+				title := strings.TrimSpace(strings.TrimPrefix(trimmed, cmd))
+				currentSection = &PodSection{
+					Type:       PodNodeHeading,
+					Level:      1,
+					Heading:    title,
+					LineNumber: lineNum,
+				}
+				doc.Sections = append(doc.Sections, currentSection)
+				continue
+			}
+		}
+
+		// Markdown ATX headings so docs/*.md weave as PodLit
+		if !strings.HasPrefix(trimmed, "=") && currentChunk == nil && strings.HasPrefix(trimmed, "#") {
+			level := 0
+			for level < len(trimmed) && trimmed[level] == '#' {
+				level++
+			}
+			if level >= 1 && level <= 6 && (level == len(trimmed) || trimmed[level] == ' ') {
+				inPod = true
+				headingText := strings.TrimSpace(trimmed[level:])
+				currentSection = &PodSection{
+					Type:       PodNodeHeading,
+					Level:      level,
+					Heading:    headingText,
+					LineNumber: lineNum,
+				}
+				doc.Sections = append(doc.Sections, currentSection)
 				continue
 			}
 		}

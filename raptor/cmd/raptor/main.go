@@ -24,8 +24,11 @@ func main() {
 	evalFlag := flag.String("e", "", "Evaluate inline code string")
 	goFlag := flag.Bool("go", false, "Use the Go interpreter backend")
 	moarFlag := flag.Bool("moar", false, "Use the native MoarVM opcode backend")
-	wasmFlag := flag.Bool("wasm", false, "Build/run via TinyGo WASM and enable WASM FFI helpers")
+	wasmFlag := flag.Bool("wasm", false, "Build raptor.wasm (TinyGo if available, else Go) and enable WASM helpers")
+	wasmCompilerFlag := flag.String("wasm-compiler", "", "WASM toolchain: tinygo, go, or auto (default)")
 	backendFlag := flag.String("backend", "", "Execution backend: go, moar, or wasm")
+	sFlag := flag.String("S", "", "PHP-style RaptorHP server, e.g. -S localhost:8000")
+	tFlag := flag.String("t", ".", "Document root for -S (like php -S -t)")
 	flag.Parse()
 
 	backend := "go"
@@ -40,12 +43,35 @@ func main() {
 		backend = "go"
 	}
 	raptor.SetDefaultBackend(backend)
+	if *wasmCompilerFlag != "" {
+		raptor.SetWASMCompiler(*wasmCompilerFlag)
+	}
+
+	if *sFlag != "" {
+		router := ""
+		if extra := flag.Args(); len(extra) > 0 && !strings.HasPrefix(extra[0], "-") {
+			router = extra[0]
+		}
+		if err := raptor.ServeRaptorHP(raptor.HPServerOptions{Addr: *sFlag, DocRoot: *tFlag, Router: router}); err != nil {
+			fmt.Fprintf(os.Stderr, "RaptorHP server: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	logLevel := slog.LevelWarn
 	if *verboseFlag {
 		logLevel = slog.LevelDebug
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+
+	if *wasmFlag && *evalFlag == "" && len(flag.Args()) == 0 {
+		if err := raptor.CompileToWASM(*outFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "wasm build: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *evalFlag != "" {
 		if backend == "wasm" {
@@ -168,7 +194,9 @@ func printUsage() {
 	fmt.Println("  raptor init [package_name]           Initialize new raptor.json package")
 	fmt.Println("  raptor get <repo-url>[@tag]          Clone Git package into raptor_modules/")
 	fmt.Println("  raptor install                       Install dependencies from raptor.json")
-	fmt.Println("  raptor --go | --moar | --wasm        Select backend (Go interp, native MoarVM, TinyGo WASM)")
+	fmt.Println("  raptor --go | --moar | --wasm        Select backend (Go interp, MoarVM, WASM)")
+	fmt.Println("  raptor --wasm --wasm-compiler=go     Force Go wasm toolchain (default: TinyGo if on PATH)")
+	fmt.Println("  raptor -S localhost:8000 [-t dir]    PHP-style RaptorHP server (also: raptorhp -S)")
 	fmt.Println("  raptor serve [--port 8080]           Launch WebAssembly In-Browser REPL & Playground")
 	fmt.Println("  raptor weave <file.pod> [-o doc.md]   Weave literate POD to Markdown")
 	fmt.Println("  raptor tangle <file.pod> [-o out_dir] Tangle literate POD to source code files")
@@ -371,7 +399,6 @@ replace moarvm-go => %s
 replace gcre => %s
 `, strings.ReplaceAll(raptorRoot, "\\", "/"), strings.ReplaceAll(moarvmRoot, "\\", "/"), strings.ReplaceAll(gcreRoot, "\\", "/"))
 
-
 	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goModContent), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing go.mod: %v\n", err)
 		os.Exit(1)
@@ -573,9 +600,15 @@ func runDoc(topic string) {
 	for _, cand := range candidates {
 		content, err := os.ReadFile(cand)
 		if err == nil {
+			text := string(content)
+			if strings.HasSuffix(cand, ".pod") || strings.Contains(text, "=begin pod") || strings.Contains(text, "=pod") {
+				if doc, perr := raptor.ParsePodDoc(text); perr == nil {
+					text = raptor.WeaveMarkdown(doc)
+				}
+			}
 			in := raptor.NewInterp()
 			if mdFn, ok := in.Builtins["tui_markdown"]; ok {
-				out, _ := mdFn(in, []*raptor.Value{raptor.StringValue(string(content))})
+				out, _ := mdFn(in, []*raptor.Value{raptor.StringValue(text)})
 				if out != nil {
 					fmt.Println(out.String())
 					return

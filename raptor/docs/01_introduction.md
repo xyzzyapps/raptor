@@ -2,6 +2,10 @@
 
 Raptor is a high-performance, strictly non-OO procedural execution platform and language runtime designed as the **pure dynamic Perl 5 subset of Raku**. It targets **MoarVM** (64-bit JIT, 6model virtual machine), native OS dynamic libraries via C FFI, TCP/UDP sockets, real-time audio synthesis (PortAudio), SQLite, Charmbracelet terminal styling, dynamic refinement types with `subset`, and standalone binary packaging (`raptor pack`).
 
+**Parse:** `ParseProgram` loads [`runtime/raptor.raku`](../runtime/raptor.raku) via **[gcre](../../gcre)** (Grammar Compatible Regular Expressions — a PEG-compatible Raku subset). The Go Pratt parser is invoked only through grammar hooks `<HOST_stmt>` and `<HOST_expr>`. There is no second full-file Pratt pass.
+
+**Run:** `raptor --go` (default interpreter), `raptor --moar` (CompUnit v7 on `moar.dll`), `raptor --wasm` (TinyGo or `GOOS=js` playground).
+
 
 ## 1. Core Philosophy
 

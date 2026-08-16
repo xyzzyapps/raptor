@@ -28,7 +28,7 @@ Write-Host "==================================================================" 
 # 0. Test Suite Validation
 if (-not $SkipTests) {
     Write-Host "`n[0/4] Running Validation Test Suite..." -ForegroundColor Yellow
-    $testResult = go test ./...
+    go test -mod=mod ./...
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Tests failed! Aborting distribution build."
     }
@@ -53,8 +53,8 @@ if ($Target -eq "All" -or $Target -eq "Windows") {
     Write-Host "`n[1/4] Building Windows x86_64 Release Bundle..." -ForegroundColor Yellow
     
     # Compile Windows executables
-    go build -ldflags="-s -w" -o (Join-Path $WinStaging "raptor.exe") .\cmd\raptor
-    go build -ldflags="-s -w" -o (Join-Path $WinStaging "raptorhp.exe") .\cmd\raptorhp
+    go build -mod=mod -ldflags="-s -w" -o (Join-Path $WinStaging "raptor.exe") .\cmd\raptor
+    go build -mod=mod -ldflags="-s -w" -o (Join-Path $WinStaging "raptorhp.exe") .\cmd\raptorhp
 
     # Bundle runtime DLLs
     if (Test-Path "bin\moar.dll") { Copy-Item "bin\moar.dll" $WinStaging -Force }
@@ -81,20 +81,26 @@ if ($Target -eq "All" -or $Target -eq "Windows") {
 if ($Target -eq "All" -or $Target -eq "Linux") {
     Write-Host "`n[2/4] Building Linux x86_64 Musl Static Release Bundle..." -ForegroundColor Yellow
     
-    $wslDistros = (wsl -l -q 2>$null)
+    # wsl -l emits UTF-16; strip NULs or "Alpine" never matches.
+    $wslDistros = ((wsl -l -q 2>$null | Out-String) -replace "`0", "")
     $hasAlpine = $wslDistros -match "Alpine"
     
     if ($hasAlpine) {
-        Write-Host "  -> Compiling via WSL Alpine Linux (Native Musl Toolchain)..." -ForegroundColor Gray
+        Write-Host "  -> Compiling static musl binaries via WSL Alpine..." -ForegroundColor Gray
         $wslRootDir = ($RootDir -replace "\\", "/").Replace("C:", "/mnt/c").Replace("c:", "/mnt/c")
-        wsl -d Alpine sh -c "cd '$wslRootDir' && go build -ldflags='-s -w' -o release/linux/raptor ./cmd/raptor && go build -ldflags='-s -w' -o release/linux/raptorhp ./cmd/raptorhp"
+        # -e /bin/ash: Alpine's login shell is fish and breaks $ / quoting.
+        # CGO_ENABLED=0 + -static matches scripts/build_dist.sh.
+        wsl -d Alpine -e /bin/ash -c "cd '$wslRootDir' && CGO_ENABLED=0 go build -mod=mod -ldflags='-s -w -extldflags -static' -o release/linux/raptor ./cmd/raptor && CGO_ENABLED=0 go build -mod=mod -ldflags='-s -w -extldflags -static' -o release/linux/raptorhp ./cmd/raptorhp"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Alpine musl build failed (exit $LASTEXITCODE)."
+        }
     } else {
         Write-Host "  -> Cross-compiling static Linux binaries via Go toolchain..." -ForegroundColor Gray
         $env:GOOS = "linux"
         $env:GOARCH = "amd64"
         $env:CGO_ENABLED = "0"
-        go build -ldflags="-s -w -extldflags '-static'" -o (Join-Path $LinuxStaging "raptor") .\cmd\raptor
-        go build -ldflags="-s -w -extldflags '-static'" -o (Join-Path $LinuxStaging "raptorhp") .\cmd\raptorhp
+        go build -mod=mod -ldflags="-s -w -extldflags '-static'" -o (Join-Path $LinuxStaging "raptor") .\cmd\raptor
+        go build -mod=mod -ldflags="-s -w -extldflags '-static'" -o (Join-Path $LinuxStaging "raptorhp") .\cmd\raptorhp
         Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
     }
 

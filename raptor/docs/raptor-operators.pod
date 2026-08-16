@@ -1,0 +1,95 @@
+=begin pod
+
+=TITLE raptor-operators - operators and junctions
+
+=head1 NAME
+
+raptor-operators - infix, prefix, file tests, junctions
+
+Precedence follows Raku more than Perl 5.
+
+=head1 ARITHMETIC
+
+    +  -  *  /  %  **  div  mod  %%
+
+Unicode (real operators): C<× ÷ ± √>. C<√$x> is prefix sqrt.
+C<∑> and C<∏> are callables: C<∑(1,2,3)>.
+
+=head1 STRING AND LIST
+
+    ~   x   xx   ..
+
+C<~> concatenates (Perl 5 C<.>). C<x> repeats a string, C<xx> a list.
+C<1..10> is a range (packed int64 lane in the interpreter).
+
+=head1 COMPARISON
+
+    == != < <= > >=
+    eq ne lt gt le ge
+    <=>  cmp  ~~  =~  !~
+
+Chained: C<0 <= $x <= 10>. C<~~> is smartmatch (subsets, regex, ranges).
+
+=head1 LOGICAL
+
+    && || //    and or orelse
+    ?? !!       ?:
+
+C<//> is defined-or. C<//=> assigns only when the left is undefined.
+
+=head1 BITWISE (numeric)
+
+    +&  +|  +^  +<  +>
+
+Not Perl's C<& | ^ << >>.
+
+=head1 ASSIGNMENT
+
+    =  +=  -=  ~=  *=  /=  //=
+
+=head1 OTHER INFIX
+
+=over 4
+
+=item min / max
+
+C<10 min 20> is 10.
+
+=item ∈ ∉ ∩ ∪
+
+Set membership / intersection / union.
+
+=back
+
+=head1 FILE TESTS
+
+C<-e -f -d -s -r -w> on a path. C<-s> is size in bytes.
+
+=begin code
+
+if -f "config.json" {
+    my $content = slurp("config.json");
+}
+
+=end code
+
+=head1 JUNCTIONS
+
+C<any>, C<all>, C<one>, C<none> autothread comparisons:
+
+=begin code
+
+if $x == any(10, 15, 20) { say "hit"; }
+if all(10, 20, 30) > 5 { say "all big"; }
+
+=end code
+
+=head1 CUSTOM OPERATORS
+
+    multi sub infix:<⊕>($a, $b) { $a + $b + 1 }
+
+=head1 SEE ALSO
+
+L<raptorop> (same topic, short name), L<raptor-syntax>, L<raptorre>
+
+=end pod

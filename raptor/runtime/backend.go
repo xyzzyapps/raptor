@@ -53,18 +53,27 @@ func (in *Interp) evalMoar(source string) (*Value, error) {
 	c := NewCompiler()
 	bc, err := c.CompileScript(source)
 	if err != nil {
-		// Full language still runs on the Go interpreter; Moar is used
-		// whenever the subset compiler succeeds.
-		return in.Eval(source)
+		return nil, fmt.Errorf("moar backend: %w", err)
+	}
+	// Process stdout: let Moar write say/print itself. Tests that redirected
+	// Interp.Stdout still need capture + copy.
+	if in.Stdout == nil || in.Stdout == os.Stdout {
+		if err := moargo.ExecNative(bc); err != nil {
+			return nil, fmt.Errorf("moar backend: %w", err)
+		}
+		return NilValue(), nil
 	}
 	out, err := moargo.RunNative(bc)
 	if err != nil {
 		return nil, fmt.Errorf("moar backend: %w", err)
 	}
-	if in.Stdout != nil && out != "" {
+	if out != "" {
 		fmt.Fprint(in.Stdout, out)
+		if !strings.HasSuffix(out, "\n") {
+			fmt.Fprint(in.Stdout, "\n")
+		}
 	}
-	return StringValue(strings.TrimRight(out, "\r\n")), nil
+	return NilValue(), nil
 }
 
 // WASM compiler names: "tinygo", "go", or "" (auto: TinyGo if on PATH).

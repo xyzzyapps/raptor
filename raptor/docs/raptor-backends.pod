@@ -1,0 +1,50 @@
+=begin pod
+
+=TITLE raptor-backends - --go, --moar, --wasm
+
+=head1 NAME
+
+raptor-backends - how each backend runs a program
+
+=head1 --go (default)
+
+Tree-walk interpreter in F<runtime/eval.go>. This is the B<full
+language>: TAP, FFI, structs, SQLite, junctions, PodLit, RaptorHP
+helpers, concurrency, the lot. C<raptor test t/> and the examples
+run here.
+
+=head1 --moar
+
+Emits CompUnit v7 and executes it on C<moar.dll> (same opcode family
+as the Tcl frontend in F<../moarvm-go>). There is B<no Go fallback>.
+If the compiler cannot emit valid bytecode, it errors.
+
+Native today: scalars, C<say>/C<print>, C<if>/C<else>/C<unless>/
+C<while>/C<until>/C<loop>/C<last>/C<next>, C<my> and C<+= -= ~= //=>,
+integer and string ops (including C<+& +| +^>, C<x>, C<//>, C<?? !!>,
+C<min>/C<max>, C<%%>), TAP C<plan>/C<ok>/C<is>/C<isnt>/C<done_testing>.
+
+Not compiled (hard error): arrays, hashes, C<for>, C<use>, C<struct>,
+C<subset>, C<is_deeply>, C<xx>, FFI, SQLite, regex, UFCS, closures.
+
+    raptor --moar -e 'say 40 + 2;'     # 42
+    raptor --moar test t/01_operators.t  # fails: is_deeply / xx
+
+=head1 --wasm
+
+Builds F<web/raptor.wasm>. Prefers TinyGo when C<tinygo> is on PATH;
+C<--wasm-compiler=go|tinygo> forces a toolchain. Writes
+C<raptor_bridge.js> and C<wasm_exec.js> next to the C<.wasm>.
+
+    raptor --wasm --wasm-compiler=go -o web/raptor.wasm
+    raptor serve --port 8080
+
+The tour HTTP and WebGPU lessons are disabled. Desktop C<--wasm> as an
+I<execution> backend still evaluates source with the Go interpreter
+after setting C<$*WASM>.
+
+=head1 SEE ALSO
+
+L<raptor>, L<raptor-wasm>, L<raptor-introduction>
+
+=end pod

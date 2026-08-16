@@ -1,0 +1,62 @@
+=begin pod
+
+=TITLE raptor-tui - Charmbracelet terminal UI
+
+=head1 NAME
+
+raptor-tui - Lip Gloss styling, boxes, tables, Bubble Tea
+
+=head1 STYLE
+
+=begin code
+
+my $banner = tui_style("RAPTOR RUNTIME", {
+    "fg" => "#38bdf8",
+    "bg" => "#0f172a",
+    "bold" => True,
+    "border" => "rounded",
+    "border_fg" => "#f43f5e",
+    "padding" => [1, 2],
+    "align" => "center"
+});
+say $banner;
+
+=end code
+
+=head1 BOX, TABLE, PROGRESS, MARKDOWN
+
+=begin code
+
+say tui_box("Server: Online", { "title" => "status", "border" => "rounded" });
+say tui_table(["ID", "Name"], [["1", "Auth"], ["2", "DB"]]);
+say tui_progress(0.75, { "width" => 40, "fg" => "#facc15" });
+say tui_markdown("# Hello\n\n- item");
+
+=end code
+
+=head1 BUBBLE TEA
+
+Elm-style C<init> / C<update> / C<view>:
+
+=begin code
+
+tui_app_run({
+    "init" => sub () { return { "count" => 0 }; },
+    "update" => sub ($model, $msg) {
+        $model{"count"} = $model{"count"} + 1;
+        return $model;
+    },
+    "view" => sub ($model) {
+        return tui_box("Count: " ~ $model{"count"}, { "title" => "app" });
+    }
+});
+
+=end code
+
+C<raptor doc> uses C<tui_markdown> to render these manuals.
+
+=head1 SEE ALSO
+
+L<raptorfunc>, F<lib/Charm.rp>
+
+=end pod

@@ -1,0 +1,70 @@
+=begin pod
+
+=TITLE raptor-subsets - refinements, contracts, dispatch
+
+=head1 NAME
+
+raptor-subsets - C<subset>, C<where>, Design-by-Contract, C<~~>
+
+=head1 SUBSET
+
+A C<subset> is a named invariant checked on every assignment:
+
+=begin code
+
+subset Positive where { $_ > 0 };
+subset Even where { $_ % 2 == 0 };
+subset PortNumber where { 1 <= $_ <= 65535 };
+subset NonEmptyStr where { $_.chars() > 0 };
+
+my Positive $score = 100;   # OK
+# $score = -5;              # runtime error
+
+=end code
+
+=head1 PREDICATE DISPATCH
+
+C<multi sub> candidates are chosen by C<subset> types and inline
+C<where> clauses:
+
+=begin code
+
+subset Negative where { $_ < 0 };
+subset Zero where { $_ == 0 };
+
+multi sub describe(Negative $n) { return "Negative: " ~ $n; }
+multi sub describe(Zero $n)     { return "Zero"; }
+multi sub describe(Positive $n) { return "Positive: " ~ $n; }
+
+multi sub grade($score where { $score >= 90 }) { return "A"; }
+multi sub grade($score where { $score >= 75 }) { return "B"; }
+multi sub grade($score) { return "C"; }
+
+=end code
+
+=head1 SMART MATCH
+
+    if 42 ~~ Even { say "even"; }
+    if $n ~~ 90..100 { say "A"; }
+
+=head1 CONTRACTS
+
+=begin code
+
+sub deposit($account, $amount) {
+    pre({ $amount > 0 });
+    $account{"balance"} = $account{"balance"} + $amount;
+    post({ $_ >= $amount });
+    return $account{"balance"};
+}
+
+=end code
+
+Also C<invariant>, C<PRE>, C<POST>, C<INVARIANT>, C<ASSERT>, C<CHECK>.
+See L<raptor-testing>.
+
+=head1 SEE ALSO
+
+L<raptor-syntax>, L<raptor-testing>, L<raptor-structs>
+
+=end pod

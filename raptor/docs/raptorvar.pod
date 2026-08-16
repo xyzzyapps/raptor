@@ -1,0 +1,75 @@
+=begin pod
+
+=TITLE raptorvar - predefined variables
+
+=head1 NAME
+
+raptorvar - topic, process, and compiler variables
+
+=over 4
+
+=item $_
+
+Default topic. C<for @list { }> and C<given $x { }> bind it. Bare
+C<say> / C<print> print C<$_>.
+
+=item $/
+
+Last successful match object (grammar or regex).
+
+=item $!
+
+Last error.
+
+=item $?
+
+Last exit status (backticks / C<system>).
+
+=item $$ / $*PID
+
+Process id.
+
+=item $0 / $*PROGRAM / $*PROGRAM-NAME
+
+Program name (C<os.Args[0]>).
+
+=item @*ARGS / @ARGV
+
+Command-line arguments after the script.
+
+=item %*ENV / %ENV
+
+Process environment.
+
+=item @*INC / @INC
+
+Module search path.
+
+=item $*OS / $*CWD / $*EXECUTABLE
+
+Host identity.
+
+=item $*RAPTOR
+
+Hash: C<name>, C<version> (1.0.0), C<auth>, C<compiler>.
+
+=item $*KERNEL
+
+Hash: C<name> is GOOS (C<windows> / C<linux> / …), C<arch>, C<version>.
+Same as C<$*OS> for C<name>.
+
+=item $*WASM
+
+True under the WASM backend / build.
+
+=item $*RAPTOR.version
+
+Currently C<1.0.0>.
+
+=back
+
+=head1 SEE ALSO
+
+L<raptor-syntax>, L<raptor>
+
+=end pod

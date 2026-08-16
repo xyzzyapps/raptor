@@ -1,0 +1,94 @@
+=begin pod
+
+=TITLE raptor-syntax - variables, subs, UFCS, control
+
+=head1 NAME
+
+raptor-syntax - sigils, declarations, subroutines, control flow
+
+=head1 SIGILS
+
+=over 4
+
+=item $
+
+Scalar: int, float, string, bool, reference, struct, closure.
+
+=item @
+
+Array / list. Literals use C<[1, 2, 3]> (not a bare C<(1,2,3)> list).
+
+=item %
+
+Hash. Literals use C<{ "k" => 1 }>.
+
+=back
+
+=begin code
+
+my $name = "Quantum Engine";
+my $speed = 299792.458;
+my $ok = True;
+my @items = ["Alpha", "Beta", "Gamma"];
+say @items[0];    # first
+say @items[-1];   # last
+my %config = { "host" => "127.0.0.1", "port" => 8080 };
+say %config{"host"};
+
+=end code
+
+=head1 SCOPING
+
+C<my> is lexical. C<our> is package-scoped. C<state> persists across
+calls. There is no C<local>.
+
+=head1 SUBROUTINES
+
+Signatures, not C<@_>. Slurpy rest params are allowed.
+
+=begin code
+
+sub greet($user) { return "Hello, " ~ $user ~ "!"; }
+
+my $double = sub ($x) { return $x * 2; };
+say $double(21);
+
+sub process_list($head, @tail) {
+    say "Head: " ~ $head;
+    say "Tail: " ~ @tail.elems();
+}
+process_list(10, 20, 30, 40);
+
+=end code
+
+=head1 UFCS
+
+Any C<sub fn($obj, …)> is C<$obj.fn(…)>.
+
+=begin code
+
+sub double($x) { return $x * 2; }
+say 21.double();
+say "  raptor  ".trim().uc();
+
+=end code
+
+=head1 CONTROL
+
+C<if>/C<elsif>/C<else>/C<unless>, C<while>/C<until>,
+C<for @xs { }> / C<for @xs -> $x { }>, C<loop ( ; ; ) { }>,
+C<given>/C<when>/C<default>, C<last>/C<next>, C<goto LABEL>,
+C<goto &sub>. Statement modifiers: C<say 1 if $ok>.
+
+No C<redo>, no C<eval STRING>. C<die>, C<warn>, C<exit> exist.
+
+=head1 REFERENCES
+
+C<\$s>, C<\@a>, C<\%h>, C<\&sub>; C<$$s>, C<$a-E<gt>[0]>,
+C<$h-E<gt>{"k"}>; C<ref>, C<is_ref>.
+
+=head1 SEE ALSO
+
+L<raptorvar>, L<raptor-operators>, L<raptor-subsets>
+
+=end pod

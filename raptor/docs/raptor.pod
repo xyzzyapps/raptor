@@ -1,0 +1,88 @@
+=begin pod
+
+=TITLE raptor - language overview
+
+=head1 NAME
+
+raptor - a Perl 5–shaped language (the dynamic, non-OO subset of Raku)
+
+=head1 SYNOPSIS
+
+    raptor script.rp
+    raptor --go script.rp
+    raptor --moar script.rp
+    raptor --wasm
+    raptor -e 'say 42;'
+    raptor test t/
+    raptor serve --port 8080
+    raptor -S localhost:8000
+
+=head1 DESCRIPTION
+
+Raptor is a dynamic, strictly non-OO procedural language. It takes the
+parts of Perl 5 people actually write — sigils, C<$_>, statement
+modifiers, hashes and lists — and spells them as valid Raku where the
+two traditions agree.
+
+There is no C<class>, no C<has>, no inheritance. Records are C
+C<struct>s. Types are optional refinements (C<subset>) checked on
+assignment.
+
+B<Parse.> B<gcre> (Grammar Compatible Regular Expressions) loads
+F<runtime/raptor.raku>. That subset is PEG-compatible Raku. The Go
+Pratt parser runs only where the grammar writes C<E<lt>HOST_stmtE<gt>>
+or C<E<lt>HOST_exprE<gt>> — not as a second full-file pass.
+
+B<Run.> C<--go> (default) is the tree-walk interpreter and the full
+language. C<--moar> emits CompUnit v7 and runs it on C<moar.dll> with
+B<no Go fallback>; unsupported constructs error. C<--wasm> builds the
+browser engine (TinyGo if available, else C<GOOS=js>).
+
+=head1 FOR PERL 5 USERS
+
+Where Perl 5 and Raku disagree, Raptor uses the B<Raku spelling>.
+The implemented table is in F<README.md> (repo root and F<raptor/README.md>).
+
+    my $x = 1;              # same
+    my @a = [1, 2, 3];      # arrays are [ ] literals
+    $s ~ $t;                # concat (Perl's .)
+    $obj.foo();             # UFCS
+    sub foo($a, $b) { }     # signatures
+    open($path, "r");
+    exists(%h, $k);
+
+B<Not implemented:> C<local>, C<redo>, C<eval STRING> / C<eval { }>,
+C<bless> / C<@ISA> / Moose / C<class> / C<has>, prototypes,
+C<wantarray>, C<s///> / C<tr///>.
+
+See L<raptor-syntax>, L<raptor-operators>, L<raptorvar>.
+
+=head1 FILE EXTENSIONS
+
+=over 4
+
+=item .rp / .raptor
+
+Scripts.
+
+=item .pod
+
+PodLit literate documents (runnable).
+
+=item .phtml / .rhtml
+
+RaptorHP templates.
+
+=item .t
+
+TAP tests (C<raptor test t/>).
+
+=back
+
+=head1 SEE ALSO
+
+L<raptor-index>, L<raptor-introduction>, L<raptor-backends>,
+L<raptorvar>, L<raptorop>, L<raptorfunc>, L<raptorre>,
+L<raptor-literate>
+
+=end pod

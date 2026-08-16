@@ -1,0 +1,58 @@
+=begin pod
+
+=TITLE raptor-concurrency - tasks, channels, audio
+
+=head1 NAME
+
+raptor-concurrency - C<start>/C<await>, Channel, atomics, PortAudio
+
+=head1 TASKS
+
+=begin code
+
+my $p = start {
+    my $sum = 0;
+    my $i = 1;
+    while $i <= 1000 { $sum = $sum + $i; $i = $i + 1; }
+    return $sum;
+};
+say await($p);
+
+=end code
+
+=head1 CHANNELS AND PARALLEL MAP
+
+=begin code
+
+my $chan = Channel.new(10);
+start { $chan.send(42); };
+say $chan.receive();
+
+my @sq = parallel_map([1, 2, 3, 4], sub ($x) { return $x * $x; }, 4);
+
+=end code
+
+=head1 SYNCHRONIZATION
+
+C<Mutex>, C<Semaphore>, C<WaitGroup>, C<Supply>.
+C<atomic_add>, C<atomic_sub>, C<atomic_load>, C<atomic_store>, C<cas>.
+Interned small ints refuse atomics (they are flyweights); bind first.
+
+=head1 PORTAUDIO
+
+=begin code
+
+pa_init();
+say pa_device_count();
+my $samples = pa_generate_sine_wave(440.0, 0.5, 44100.0, 0.8);
+pa_terminate();
+
+=end code
+
+See F<lib/PortAudio.rp>.
+
+=head1 SEE ALSO
+
+L<raptor-wasm> (WebAudio node graph), L<raptorfunc>
+
+=end pod

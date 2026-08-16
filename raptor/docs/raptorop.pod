@@ -1,0 +1,12 @@
+=begin pod
+
+=TITLE raptorop - operators (short name)
+
+=head1 NAME
+
+raptorop - alias of L<raptor-operators>
+
+See L<raptor-operators> for the full table (arithmetic, string, bitwise
+C<+& +| +^>, C<//>, C<?? !!>, file tests, junctions).
+
+=end pod

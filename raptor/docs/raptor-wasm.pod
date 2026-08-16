@@ -1,0 +1,73 @@
+=begin pod
+
+=TITLE raptor-wasm - WebAssembly tour and browser APIs
+
+=head1 NAME
+
+raptor-wasm - C<raptor --wasm>, canvas, DOM, WebAudio
+
+=head1 BUILD
+
+    raptor --wasm --wasm-compiler=tinygo -o web/raptor.wasm
+    raptor --wasm --wasm-compiler=go -o web/raptor.wasm
+    raptor serve --port 8080
+
+TinyGo is preferred when C<tinygo> is on PATH. Stubs
+(C<raptor_bridge.js>, C<wasm_exec.js>) are written beside the
+C<.wasm>. Live tour: L<https://xyzzyapps.github.io/raptor/>.
+
+Tour B<HTTP> and B<WebGPU> lessons are disabled (they did not run
+well in WASM).
+
+=head1 CANVAS
+
+    canvas_init("wasmCanvas", 640, 380);
+    canvas_clear("#090d16");
+    canvas_draw_rect(20, 20, 200, 100, "#10b981", True);
+    canvas_draw_circle(320, 190, 45, "#f59e0b", True);
+    canvas_draw_line(50, 50, 400, 300, "#a855f7", 2.5);
+    canvas_draw_text("Raptor", 30, 45, 18, "#ffffff");
+
+=head1 DOM
+
+    dom_get("#status");
+    dom_set_text("#title", "ok");
+    dom_set_html("#out", "<b>hi</b>");
+    dom_create("#box", "div", "child", "card");
+
+=head1 WEBAUDIO
+
+Graph in Raptor; JS wraps C<AudioNode>. Schedule on
+C<audio_get_current_time> (not C<setTimeout>). Melody in the tour is
+C4 E4 G4 B4 C5.
+
+=begin code
+
+my $ctx = audio_context_create();
+my $t0 = audio_get_current_time($ctx);
+my $osc = audio_create_oscillator($ctx);
+my $env = audio_create_gain($ctx);
+audio_set_frequency($osc, 261.63, $t0);
+audio_connect($osc, $env);
+audio_connect_destination($env, $ctx);
+audio_osc_start($osc, $t0);
+
+=end code
+
+Also filter, compressor, delay, panner, analyser, LFO via
+C<audio_connect_param>. C<audio_play_melody> composes that graph.
+
+=head1 TINY LLM / GGML
+
+    llm_tiny_load(); llm_tiny_generate($m, $prompt, 48, 0.35);
+    ggml_init(); ggml_new_tensor_2d(...); ggml_mul_mat($A, $B);
+    ggml_graph_compute_with_ctx($ctx, $gf, $n);
+
+Desktop runs the same tensors on CPU. WebGPU matmul exists but the
+tour page is off.
+
+=head1 SEE ALSO
+
+L<raptor-backends>, L<raptorfunc>, F<examples/webaudio_graph.rp>
+
+=end pod

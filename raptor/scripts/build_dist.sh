@@ -17,7 +17,7 @@ echo "=================================================================="
 
 # 1. Run Tests
 echo "\n[1/3] Running Test Suite..."
-go test ./...
+go test -mod=mod ./...
 
 # 2. Build Static Binaries
 DIST_DIR="$ROOT_DIR/dist"
@@ -28,8 +28,8 @@ rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 
 echo "\n[2/3] Compiling Static Musl Binaries..."
-CGO_ENABLED=0 go build -ldflags="-s -w -extldflags '-static'" -o "$STAGING_DIR/raptor" ./cmd/raptor
-CGO_ENABLED=0 go build -ldflags="-s -w -extldflags '-static'" -o "$STAGING_DIR/raptorhp" ./cmd/raptorhp
+CGO_ENABLED=0 go build -mod=mod -ldflags="-s -w -extldflags '-static'" -o "$STAGING_DIR/raptor" ./cmd/raptor
+CGO_ENABLED=0 go build -mod=mod -ldflags="-s -w -extldflags '-static'" -o "$STAGING_DIR/raptorhp" ./cmd/raptorhp
 
 cp -r lib "$STAGING_DIR/lib"
 cp -r examples "$STAGING_DIR/examples"

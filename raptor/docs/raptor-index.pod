@@ -1,0 +1,108 @@
+=begin pod
+
+=TITLE raptor-index - Raptor manuals
+
+=head1 NAME
+
+raptor-index - catalog of PodLit manuals in F<docs/>
+
+=head1 SYNOPSIS
+
+    raptor doc
+    raptor doc raptor
+    raptor doc raptor-syntax
+    raptor weave docs/raptor.pod
+    raptor weave docs/raptor-index.pod
+
+Every file in this directory is PodLit (C<=begin pod>). There are no
+C<perl*> man-page names and no numbered Markdown chapters.
+
+=head1 LANGUAGE
+
+=over 4
+
+=item L<raptor>
+
+Language overview: identity, Perl 5 map, parse (gcre + HOST), backends.
+
+=item L<raptor-introduction>
+
+Philosophy, quick tour, CLI.
+
+=item L<raptor-syntax>
+
+Sigils, C<my>/C<our>/C<state>, signatures, UFCS, refs, control flow.
+
+=item L<raptor-operators>
+
+Operators, file tests, junctions, unicode ops.
+
+=item L<raptorvar>
+
+Predefined variables (C<$_>, C<@*ARGS>, C<$*KERNEL>, …).
+
+=item L<raptorfunc>
+
+Built-in functions.
+
+=item L<raptorre>
+
+Regex, smartmatch, grammars, C<samre>.
+
+=item L<raptor-subsets>
+
+C<subset>, C<where>, contracts, predicate dispatch.
+
+=item L<raptor-structs>
+
+C-ABI C<struct>, operator overloads, NativeCall / FFI.
+
+=back
+
+=head1 RUNTIME
+
+=over 4
+
+=item L<raptor-backends>
+
+C<--go>, C<--moar>, C<--wasm>: what each actually runs.
+
+=item L<raptor-io>
+
+Files, sockets, HTTP, WebSockets, SQLite, JSON.
+
+=item L<raptor-tui>
+
+Charmbracelet styling, boxes, tables, Bubble Tea.
+
+=item L<raptor-concurrency>
+
+C<start>/C<await>, Channel, atomics, PortAudio.
+
+=item L<raptor-testing>
+
+TAP, C<raptor test>, C<pre>/C<post>, QuickCheck.
+
+=item L<raptor-modules>
+
+C<package>, C<use>, C<raptor get> / C<install>.
+
+=item L<raptor-literate>
+
+PodLit weave / tangle / stitch.
+
+=item L<raptor-wasm>
+
+WASM tour, canvas, DOM, WebAudio. WebGPU/HTTP tour pages are off.
+
+=item L<raptorhp>
+
+PHP-style templates and C<raptor -S>.
+
+=back
+
+=begin code :tangle<docs_ok.rp>
+say "docs index tangled";
+=end code
+
+=end pod

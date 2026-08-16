@@ -1,0 +1,72 @@
+=begin pod
+
+=TITLE raptor-io - files, sockets, HTTP, SQLite, JSON
+
+=head1 NAME
+
+raptor-io - I/O builtins
+
+=head1 FILES
+
+    $fh = open($path, "r");     # also "<" ">" ">>" "rw"
+    $line = readline($fh);
+    close($fh);
+    slurp($path);               # whole file
+    spurt($path, $content);
+    chomp($s); chop($s);        # return a new string (do not mutate)
+    chdir mkdir rmdir unlink rename copy
+    dirname basename abspath dir
+
+=head1 SOCKETS
+
+=begin code
+
+my $server = tcp_listen(9000);
+my $client = tcp_accept($server);
+tcp_send($client{"socket"}, "ok");
+tcp_close($server);
+
+my $sock = tcp_connect("127.0.0.1", 9000);
+tcp_send($sock, "Hello");
+my $response = tcp_recv($sock, 1024);
+tcp_close($sock);
+
+=end code
+
+Also C<udp_bind> / C<udp_send> / C<udp_recv>.
+
+=head1 HTTP AND WEBSOCKETS
+
+    http_get($url, %headers)
+    http_post($url, $body)
+    http_server_start / http_server_listen
+    http_format_response($code, $body)
+    ws_frame_text($s)
+    ws_parse_frame($bytes)
+
+=head1 SQLITE
+
+=begin code
+
+my $db = sqlite_open("app.db");        # or ":memory:"
+sqlite_exec($db, "CREATE TABLE t (id INTEGER, name TEXT)");
+sqlite_exec($db, "INSERT INTO t VALUES (1, 'Ada')");
+my @rows = sqlite_query($db, "SELECT * FROM t");
+sqlite_close($db);
+
+=end code
+
+Falls back to an in-memory engine if C<sqlite3.dll> / C<libsqlite3> is
+missing.
+
+=head1 JSON
+
+    to_json(%data) / to_json(%data, True)   # pretty
+    from_json($s)
+    json_encode / json_decode               # aliases
+
+=head1 SEE ALSO
+
+L<raptorfunc>, L<raptorhp>, F<lib/Socket.rp>
+
+=end pod

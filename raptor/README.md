@@ -8,23 +8,75 @@ A **Perl 5–shaped** dynamic language: the non-OO subset of Raku. No `class`, `
 
 **Parse:** [gcre](../gcre) loads [`runtime/raptor.raku`](runtime/raptor.raku). Pratt is only `<HOST_stmt>` / `<HOST_expr>` inside that grammar — not a second full-file parser.
 
-**Backends:** `--go` (default tree-walk), `--moar` (CompUnit v7 on `moar.dll`, same opcode family as Tcl in [../moarvm-go](../moarvm-go)), `--wasm` (TinyGo if available, else `GOOS=js`; `--wasm-compiler=go|tinygo`).
+**Backends:** `--go` (default tree-walk), `--moar` (CompUnit v7 on `moar.dll` — no Go fallback; unsupported constructs error), `--wasm` (TinyGo if available, else `GOOS=js`; `--wasm-compiler=go|tinygo`).
 
-**Docs:** PodLit in `docs/` — `raptor doc perlraptor`, `raptor weave docs/index.pod`, numbered `01_*.md` chapters. `raptor pack` embeds gcre + the runtime (`replace gcre => ../gcre`).
+**Docs:** PodLit in `docs/raptor*.pod` — `raptor doc`, `raptor doc raptor`, `raptor weave docs/raptor-index.pod`. `raptor pack` embeds gcre + the runtime (`replace gcre => ../gcre`).
 
-If you know Perl 5, you already know Raptor.
+If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Raptor uses the **Raku spelling**.
+
+**Implemented**
 
 | Perl 5 | Raptor |
 | :--- | :--- |
-| `my $x`, `my @a`, `my %h` | same |
-| `$_` topic | same (`for`, `given`, bare `say`) |
-| `.` concat | `~` |
-| `x` / `//` / `eq ne lt gt` | same (`//=` too; also `==` numeric) |
-| `$obj->method` | `$obj.method()` **UFCS** (any `sub method($obj, …)`) |
-| `bless` / `@ISA` | no classes — `struct` + `multi sub` |
+| `my $x`, `my @a`, `my %h` | same sigils |
+| `our $x` / `state $x` | same |
+| `$_` topic | same (`for`, `given`, bare `say` / `print`) |
+| `@ARGV` `%ENV` | `@*ARGS` / `@ARGV`, `%*ENV` / `%ENV` |
+| `$$` `$0` `$?` `$!` | same; also `$*PID` `$*PROGRAM` `$*OS` |
+| `defined` | `defined($x)`; `Nil` is the undefined value |
+| `.` concat | `~` (`~=` too) |
+| `x` string repeat | same; `xx` repeats lists |
+| `//` `//=` | same |
+| `eq ne lt gt le ge` | same; `== != < >` are numeric |
+| `<=>` / `cmp` | same |
+| `=~` `!~` | same; also smartmatch `~~` |
+| `? :` | `?? !!` (also `?:`) |
+| `& \| ^ << >>` bitwise | `+&` `+\|` `+^` `+<` `+>` |
+| `**` `&&` `\|\|` `and` `or` `not` | same |
+| `1 .. 10` | same |
+| `1 < $x < 10` | same (chained) |
+| `if` `elsif` `else` `unless` | same |
+| `while` `until` | same |
+| `for` / `foreach (@xs)` | `for @xs { }` or `for @xs -> $x { }` |
+| C-style `for (;;)` | `loop (my $i = 0; $i < n; $i++) { }` |
+| `say 1 if $ok` | same modifiers (`if` `unless` `while` `until` `for` `given`) |
+| `last` / `next` | same |
+| `given` / `when` / `default` | same (`when` uses `~~`) |
+| `goto LABEL` / `goto &sub` | same |
+| `sub foo { my $a = shift; }` | `sub foo($a) { }` signatures |
+| `@_` | named / slurpy params (`$head, @tail`) |
+| `$obj->method($a)` | `$obj.method($a)` **UFCS** (any `sub method($obj, …)`) |
+| `sub { }` closures | same |
+| `AUTOLOAD` | same (`$AUTOLOAD`) |
+| records / methods | `struct` + `multi sub` (UFCS) |
+| `@a = (1, 2, 3)` | `@a = [1, 2, 3]` |
+| `%h = (k => 1)` | `%h = { "k" => 1 }` |
+| `$a[0]` `$h{k}` | `$a[0]` `$h{"k"}` |
+| `push pop shift unshift splice` | same |
+| `keys` `values` `map` `grep` `sort` `join` `split` `reverse` | same (+ UFCS: `@a.elems()`, `@a.map(...)`) |
+| `exists $h{$k}` / `delete $h{$k}` | `exists(%h, $k)` / `delete(%h, $k)` |
+| `$#a` | `@a.elems() - 1` |
+| `\$s` `\@a` `\%h` `\&f` / `->` | same; `$a->[0]` `$h->{"k"}`; `ref` / `is_ref` |
+| `"$x"` / `'lit'` | same interpolation |
+| `<<EOF` | same; `<<~EOF` strips indent |
+| `length` `uc` `lc` `substr` `index` `ord` `chr` `sprintf` | same; also `chars` `trim` `tc` `fc` |
+| `chomp` / `chop` | return a new string (do not mutate) |
+| `qw(a b c)` | `[ "a", "b", "c" ]` |
+| `m//` | `=~` / `~~`; `regex_engine("samre")` |
+| `open my $fh, "<", $p` | `$fh = open($p, "r")` (`<` `>` `>>` ok) |
+| `<>` / `readline` | `readline($fh)`; `slurp` / `spurt` for whole files |
+| `-e -f -d -s -r -w` | same |
+| `` `cmd` `` / `qx` / `system` | same (`$?` / `$!`) |
+| `die` `warn` `exit` | same |
+| `chdir` `mkdir` `unlink` `rename` | same |
 | `package Foo;` | same; `%Foo::` stash |
-| TAP `ok` / `is` | built in (`raptor test t/`) |
-| XS | `is native('lib.dll')` NativeCall |
+| `use Foo;` / `require` | same (`lib/`, `raptor_modules/`, `@*INC`) |
+| TAP `ok` / `is` / `prove` | built in; `raptor test t/` |
+| XS / Inline::C | `is native('lib.dll')` NativeCall |
+| `threads` | `start` / `await` / `Channel` |
+| CGI / PSGI | RaptorHP `.phtml` — `raptor -S` (like `php -S`) |
+
+**Not implemented:** `local`, `redo`, `eval STRING` / `eval { }`, `bless` / `@ISA` / Moose / `class` / `has`, prototypes, `wantarray` (no list/scalar context), `s///` / `tr///`.
 
 ```perl
 my $name = "Raptor";
@@ -171,10 +223,19 @@ go test -mod=mod ./...
 .\bin\raptor.exe -S localhost:8000
 .\bin\raptor.exe --wasm --wasm-compiler=go -o web/raptor.wasm
 .\bin\raptor.exe pack examples/raylib_game.rp -o bin/raylib_game.exe
-.\bin\raptor.exe doc perlraptor
+.\bin\raptor.exe doc raptor
 ```
 
 Linux: `go build -o bin/raptor ./cmd/raptor` and the same `test` / `serve` / `-S` commands. Packages: `gcc`, `libsqlite3-dev`, `portaudio` as needed.
+
+Release zips (Windows + Alpine musl, checksums in `dist/`):
+
+```powershell
+.\scripts\build_dist.ps1                  # Windows + WSL Alpine musl + checksums
+.\scripts\build_dist.ps1 -Target Windows  # windows-x86_64.zip only
+# on Alpine / musl:
+sh scripts/build_dist.sh v1.0.0
+```
 
 Rakupp-style kernels: `examples/bench/*.rp`. Memory/time table: [SPEC.md](SPEC.md) §8.
 

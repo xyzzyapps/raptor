@@ -1,0 +1,39 @@
+=begin pod
+
+=TITLE raptor-modules - packages and raptor_modules/
+
+=head1 NAME
+
+raptor-modules - C<package>, C<use>, C<raptor get>
+
+=head1 PACKAGE
+
+    package Foo;
+    # %Foo:: stash
+    package_symbols("Foo");
+    package_get / package_set / package_delete
+    AUTOLOAD / $AUTOLOAD
+
+    unit module Math::Matrix;
+
+=head1 USE AND REQUIRE
+
+    use Math::Matrix;
+    use Acme::Colors;          # raptor_modules/acme-colors/lib/…
+    require "lib/Config.rp";
+
+Search order: C<./>, C<./lib/>, C<./raptor_modules/*/>, C<@*INC>.
+
+=head1 PACKAGE MANAGER
+
+    raptor init my-application     # raptor.json, lib/, raptor_modules/
+    raptor get https://github.com/org/repo
+    raptor install
+
+See F<examples/use_raptor_module_demo.rp>.
+
+=head1 SEE ALSO
+
+L<raptor-syntax>, L<raptorvar>
+
+=end pod

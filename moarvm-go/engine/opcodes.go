@@ -50,6 +50,7 @@ const (
 	OpTakeClosure uint16 = 162
 
 	OpCoerceIS uint16 = 121
+	OpCoerceNS uint16 = 122
 	OpCoerceSI uint16 = 123
 
 	OpNull uint16 = 247
@@ -82,8 +83,14 @@ const (
 	OpAbsI uint16 = 71
 	OpIncI uint16 = 72
 	OpDecI uint16 = 74
-	OpPowI uint16 = 82
-	OpNotI uint16 = 83
+	OpBandI    uint16 = 76
+	OpBorI     uint16 = 77
+	OpBxorI    uint16 = 78
+	OpBnotI    uint16 = 79
+	OpBlshiftI uint16 = 80
+	OpBrshiftI uint16 = 81
+	OpPowI     uint16 = 82
+	OpNotI     uint16 = 83
 
 	OpEqN  uint16 = 86
 	OpNeN  uint16 = 87

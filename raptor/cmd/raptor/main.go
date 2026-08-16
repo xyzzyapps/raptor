@@ -544,26 +544,34 @@ func runTests(paths []string, logger *slog.Logger) {
 		}
 
 		in := raptor.NewInterp()
+		var captured strings.Builder
+		in.SetStdout(&captured)
 		_, err = in.EvalOnBackend(string(content), raptor.DefaultBackend())
+		out := captured.String()
+		fmt.Print(out)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Script error in %s: %v\n", tf, err)
 			totalFailedFiles++
 			continue
 		}
 
+		t, f := 0, 0
 		if summaryFn, ok := in.Builtins["tap_summary"]; ok {
 			sVal, _ := summaryFn(in, nil)
 			if sVal != nil && sVal.Type == raptor.ValHash {
-				t := int(sVal.HashVal["total"].IntVal)
-				f := int(sVal.HashVal["failed"].IntVal)
-				totalTestsRun += t
-				totalTestsFailed += f
-				if f == 0 {
-					totalPassedFiles++
-				} else {
-					totalFailedFiles++
-				}
+				t = int(sVal.HashVal["total"].IntVal)
+				f = int(sVal.HashVal["failed"].IntVal)
 			}
+		}
+		if t == 0 {
+			t, f = parseTAPCounts(out)
+		}
+		totalTestsRun += t
+		totalTestsFailed += f
+		if f == 0 {
+			totalPassedFiles++
+		} else {
+			totalFailedFiles++
 		}
 		fmt.Println()
 	}
@@ -577,17 +585,30 @@ func runTests(paths []string, logger *slog.Logger) {
 	}
 }
 
+func parseTAPCounts(out string) (total, failed int) {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "not ok "):
+			total++
+			failed++
+		case strings.HasPrefix(line, "ok "):
+			total++
+		}
+	}
+	return total, failed
+}
+
 func runDoc(topic string) {
 	if topic == "" {
-		topic = "01_introduction"
+		topic = "raptor-index"
 	}
 	docsDir := filepath.Join(findRaptorModuleRoot(), "docs")
 	candidates := []string{
 		filepath.Join(docsDir, topic+".pod"),
+		filepath.Join(docsDir, "raptor-"+topic+".pod"),
 		filepath.Join(docsDir, topic+".md"),
 		filepath.Join(docsDir, topic),
-		filepath.Join(docsDir, "perlraptor.pod"),
-		filepath.Join(docsDir, "01_introduction.md"),
 	}
 
 	entries, _ := os.ReadDir(docsDir)
@@ -621,8 +642,9 @@ func runDoc(topic string) {
 
 	fmt.Fprintf(os.Stderr, "Documentation topic %q not found in %s\nAvailable topics:\n", topic, docsDir)
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".md") {
-			fmt.Printf("  - %s\n", strings.TrimSuffix(e.Name(), ".md"))
+		name := e.Name()
+		if strings.HasSuffix(name, ".pod") {
+			fmt.Printf("  - %s\n", strings.TrimSuffix(name, ".pod"))
 		}
 	}
 }

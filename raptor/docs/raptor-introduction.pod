@@ -1,0 +1,87 @@
+=begin pod
+
+=TITLE raptor-introduction - philosophy, tour, CLI
+
+=head1 NAME
+
+raptor-introduction - what Raptor is and how to run it
+
+=head1 PHILOSOPHY
+
+=over 4
+
+=item No OOP keywords
+
+No C<class>, C<has>, inheritance, or C<@ISA>. Records are C<struct>.
+
+=item Dynamic variables
+
+C<$scalar>, C<@array>, C<%hash> — Perl 5 sigils, optional C<subset>
+checks.
+
+=item C-ABI structs
+
+Natural C layouts, function-pointer fields, closures.
+
+=item Predicate dispatch
+
+C<subset Positive where { $_ > 0 }> and C<multi sub fib($n where { $n <= 1 })>.
+
+=item UFCS
+
+Any C<sub fn($obj, $arg)> is callable as C<$obj.fn($arg)>.
+
+=back
+
+=head1 QUICK TOUR
+
+=begin code
+
+my $name = "Raptor";
+my @nums = [1, 2, 3, 4, 5];
+my %user = { "name" => "Alice", "role" => "Admin" };
+
+subset Positive where { $_ > 0 };
+my Positive $score = 100;
+
+multi sub solve($n where { $n <= 1 }) { return 1; }
+multi sub solve($n where { $n > 1 })  { return $n * solve($n - 1); }
+
+$_ = $name;
+say;                          # topic
+say 2 ** 10;                  # 1024
+say $user{"role"} // "none";
+say "Factorial of 5: " ~ solve(5);
+
+=end code
+
+=head1 COMMAND LINE
+
+=begin code
+
+raptor app.rp                 # --go interpreter
+raptor --go app.rp
+raptor --moar app.rp          # CompUnit v7; errors if not compilable
+raptor -e 'say 42;'
+raptor test t/                # TAP harness (like prove)
+raptor serve --port 8080      # WASM tour
+raptor -S localhost:8000      # RaptorHP (like php -S)
+raptor -S localhost:8000 -t public
+raptor weave doc.pod -o doc.md
+raptor tangle doc.pod -o src/
+raptor stitch doc.pod src/
+raptor doc raptor
+raptor pack app.rp -o app.exe
+raptor --wasm --wasm-compiler=go -o web/raptor.wasm
+
+=end code
+
+Binaries: C<cmd/raptor> (CLI), C<cmd/raptorhp> (templates),
+C<cmd/wasm> (browser). Bundled DLLs in C<bin/>: C<moar.dll>,
+C<libraylib.dll>, C<sqlite3.dll>.
+
+=head1 SEE ALSO
+
+L<raptor>, L<raptor-backends>, L<raptor-index>
+
+=end pod

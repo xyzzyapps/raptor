@@ -1,0 +1,92 @@
+=begin pod
+
+=TITLE raptorfunc - built-in functions
+
+=head1 NAME
+
+raptorfunc - selected builtins (Perl 5 names where they match)
+
+=head1 OUTPUT
+
+C<say>, C<print> — bare call prints C<$_>. C<say> adds a newline.
+C<sprintf>, C<warn>, C<die>, C<exit>.
+
+=head1 STRINGS
+
+C<chars>, C<codes>, C<length>, C<uc>, C<lc>, C<tc>, C<fc>, C<trim>,
+C<substr>, C<index>, C<rindex>, C<ord>, C<chr>, C<chomp>, C<chop>
+(chomp/chop return a new string), C<split>, C<join>, C<reverse>.
+
+=head1 LISTS AND HASHES
+
+C<elems>, C<push>, C<pop>, C<shift>, C<unshift>, C<splice>,
+C<keys>, C<values>, C<kv>, C<map>, C<grep>, C<sort>, C<reduce>,
+C<exists(%h, $k)>, C<delete(%h, $k)>. Also UFCS: C<@a.elems()>.
+
+=head1 NUMBERS
+
+C<int>/C<Int>, C<num>, C<str>, C<abs>, C<sqrt>, C<sin> C<cos> C<tan>
+C<asin> C<acos> C<atan> C<atan2>, C<log> C<log10> C<exp>,
+C<floor> C<ceil> C<round>, C<min> C<max> (also infix), C<rand>.
+
+=head1 REFS AND DEFINED
+
+C<ref>, C<is_ref>, C<defined>.
+
+=head1 PROCESS
+
+C<system>, C<qx>, backticks, C<getenv>/C<setenv>/C<unsetenv>,
+C<pid>, C<time>, C<now>, C<time_ms>, C<gmtime>, C<localtime>,
+C<cwd>, C<sleep>.
+
+=head1 FILES
+
+C<open>, C<close>, C<readline>, C<slurp>, C<spurt>, C<mkdir>,
+C<rmdir>, C<unlink>, C<rename>, C<copy>, C<dirname>, C<basename>,
+C<abspath>, C<dir>. File tests: C<-e -f -d -s -r -w>.
+
+=head1 JSON / SQLITE
+
+C<to_json>, C<from_json>, C<json_encode>, C<json_decode>.
+C<sqlite_open>, C<sqlite_exec>, C<sqlite_query>, C<sqlite_close>.
+
+=head1 NET
+
+C<tcp_listen>, C<tcp_accept>, C<tcp_connect>, C<tcp_send>, C<tcp_recv>,
+C<tcp_close>, C<udp_bind>, C<udp_send>, C<udp_recv>.
+C<http_get>, C<http_post>, C<http_request>, C<http_server_listen>,
+C<http_format_response>. C<ws_frame_text>, C<ws_parse_frame>.
+
+=head1 TAP
+
+C<plan>, C<ok>, C<is>, C<isnt>, C<is_deeply>, C<like>, C<unlike>,
+C<done_testing>, C<subtest>. See L<raptor-testing>.
+
+=head1 TUI
+
+C<tui_style>, C<tui_box>, C<tui_table>, C<tui_progress>,
+C<tui_markdown>, C<tui_app_run>.
+
+=head1 AUDIO / GPU / TENSORS
+
+WebAudio: C<audio_context_create>, C<audio_create_oscillator>,
+C<audio_create_gain>, C<audio_connect>, C<audio_osc_start>,
+C<audio_get_current_time>, plus filter / compressor / delay.
+C<llm_tiny_load> / C<generate> / C<logits>.
+C<ggml_init>, C<ggml_new_tensor_2d>, C<ggml_mul_mat>,
+C<ggml_graph_compute_with_ctx>.
+PortAudio: C<pa_init>, C<pa_device_count>, C<pa_generate_sine_wave>.
+
+=head1 PODLIT
+
+C<pod_weave>, C<pod_tangle>, C<pod_stitch>.
+
+=head1 PACKAGES
+
+C<package_symbols>, C<package_get>, C<package_set>, C<package_delete>.
+
+=head1 SEE ALSO
+
+L<raptor-io>, L<raptor-tui>, L<raptor-testing>, L<raptor-wasm>
+
+=end pod

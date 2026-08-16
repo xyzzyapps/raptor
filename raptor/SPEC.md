@@ -103,12 +103,12 @@ Eval and the Moar compiler still consume the same AST.
 | Flag | Role |
 | :--- | :--- |
 | `--go` (default) | AST interpreter in `runtime/eval.go` |
-| `--moar` | CompUnit v7 opcodes on `moar.dll` (same family as `moarvm-go` Tcl) |
+| `--moar` | CompUnit v7 on `moar.dll`. No Go fallback — unsupported AST is an error. Scalars, `say`/`print`, control flow, TAP `plan`/`ok`/`is`, and the usual integer/string ops compile natively. |
 | `--wasm` | TinyGo or `GOOS=js GOARCH=wasm` build of `cmd/wasm`; enables browser FFI helpers |
 
 `raptor serve` hosts `web/` (tour + `raptor.wasm`).
 
-Manuals live in `docs/`: PodLit `.pod` (`perlraptor`, `perlvar`, `perlop`, `perlfunc`, `perlpodlit`, `perlre`, `index`) and numbered Markdown chapters. `raptor weave docs/perlraptor.pod` and `raptor weave docs/01_introduction.md` both work (`=begin pod` and ATX `#` headings). `raptor doc perlraptor` weaves Pod then renders it.
+Manuals live in `docs/raptor*.pod` (PodLit only; no `perl*` names, no numbered `.md` chapters). `raptor doc` / `raptor doc raptor` weaves then renders with `tui_markdown`. `raptor weave docs/raptor-index.pod`.
 
 ---
 
@@ -150,25 +150,22 @@ The TAP subsystem (`runtime/tap.go`, `lib/Test/More.raku`) implements the Test A
 
 ## 5. Verification Framework: Inline Tests, Contracts & Fuzzing
 
-The verification engine (`runtime/verification.go`, `docs/09_testing_and_verification.md`) provides:
+The verification engine (`runtime/verification.go`, `docs/raptor-testing.pod`) provides:
 1. **Zero-Overhead Inline Tests (`TEST "desc", sub () { ... }`)**: Skipped with zero overhead in production; executed automatically during `raptor test` or with `--test`.
 2. **Design-by-Contract (`pre`, `post`, `invariant`)**: Preconditions and postconditions checked at subroutine entry/return.
 3. **Property-Based QuickCheck Fuzzing (`property "name", sub ($a, $b) { ... }`)**: Invariant verification across 100 randomized input trials.
 
 ---
 
-## 6. Perl5-Style Markdown Documentation Suite
+## 6. PodLit documentation suite
 
-Comprehensive manual guides in `docs/` readable via `raptor doc <topic>`:
-- `docs/01_introduction.md`: Runtime architecture, philosophy, and quickstart.
-- `docs/02_syntax_and_types.md`: Dynamic variables, first-class closures, and parameter destructuring.
-- `docs/03_operators.md`: Complete guide to all Perl5 & Raku operators.
-- `docs/04_subsets_and_contracts.md`: Dynamic refinement types and Predicate Dispatching.
-- `docs/05_structs_and_ffi.md`: C-ABI structs, function pointers, NativeCall, and Raylib.
-- `docs/06_tui_and_styling.md`: Charmbracelet Lip Gloss styling, boxes, tables, and Bubble Tea.
-- `docs/07_networking_and_io.md`: Sockets, HTTP, WebSockets, SQLite, and JSON.
-- `docs/08_concurrency_and_audio.md`: Promises, Channels, Atomics, and PortAudio audio synthesis.
-- `docs/09_testing_and_verification.md`: TAP test framework, inline tests, and contracts.
+Comprehensive manuals in `docs/` (`raptor doc <topic>`):
+- `docs/raptor.pod` / `raptor-introduction.pod`: identity, Perl 5 map, CLI
+- `docs/raptor-syntax.pod` / `raptor-operators.pod` / `raptorvar.pod` / `raptorfunc.pod` / `raptorre.pod`
+- `docs/raptor-subsets.pod` / `raptor-structs.pod` / `raptor-backends.pod`
+- `docs/raptor-io.pod` / `raptor-tui.pod` / `raptor-concurrency.pod`
+- `docs/raptor-testing.pod` / `raptor-modules.pod` / `raptor-literate.pod`
+- `docs/raptor-wasm.pod` / `docs/raptorhp.pod` / `docs/raptor-index.pod`
 
 ---
 
@@ -191,7 +188,7 @@ Memory is the interpreter’s real budget. `--go` stays a tree-walk; C / `--moar
 5. **`$a OP $b` / `$n OP literal` fast path** in `evalExpr` (ints and `eq`/`lt`/`gt`/`ne`) skips custom-infix maps and the full `evalBinaryOp` type switch.
 6. **`labelMap` only if the block has labels**.
 7. **Homogeneous `int64` array lane** (`Value.Ints`). Ranges (`90..100`), `push` of ints, and `sort` of int lists stay packed — sortnums’s 50k fat Values drop to 50k `int64`s until something needs boxing.
-8. **`--moar` / `pack`**. Pack is the same interpreter in a fatter binary (no speed win). Native opcodes help fib/loopsum when the subset compiler accepts the script.
+8. **`--moar` / `pack`**. `--moar` is native CompUnit v7 only (no silent Go fallback). Pack is the same interpreter in a fatter binary (no speed win).
 
 Flyweights for `Nil` / `True` / `False` / `""` and $O(1)$ C-struct field indexes are unchanged.
 

@@ -1,0 +1,80 @@
+=begin pod
+
+=TITLE raptor-structs - C-ABI records and NativeCall
+
+=head1 NAME
+
+raptor-structs - C<struct>, closures, C<multi sub infix>, FFI
+
+=head1 STRUCT
+
+The only compound record type. Fields have C layouts.
+
+=begin code
+
+struct Point {
+    int32 $x;
+    int32 $y;
+}
+
+my $p = Point.new();
+$p.x = 100;
+$p.y = 200;
+
+=end code
+
+=head1 CLOSURE FIELDS
+
+=begin code
+
+struct Button {
+    int32 $id;
+    ptr $onClick;
+}
+
+my $btn = Button.new();
+$btn.id = 42;
+$btn.onClick = sub ($val) {
+    say "Button " ~ $btn.id ~ " -> " ~ $val;
+};
+$btn.onClick(123);
+
+=end code
+
+=head1 OPERATOR OVERLOADS
+
+=begin code
+
+struct Vec2 { num64 $x; num64 $y; }
+
+multi sub infix:<+>(Vec2 $a, Vec2 $b) {
+    my $res = Vec2.new();
+    $res.x = $a.x + $b.x;
+    $res.y = $a.y + $b.y;
+    return $res;
+}
+
+=end code
+
+=head1 NATIVECALL
+
+=begin code
+
+sub InitWindow(int32 $w, int32 $h, string $title)
+    returns void is native('libraylib.dll') { * }
+sub WindowShouldClose() returns bool is native('libraylib.dll') { * }
+
+=end code
+
+Also C<ffi_load> / C<ffi_call>. Search path: C<bin/>, the exe
+directory, C<PATH>. Bindings live in F<lib/Raylib.rp>, F<lib/GGML.rp>,
+F<lib/PortAudio.rp>, F<lib/Socket.rp>.
+
+    raptor run examples/raylib_game.rp
+    raptor run examples/ggml_tensors.rp
+
+=head1 SEE ALSO
+
+L<raptorfunc>, L<raptor-io>
+
+=end pod

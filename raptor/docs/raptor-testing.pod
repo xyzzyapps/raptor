@@ -1,0 +1,68 @@
+=begin pod
+
+=TITLE raptor-testing - TAP, contracts, QuickCheck
+
+=head1 NAME
+
+raptor-testing - C<raptor test>, Test::More-shaped TAP, C<pre>/C<post>
+
+=head1 TAP
+
+Write C<t/*.t>:
+
+=begin code
+
+plan(6);
+ok(1 + 1 == 2, "Addition holds");
+is(2 * 3, 6, "Multiplication produces 6");
+isnt("alpha", "beta", "different");
+is_deeply([1, 2], [1, 2], "deep");
+like("raptor_1.0.0", "^raptor_", "prefix");
+done_testing();
+
+=end code
+
+    raptor test t/
+
+Also C<unlike>, C<cmp_ok>, C<pass>, C<fail>, C<diag>, C<subtest>,
+C<SUBTEST>. Prefer these over C<use Test::More> (that file is a thin
+wrapper).
+
+=head1 INLINE TEST
+
+C<TEST> blocks are skipped in normal runs; C<raptor test> executes them.
+
+=begin code
+
+sub calculate_tax($subtotal, $rate) { return $subtotal * $rate; }
+
+TEST "calculate_tax", sub () {
+    is(calculate_tax(100.0, 0.05), 5.0, "5% of 100");
+};
+
+=end code
+
+=head1 CONTRACTS
+
+C<pre>, C<post>, C<invariant> (and C<PRE>, C<POST>, C<INVARIANT>,
+C<ASSERT>, C<CHECK>).
+
+=head1 QUICKCHECK
+
+    property "addition commutativity", sub ($a, $b) {
+        return ($a + $b) == ($b + $a);
+    };
+
+One hundred random trials by default.
+
+=head1 BACKENDS
+
+C<raptor --go test t/> is the full harness. C<raptor --moar test>
+only runs files the Moar subset compiler accepts (C<plan>/C<ok>/C<is>,
+no C<is_deeply> / arrays). See L<raptor-backends>.
+
+=head1 SEE ALSO
+
+L<raptor-subsets>, L<raptorfunc>
+
+=end pod

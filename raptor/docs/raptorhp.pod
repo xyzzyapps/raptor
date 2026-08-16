@@ -1,0 +1,53 @@
+=begin pod
+
+=TITLE raptorhp - PHP-style templates
+
+=head1 NAME
+
+raptorhp - C<E<lt>?raptor ?E<gt>> templates and C<raptor -S>
+
+=head1 TAGS
+
+=over 4
+
+=item E<lt>?raptor … ?E<gt>
+
+Code block.
+
+=item E<lt>?rp … ?E<gt>
+
+Short code.
+
+=item E<lt>?= $expr ?E<gt>
+
+Echo expression.
+
+=item E<lt>?php … ?E<gt> / E<lt>? … ?E<gt>
+
+Compatibility / short open.
+
+=back
+
+=head1 CLI
+
+    raptorhp index.phtml
+    raptorhp -r '<h1><?= "hi" ?></h1>'
+    raptor -S localhost:8000
+    raptorhp -S localhost:8000 -t public
+    raptor -S localhost:8000 router.phtml
+
+Same shape as C<php -S>. Serves C<.phtml>, C<.rhtml>, C<.rp>,
+C<.raptor>, C<.html>.
+
+=head1 SUPERGLOBALS
+
+C<%_GET> / C<%*GET>, C<%_POST> / C<%*POST>,
+C<%_SERVER> / C<%*SERVER>, C<%*ENV>.
+
+    <?= %_GET{"q"} // "none" ?>
+
+=head1 SEE ALSO
+
+L<raptor-io>, F<examples/demo_page.rphp>
+
+=end pod

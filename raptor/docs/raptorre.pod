@@ -1,0 +1,42 @@
+=begin pod
+
+=TITLE raptorre - regex, smartmatch, grammars
+
+=head1 NAME
+
+raptorre - matching
+
+=head1 OPERATORS
+
+C<~~> (smartmatch) and C<=~> / C<!~> use the active regex engine.
+
+    if $s ~~ "\\d+" { ... }
+    if $email =~ /^[^@]+@[^@]+$/ { ... }
+
+There is no C<s///> or C<tr///>.
+
+=head1 ENGINES
+
+Default is Go C<regexp>. Switch with:
+
+    regex_engine("samre");
+
+=head1 GRAMMARS
+
+Declarative C<grammar> / C<rule> / C<token> / C<regex> via gcre
+(Raku ⊂ PEG). Host parse of Raptor itself is
+F<runtime/raptor.raku> plus C<E<lt>HOST_stmtE<gt>> /
+C<E<lt>HOST_exprE<gt>>.
+
+    grammar MiniCalc {
+        rule TOP { <statement> }
+        rule statement { <ident> '=' <number> ';' }
+        token ident { \w+ }
+        token number { \d+ }
+    }
+
+=head1 SEE ALSO
+
+L<raptor-operators>, L<raptor-syntax>
+
+=end pod

@@ -1,0 +1,92 @@
+=begin pod
+
+=TITLE raptor-literate - PodLit weave, tangle, stitch
+
+=head1 NAME
+
+raptor-literate - literate programming (Knuth + Entangled-style stitch)
+
+=head1 SYNOPSIS
+
+    raptor weave file.pod -o doc.md
+    raptor tangle file.pod -o out/
+    raptor stitch file.pod changed.rp
+    raptor file.pod              # run tangled main
+
+=head1 DIRECTIVES
+
+=over 4
+
+=item =pod / =begin pod
+
+Start a Pod block.
+
+=item =head1 … =head6
+
+Headings.
+
+=item =item
+
+List item (C<=over> / C<=back> ignored).
+
+=item =chunk E<lt>nameE<gt> [:file "path"] [:mangle(...)]
+
+Named code fragment. Also C<=begin code :tangleE<lt>main.rpE<gt>>.
+
+=item =end chunk / =end code / =cut
+
+End a chunk or the Pod.
+
+=back
+
+Inline: C<B<bold>>, C<I<italic>>, C<C<code>>, C<L<url>>.
+
+=head1 CHUNKS
+
+=begin code
+
+=chunk <vector-type>
+struct Vec2 {
+    num32 $x;
+    num32 $y;
+}
+=end chunk
+
+=chunk <main> :file "bin/app.rp"
+<<vector-type>>
+
+say "Vector initialized";
+=end chunk
+
+=end code
+
+C<E<lt>E<lt>chunk-nameE<gt>E<gt>> expands recursively and keeps the
+caller's indent. Cycles error.
+
+=head1 MANGLE
+
+C<:mangle(indent(4))>, C<:mangle(strip_comments)>,
+C<:mangle(prefix("lib_"))>.
+
+=head1 STITCH
+
+Edits to tangled C<.rp> files write back into the C<.pod> without
+touching prose.
+
+    raptor stitch examples/literate_game.pod src/lib/LiterateTypes.rp
+    raptor stitch examples/literate_game.pod src/ -o updated.pod
+
+=head1 IN-LANGUAGE
+
+    my $md = pod_weave($pod);
+    my %files = pod_tangle($pod);
+    my $new = pod_stitch($pod, %updates);
+
+These manuals are themselves PodLit: C<raptor doc raptor-literate>
+weaves then renders with C<tui_markdown>.
+
+=head1 SEE ALSO
+
+L<raptor-index>, F<examples/literate_game.pod>
+
+=end pod

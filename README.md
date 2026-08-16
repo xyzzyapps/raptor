@@ -5,6 +5,20 @@
 
 A **Perl 5–shaped** language (the dynamic, non-OO subset of Raku): sigils, `$_`, `//`, UFCS, `struct`, `subset`, no `class` / `has`. Go host, optional **MoarVM** backend.
 
+If you know Perl 5, you already know Raptor.
+
+| Perl 5 | Raptor |
+| :--- | :--- |
+| `my $x`, `my @a`, `my %h` | same |
+| `$_` topic | same (`for`, `given`, bare `say`) |
+| `.` concat | `~` |
+| `x` / `//` / `eq ne lt gt` | same (`//=` too; also `==` numeric) |
+| `$obj->method` | `$obj.method()` **UFCS** (any `sub method($obj, …)`) |
+| `bless` / `@ISA` | no classes — `struct` + `multi sub` |
+| `package Foo;` | same; `%Foo::` stash |
+| TAP `ok` / `is` | built in (`raptor test t/`) |
+| XS | `is native('lib.dll')` NativeCall |
+
 ```
 cd raptor
 go build -mod=mod -o bin/raptor.exe ./cmd/raptor

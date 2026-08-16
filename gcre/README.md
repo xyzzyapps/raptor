@@ -44,3 +44,8 @@ go generate
 ```
 
 That runs Pigeon on `raku.peg`. Language authors still only edit `.raku`.
+
+The `.raku` subset stays **1-to-1 with Pigeon PEG** (no action blocks, no LTM).
+Hosts that need syntax outside that subset (Raptor) must keep a
+non-Pigeon escape hatch rather than extending `raku.peg` in ways Pigeon
+cannot generate.

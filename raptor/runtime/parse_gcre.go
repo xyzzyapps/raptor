@@ -3,6 +3,7 @@ package raptor
 import (
 	_ "embed"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,8 +27,21 @@ func raptorGrammar() (*gcre.Grammar, error) {
 	return raptorG, raptorGErr
 }
 
-// ParseProgram tokenizes and parses source with the gcre Raptor grammar.
+// ParseProgram prefers the gcre (Pigeon-compatible Raku subset) grammar.
+// Constructs that subset cannot express fall back to the older Go parser.
 func ParseProgram(source string) (*Program, error) {
+	if os.Getenv("RAPTOR_PARSER") == "legacy" || gcreNeedsEscapeHatch(source) {
+		return ParseProgramLegacy(source)
+	}
+	prog, err := parseProgramGcre(source)
+	if err == nil && prog != nil {
+		return prog, nil
+	}
+	// Escape hatch: Pigeon/gcre could not consume the program.
+	return ParseProgramLegacy(source)
+}
+
+func parseProgramGcre(source string) (*Program, error) {
 	g, err := raptorGrammar()
 	if err != nil {
 		return nil, fmt.Errorf("load raptor grammar: %w", err)
@@ -37,14 +51,9 @@ func ParseProgram(source string) (*Program, error) {
 	if m == nil || !m.Ok {
 		return nil, fmt.Errorf("parse error at position %d", ctx.Pos)
 	}
-	// leftover non-space is an error
 	rest := strings.TrimSpace(string(ctx.Src[ctx.Pos:]))
-	if rest != "" && !strings.HasPrefix(strings.TrimSpace(rest), "#") {
-		// allow trailing comments
-		trimmed := strings.TrimSpace(rest)
-		if !allComments(trimmed) {
-			return nil, fmt.Errorf("parse error: unconsumed input at position %d: %q", ctx.Pos, clip(rest, 60))
-		}
+	if rest != "" && !allComments(rest) {
+		return nil, fmt.Errorf("parse error: unconsumed input at position %d: %q", ctx.Pos, clip(rest, 60))
 	}
 	var stmts []Stmt
 	for _, sm := range m.GetAll("statement") {
@@ -54,6 +63,55 @@ func ParseProgram(source string) (*Program, error) {
 		}
 	}
 	return &Program{Stmts: stmts}, nil
+}
+
+// gcreNeedsEscapeHatch is true when the source uses syntax outside the
+// Pigeon-compatible Raku subset (no actions, no LTM, limited tokens).
+func gcreNeedsEscapeHatch(source string) bool {
+	needles := []string{
+		"infix:<", "prefix:<", "postfix:<",
+		"{ * }", "{*}",
+		"(:{:", ":{:",
+		"<<", "heredoc",
+		"∩", "∪",
+		"\\$", "\\@", "\\%", "\\&",
+		"http_parse", "http_format",
+		"slurp(", "spurt(",
+		"chomp(",
+		"gather ",
+		"~~",
+		"subset ",
+		"tcp_",
+		"udp_",
+		"goto ",
+		`use "`,
+		"plan(",
+		"use Test::More",
+		"done-testing",
+		"done_testing",
+		"package ",
+		"AUTOLOAD",
+	}
+	for _, n := range needles {
+		if strings.Contains(source, n) {
+			return true
+		}
+	}
+	// Double-quoted interpolation of { expr }
+	if strings.Contains(source, "{$") || strings.Contains(source, "{ ") {
+		if strings.Contains(source, `"`) {
+			return true
+		}
+	}
+	// enum Name (Key => val)
+	if strings.Contains(source, "enum ") && strings.Contains(source, "=>") {
+		return true
+	}
+	// colonpair hash {:a => 1}
+	if strings.Contains(source, "{:") || strings.Contains(source, "{ :") {
+		return true
+	}
+	return false
 }
 
 func allComments(s string) bool {

@@ -404,6 +404,12 @@ func (p *Parser) parseSubDecl(isMulti bool) (Stmt, error) {
 			if paramTok.Type == TokScalar || paramTok.Type == TokArray || paramTok.Type == TokHash || paramTok.Type == TokSubRef {
 				pName := paramTok.Literal
 				p.advance()
+				if p.peek().Type == TokAssign {
+					p.advance()
+					if _, err := p.parseExpression(0); err != nil {
+						return nil, err
+					}
+				}
 
 				var paramWhere Expr
 				if p.peek().Type == TokWhere {

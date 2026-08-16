@@ -51,6 +51,7 @@ func (in *Interp) evalUse(u *UseStmt, env *Env) (*Value, error) {
 	}
 
 	// 1. Convert Package::Submodule to filesystem path
+	u.Module = strings.Trim(u.Module, `"'`)
 	relPath := strings.ReplaceAll(u.Module, "::", "/")
 	baseName := filepath.Base(relPath)
 

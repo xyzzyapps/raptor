@@ -77,7 +77,7 @@ func (l *Lexer) NextToken() Token {
 	}
 
 	// Identifiers & Keywords & Types
-	if unicode.IsLetter(ch) || ch == '_' {
+	if unicode.IsLetter(ch) || ch == '_' || ch == '∑' || ch == '∏' || ch == '√' || ch == 'π' || ch == 'τ' {
 		return l.scanIdentOrKeyword()
 	}
 
@@ -497,7 +497,7 @@ func (l *Lexer) scanIdentOrKeyword() Token {
 
 	for l.pos < len(l.src) {
 		ch := l.src[l.pos]
-		if unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_' {
+		if unicode.IsLetter(ch) || unicode.IsDigit(ch) || ch == '_' || ch == '∑' || ch == '∏' || ch == '√' || ch == 'π' || ch == 'τ' {
 			sb.WriteRune(ch)
 			l.advance()
 		} else if ch == ':' {

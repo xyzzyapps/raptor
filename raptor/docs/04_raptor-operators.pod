@@ -90,6 +90,6 @@ if all(10, 20, 30) > 5 { say "all big"; }
 
 =head1 SEE ALSO
 
-L<raptorop> (same topic, short name), L<raptor-syntax>, L<raptorre>
+L<03_raptor-syntax>, L<07_raptorre>
 
 =end pod

@@ -55,7 +55,7 @@ B<Not implemented:> C<local>, C<redo>, C<eval STRING> / C<eval { }>,
 C<bless> / C<@ISA> / Moose / C<class> / C<has>, prototypes,
 C<wantarray>, C<s///> / C<tr///>.
 
-See L<raptor-syntax>, L<raptor-operators>, L<raptorvar>.
+See L<03_raptor-syntax>, L<04_raptor-operators>, L<05_raptorvar>.
 
 =head1 FILE EXTENSIONS
 
@@ -81,8 +81,8 @@ TAP tests (C<raptor test t/>).
 
 =head1 SEE ALSO
 
-L<raptor-index>, L<raptor-introduction>, L<raptor-backends>,
-L<raptorvar>, L<raptorop>, L<raptorfunc>, L<raptorre>,
-L<raptor-literate>
+L<00_raptor-index>, L<02_raptor-introduction>, L<10_raptor-backends>,
+L<05_raptorvar>, L<06_raptorfunc>, L<07_raptorre>,
+L<16_raptor-literate>
 
 =end pod

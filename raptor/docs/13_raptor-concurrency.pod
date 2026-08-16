@@ -53,6 +53,6 @@ See F<lib/PortAudio.rp>.
 
 =head1 SEE ALSO
 
-L<raptor-wasm> (WebAudio node graph), L<raptorfunc>
+L<17_raptor-wasm> (WebAudio node graph), L<06_raptorfunc>
 
 =end pod

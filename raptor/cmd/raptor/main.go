@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"raptor/runtime"
 	goruntime "runtime"
+	"sort"
 	"strings"
 )
 
@@ -202,7 +203,7 @@ func printUsage() {
 	fmt.Println("  raptor tangle <file.pod> [-o out_dir] Tangle literate POD to source code files")
 	fmt.Println("  raptor stitch <file.pod> <source>     Stitch modified source back into literate POD")
 	fmt.Println("  raptor test [t/*.t]                  Run TAP test harness (like prove)")
-	fmt.Println("  raptor doc [topic]                   Read markdown manual documentation")
+	fmt.Println("  raptor doc [01|syntax|…]            Read PodLit manuals (00 index … 18)")
 	fmt.Println("  raptor pack <script.rp> -o app.exe   Package script into standalone executable")
 	fmt.Println("  raptor -e 'say 42;'                  Evaluate inline code")
 	fmt.Println("  raptor compile <source> -o out       Compile script to MoarVM bytecode")
@@ -601,22 +602,42 @@ func parseTAPCounts(out string) (total, failed int) {
 
 func runDoc(topic string) {
 	if topic == "" {
-		topic = "raptor-index"
+		topic = "00"
 	}
 	docsDir := filepath.Join(findRaptorModuleRoot(), "docs")
-	candidates := []string{
-		filepath.Join(docsDir, topic+".pod"),
-		filepath.Join(docsDir, "raptor-"+topic+".pod"),
-		filepath.Join(docsDir, topic+".md"),
-		filepath.Join(docsDir, topic),
+	topicLower := strings.ToLower(topic)
+	if n := len(topicLower); n == 1 && topicLower[0] >= '0' && topicLower[0] <= '9' {
+		topicLower = "0" + topicLower
+		topic = topicLower
 	}
 
 	entries, _ := os.ReadDir(docsDir)
+	var prefixHits, nameHits []string
 	for _, e := range entries {
-		if strings.Contains(strings.ToLower(e.Name()), strings.ToLower(topic)) {
-			candidates = append([]string{filepath.Join(docsDir, e.Name())}, candidates...)
+		name := e.Name()
+		if !strings.HasSuffix(name, ".pod") {
+			continue
+		}
+		base := strings.TrimSuffix(name, ".pod")
+		low := strings.ToLower(name)
+		path := filepath.Join(docsDir, name)
+		if base == topic || low == topicLower+".pod" {
+			prefixHits = append([]string{path}, prefixHits...)
+			continue
+		}
+		if strings.HasPrefix(low, topicLower+"_") || strings.HasPrefix(low, topicLower+"-") {
+			prefixHits = append(prefixHits, path)
+			continue
+		}
+		if strings.Contains(low, topicLower) {
+			nameHits = append(nameHits, path)
 		}
 	}
+	candidates := append(prefixHits, nameHits...)
+	candidates = append(candidates,
+		filepath.Join(docsDir, topic+".pod"),
+		filepath.Join(docsDir, "raptor-"+topic+".pod"),
+	)
 
 	for _, cand := range candidates {
 		content, err := os.ReadFile(cand)
@@ -641,11 +662,16 @@ func runDoc(topic string) {
 	}
 
 	fmt.Fprintf(os.Stderr, "Documentation topic %q not found in %s\nAvailable topics:\n", topic, docsDir)
+	var topics []string
 	for _, e := range entries {
 		name := e.Name()
 		if strings.HasSuffix(name, ".pod") {
-			fmt.Printf("  - %s\n", strings.TrimSuffix(name, ".pod"))
+			topics = append(topics, strings.TrimSuffix(name, ".pod"))
 		}
+	}
+	sort.Strings(topics)
+	for _, t := range topics {
+		fmt.Printf("  - %s\n", t)
 	}
 }
 

@@ -67,6 +67,6 @@ missing.
 
 =head1 SEE ALSO
 
-L<raptorfunc>, L<raptorhp>, F<lib/Socket.rp>
+L<06_raptorfunc>, L<18_raptorhp>, F<lib/Socket.rp>
 
 =end pod

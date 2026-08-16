@@ -108,7 +108,7 @@ Eval and the Moar compiler still consume the same AST.
 
 `raptor serve` hosts `web/` (tour + `raptor.wasm`).
 
-Manuals live in `docs/raptor*.pod` (PodLit only; no `perl*` names, no numbered `.md` chapters). `raptor doc` / `raptor doc raptor` weaves then renders with `tui_markdown`. `raptor weave docs/raptor-index.pod`.
+Manuals live in `docs/00_`…`18_*.pod` (PodLit; numbered reading order). `raptor doc` / `raptor doc 01` weaves then renders with `tui_markdown`. `raptor weave docs/00_raptor-index.pod`.
 
 ---
 
@@ -150,7 +150,7 @@ The TAP subsystem (`runtime/tap.go`, `lib/Test/More.raku`) implements the Test A
 
 ## 5. Verification Framework: Inline Tests, Contracts & Fuzzing
 
-The verification engine (`runtime/verification.go`, `docs/raptor-testing.pod`) provides:
+The verification engine (`runtime/verification.go`, `docs/14_raptor-testing.pod`) provides:
 1. **Zero-Overhead Inline Tests (`TEST "desc", sub () { ... }`)**: Skipped with zero overhead in production; executed automatically during `raptor test` or with `--test`.
 2. **Design-by-Contract (`pre`, `post`, `invariant`)**: Preconditions and postconditions checked at subroutine entry/return.
 3. **Property-Based QuickCheck Fuzzing (`property "name", sub ($a, $b) { ... }`)**: Invariant verification across 100 randomized input trials.
@@ -159,13 +159,11 @@ The verification engine (`runtime/verification.go`, `docs/raptor-testing.pod`) p
 
 ## 6. PodLit documentation suite
 
-Comprehensive manuals in `docs/` (`raptor doc <topic>`):
-- `docs/raptor.pod` / `raptor-introduction.pod`: identity, Perl 5 map, CLI
-- `docs/raptor-syntax.pod` / `raptor-operators.pod` / `raptorvar.pod` / `raptorfunc.pod` / `raptorre.pod`
-- `docs/raptor-subsets.pod` / `raptor-structs.pod` / `raptor-backends.pod`
-- `docs/raptor-io.pod` / `raptor-tui.pod` / `raptor-concurrency.pod`
-- `docs/raptor-testing.pod` / `raptor-modules.pod` / `raptor-literate.pod`
-- `docs/raptor-wasm.pod` / `docs/raptorhp.pod` / `docs/raptor-index.pod`
+Comprehensive manuals in `docs/` (`raptor doc 01` … `raptor doc 18`):
+- `00_raptor-index.pod` — catalog
+- `01_raptor.pod` / `02_raptor-introduction.pod` — identity, Perl 5 map, CLI
+- `03_raptor-syntax.pod` … `09_raptor-structs.pod` — language
+- `10_raptor-backends.pod` … `18_raptorhp.pod` — runtime
 
 ---
 

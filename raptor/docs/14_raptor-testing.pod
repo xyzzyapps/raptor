@@ -59,10 +59,10 @@ One hundred random trials by default.
 
 C<raptor --go test t/> is the full harness. C<raptor --moar test>
 only runs files the Moar subset compiler accepts (C<plan>/C<ok>/C<is>,
-no C<is_deeply> / arrays). See L<raptor-backends>.
+no C<is_deeply> / arrays). See L<10_raptor-backends>.
 
 =head1 SEE ALSO
 
-L<raptor-subsets>, L<raptorfunc>
+L<08_raptor-subsets>, L<06_raptorfunc>
 
 =end pod

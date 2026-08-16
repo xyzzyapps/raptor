@@ -60,7 +60,7 @@ C<http_format_response>. C<ws_frame_text>, C<ws_parse_frame>.
 =head1 TAP
 
 C<plan>, C<ok>, C<is>, C<isnt>, C<is_deeply>, C<like>, C<unlike>,
-C<done_testing>, C<subtest>. See L<raptor-testing>.
+C<done_testing>, C<subtest>. See L<14_raptor-testing>.
 
 =head1 TUI
 
@@ -87,6 +87,6 @@ C<package_symbols>, C<package_get>, C<package_set>, C<package_delete>.
 
 =head1 SEE ALSO
 
-L<raptor-io>, L<raptor-tui>, L<raptor-testing>, L<raptor-wasm>
+L<11_raptor-io>, L<12_raptor-tui>, L<14_raptor-testing>, L<17_raptor-wasm>
 
 =end pod

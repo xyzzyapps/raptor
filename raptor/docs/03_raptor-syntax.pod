@@ -89,6 +89,6 @@ C<$h-E<gt>{"k"}>; C<ref>, C<is_ref>.
 
 =head1 SEE ALSO
 
-L<raptorvar>, L<raptor-operators>, L<raptor-subsets>
+L<05_raptorvar>, L<04_raptor-operators>, L<08_raptor-subsets>
 
 =end pod

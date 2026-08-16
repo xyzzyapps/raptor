@@ -45,6 +45,6 @@ after setting C<$*WASM>.
 
 =head1 SEE ALSO
 
-L<raptor>, L<raptor-wasm>, L<raptor-introduction>
+L<01_raptor>, L<17_raptor-wasm>, L<02_raptor-introduction>
 
 =end pod

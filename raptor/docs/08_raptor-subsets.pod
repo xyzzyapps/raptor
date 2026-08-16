@@ -61,10 +61,10 @@ sub deposit($account, $amount) {
 =end code
 
 Also C<invariant>, C<PRE>, C<POST>, C<INVARIANT>, C<ASSERT>, C<CHECK>.
-See L<raptor-testing>.
+See L<14_raptor-testing>.
 
 =head1 SEE ALSO
 
-L<raptor-syntax>, L<raptor-testing>, L<raptor-structs>
+L<03_raptor-syntax>, L<14_raptor-testing>, L<09_raptor-structs>
 
 =end pod

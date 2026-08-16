@@ -75,6 +75,6 @@ F<lib/PortAudio.rp>, F<lib/Socket.rp>.
 
 =head1 SEE ALSO
 
-L<raptorfunc>, L<raptor-io>
+L<06_raptorfunc>, L<11_raptor-io>
 
 =end pod

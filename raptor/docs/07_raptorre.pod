@@ -37,6 +37,6 @@ C<E<lt>HOST_exprE<gt>>.
 
 =head1 SEE ALSO
 
-L<raptor-operators>, L<raptor-syntax>
+L<04_raptor-operators>, L<03_raptor-syntax>
 
 =end pod

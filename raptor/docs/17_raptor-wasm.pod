@@ -68,6 +68,6 @@ tour page is off.
 
 =head1 SEE ALSO
 
-L<raptor-backends>, L<raptorfunc>, F<examples/webaudio_graph.rp>
+L<10_raptor-backends>, L<06_raptorfunc>, F<examples/webaudio_graph.rp>
 
 =end pod

@@ -70,7 +70,7 @@ raptor -S localhost:8000 -t public
 raptor weave doc.pod -o doc.md
 raptor tangle doc.pod -o src/
 raptor stitch doc.pod src/
-raptor doc raptor
+raptor doc 01
 raptor pack app.rp -o app.exe
 raptor --wasm --wasm-compiler=go -o web/raptor.wasm
 
@@ -82,6 +82,6 @@ C<libraylib.dll>, C<sqlite3.dll>.
 
 =head1 SEE ALSO
 
-L<raptor>, L<raptor-backends>, L<raptor-index>
+L<01_raptor>, L<10_raptor-backends>, L<00_raptor-index>
 
 =end pod

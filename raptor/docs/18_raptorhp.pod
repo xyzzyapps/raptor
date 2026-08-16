@@ -48,6 +48,6 @@ C<%_SERVER> / C<%*SERVER>, C<%*ENV>.
 
 =head1 SEE ALSO
 
-L<raptor-io>, F<examples/demo_page.rphp>
+L<11_raptor-io>, F<examples/demo_page.rphp>
 
 =end pod

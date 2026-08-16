@@ -70,6 +70,6 @@ Currently C<1.0.0>.
 
 =head1 SEE ALSO
 
-L<raptor-syntax>, L<raptor>
+L<03_raptor-syntax>, L<01_raptor>
 
 =end pod

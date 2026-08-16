@@ -34,6 +34,6 @@ See F<examples/use_raptor_module_demo.rp>.
 
 =head1 SEE ALSO
 
-L<raptor-syntax>, L<raptorvar>
+L<03_raptor-syntax>, L<05_raptorvar>
 
 =end pod

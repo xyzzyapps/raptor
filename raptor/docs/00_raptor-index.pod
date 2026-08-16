@@ -1,59 +1,59 @@
 =begin pod
 
-=TITLE raptor-index - Raptor manuals
+=TITLE 00_raptor-index - Raptor manuals
 
 =head1 NAME
 
-raptor-index - catalog of PodLit manuals in F<docs/>
+00_raptor-index - catalog of PodLit manuals in F<docs/>
 
 =head1 SYNOPSIS
 
-    raptor doc
-    raptor doc raptor
-    raptor doc raptor-syntax
-    raptor weave docs/raptor.pod
-    raptor weave docs/raptor-index.pod
+    raptor doc           # this index
+    raptor doc 01        # overview
+    raptor doc 03        # syntax
+    raptor doc syntax    # same (name match)
+    raptor weave docs/00_raptor-index.pod
 
-Every file in this directory is PodLit (C<=begin pod>). There are no
-C<perl*> man-page names and no numbered Markdown chapters.
+Read in order: C<01>, C<02>, C<03>, … C<18>. Every file is PodLit
+(C<=begin pod>).
 
 =head1 LANGUAGE
 
 =over 4
 
-=item L<raptor>
+=item L<01_raptor>
 
 Language overview: identity, Perl 5 map, parse (gcre + HOST), backends.
 
-=item L<raptor-introduction>
+=item L<02_raptor-introduction>
 
 Philosophy, quick tour, CLI.
 
-=item L<raptor-syntax>
+=item L<03_raptor-syntax>
 
 Sigils, C<my>/C<our>/C<state>, signatures, UFCS, refs, control flow.
 
-=item L<raptor-operators>
+=item L<04_raptor-operators>
 
 Operators, file tests, junctions, unicode ops.
 
-=item L<raptorvar>
+=item L<05_raptorvar>
 
 Predefined variables (C<$_>, C<@*ARGS>, C<$*KERNEL>, …).
 
-=item L<raptorfunc>
+=item L<06_raptorfunc>
 
 Built-in functions.
 
-=item L<raptorre>
+=item L<07_raptorre>
 
 Regex, smartmatch, grammars, C<samre>.
 
-=item L<raptor-subsets>
+=item L<08_raptor-subsets>
 
 C<subset>, C<where>, contracts, predicate dispatch.
 
-=item L<raptor-structs>
+=item L<09_raptor-structs>
 
 C-ABI C<struct>, operator overloads, NativeCall / FFI.
 
@@ -63,39 +63,39 @@ C-ABI C<struct>, operator overloads, NativeCall / FFI.
 
 =over 4
 
-=item L<raptor-backends>
+=item L<10_raptor-backends>
 
 C<--go>, C<--moar>, C<--wasm>: what each actually runs.
 
-=item L<raptor-io>
+=item L<11_raptor-io>
 
 Files, sockets, HTTP, WebSockets, SQLite, JSON.
 
-=item L<raptor-tui>
+=item L<12_raptor-tui>
 
 Charmbracelet styling, boxes, tables, Bubble Tea.
 
-=item L<raptor-concurrency>
+=item L<13_raptor-concurrency>
 
 C<start>/C<await>, Channel, atomics, PortAudio.
 
-=item L<raptor-testing>
+=item L<14_raptor-testing>
 
 TAP, C<raptor test>, C<pre>/C<post>, QuickCheck.
 
-=item L<raptor-modules>
+=item L<15_raptor-modules>
 
 C<package>, C<use>, C<raptor get> / C<install>.
 
-=item L<raptor-literate>
+=item L<16_raptor-literate>
 
 PodLit weave / tangle / stitch.
 
-=item L<raptor-wasm>
+=item L<17_raptor-wasm>
 
 WASM tour, canvas, DOM, WebAudio. WebGPU/HTTP tour pages are off.
 
-=item L<raptorhp>
+=item L<18_raptorhp>
 
 PHP-style templates and C<raptor -S>.
 

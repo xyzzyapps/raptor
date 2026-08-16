@@ -10,7 +10,7 @@ A **Perl 5–shaped** dynamic language: the non-OO subset of Raku. No `class`, `
 
 **Backends:** `--go` (default tree-walk), `--moar` (CompUnit v7 on `moar.dll` — no Go fallback; unsupported constructs error), `--wasm` (TinyGo if available, else `GOOS=js`; `--wasm-compiler=go|tinygo`).
 
-**Docs:** PodLit in `docs/raptor*.pod` — `raptor doc`, `raptor doc raptor`, `raptor weave docs/raptor-index.pod`. `raptor pack` embeds gcre + the runtime (`replace gcre => ../gcre`).
+**Docs:** PodLit in `docs/00_`…`18_*.pod` — `raptor doc`, `raptor doc 01`, `raptor weave docs/00_raptor-index.pod`. `raptor pack` embeds gcre + the runtime (`replace gcre => ../gcre`).
 
 If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Raptor uses the **Raku spelling**.
 
@@ -223,7 +223,7 @@ go test -mod=mod ./...
 .\bin\raptor.exe -S localhost:8000
 .\bin\raptor.exe --wasm --wasm-compiler=go -o web/raptor.wasm
 .\bin\raptor.exe pack examples/raylib_game.rp -o bin/raylib_game.exe
-.\bin\raptor.exe doc raptor
+.\bin\raptor.exe doc 01
 ```
 
 Linux: `go build -o bin/raptor ./cmd/raptor` and the same `test` / `serve` / `-S` commands. Packages: `gcc`, `libsqlite3-dev`, `portaudio` as needed.

@@ -82,11 +82,11 @@ touching prose.
     my %files = pod_tangle($pod);
     my $new = pod_stitch($pod, %updates);
 
-These manuals are themselves PodLit: C<raptor doc raptor-literate>
+These manuals are themselves PodLit: C<raptor doc 16>
 weaves then renders with C<tui_markdown>.
 
 =head1 SEE ALSO
 
-L<raptor-index>, F<examples/literate_game.pod>
+L<00_raptor-index>, F<examples/literate_game.pod>
 
 =end pod

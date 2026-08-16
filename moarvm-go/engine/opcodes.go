@@ -49,9 +49,14 @@ const (
 	OpCaptureLex  uint16 = 161
 	OpTakeClosure uint16 = 162
 
+	OpCoerceIN uint16 = 119
+	OpCoerceNI uint16 = 120
 	OpCoerceIS uint16 = 121
 	OpCoerceNS uint16 = 122
 	OpCoerceSI uint16 = 123
+	OpCoerceSN uint16 = 124
+	OpCoerceIs uint16 = 452 // coerce_Is: obj → str
+	OpCoerceIn uint16 = 451 // coerce_In: obj → num
 
 	OpNull uint16 = 247
 
@@ -144,4 +149,50 @@ const (
 	OpContinuationReset   uint16 = 551
 	OpContinuationControl uint16 = 552
 	OpContinuationInvoke  uint16 = 553
+
+	OpSetElemsPos uint16 = 315
+	OpShiftI      uint16 = 306
+	OpShiftN      uint16 = 307
+	OpShiftS      uint16 = 308
+	OpShiftO      uint16 = 309
+	OpUnshiftI    uint16 = 310
+	OpUnshiftN    uint16 = 311
+	OpUnshiftS    uint16 = 312
+	OpUnshiftO    uint16 = 313
+	OpSplice      uint16 = 314
+	OpBootInt      uint16 = 339
+	OpBootNum      uint16 = 340
+	OpBootStr      uint16 = 341
+	OpBootIntArray uint16 = 343
+	OpBootNumArray uint16 = 344
+	OpBootStrArray uint16 = 345
+	OpStat    uint16 = 498
+	OpSeekFH  uint16 = 477
+	OpTellFH  uint16 = 497
+	OpCwd     uint16 = 512
+	OpChdir   uint16 = 501
+	OpGetPID  uint16 = 533
+	OpExit    uint16 = 510
+	OpIsTrueS uint16 = 245
+	OpIsNull  uint16 = 248
+	OpGetCPS  uint16 = 214 // getcp_s: codepoint at index
+
+	OpOpenFH   uint16 = 471
+	OpCloseFH  uint16 = 472
+	OpEofFH    uint16 = 482
+	OpReadFHB  uint16 = 540
+	OpWriteFHB uint16 = 541
+	OpEncode   uint16 = 243
+	OpDecode   uint16 = 244
+
+	OpNativeCallBuild  uint16 = 564
+	OpNativeCallInvoke uint16 = 565
+	OpNativeCallGlobal uint16 = 617
+
+	OpCopyF   uint16 = 460
+	OpRenameF uint16 = 462
+	OpDeleteF uint16 = 463
+	OpExistsF uint16 = 465
+	OpMkdir   uint16 = 466
+	OpRmdir   uint16 = 467
 )

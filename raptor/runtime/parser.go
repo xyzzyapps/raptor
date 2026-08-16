@@ -1766,7 +1766,7 @@ func getPrecedence(tok Token) int {
 		return 1
 	case TokAnd:
 		return 2
-	case TokEqual, TokNotEqual, TokLess, TokLessEq, TokGreater, TokGreaterEq, TokEqStr, TokNeStr, TokLtStr, TokGtStr, TokAngleL, TokAngleR, TokElem, TokNotElem, TokDivisible, TokSmartMatch, TokRegexMatch, TokRegexNotMatch, TokMin, TokMax:
+	case TokEqual, TokNotEqual, TokLess, TokLessEq, TokGreater, TokGreaterEq, TokEqStr, TokNeStr, TokLtStr, TokGtStr, TokAngleL, TokAngleR, TokElem, TokNotElem, TokDivisible, TokSmartMatch, TokRegexMatch, TokRegexNotMatch, TokMin, TokMax, TokCmp:
 		return 4
 	case TokConcat, TokRepeat, TokListRepeat, TokDotDot, TokIntersect, TokUnionOp, TokBitAnd, TokBitOr, TokBitXor, TokBitShiftL, TokBitShiftR:
 		return 5

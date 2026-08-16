@@ -19,16 +19,20 @@ Emits CompUnit v7 and executes it on C<moar.dll> (same opcode family
 as the Tcl frontend in F<../moarvm-go>). There is B<no Go fallback>.
 If the compiler cannot emit valid bytecode, it errors.
 
-Native today: scalars, C<say>/C<print>, C<if>/C<else>/C<unless>/
-C<while>/C<until>/C<loop>/C<last>/C<next>, C<my> and C<+= -= ~= //=>,
-integer and string ops (including C<+& +| +^>, C<x>, C<//>, C<?? !!>,
-C<min>/C<max>, C<%%>), TAP C<plan>/C<ok>/C<is>/C<isnt>/C<done_testing>.
+Native today: scalars, arrays (C<@a[$i]>, C<elems>/C<push>/C<pop>/
+C<shift>, C<xx>), hashes (C<%h{"k"}>, C<exists>/C<delete>), C<for>
+(including postfix), C<given>/C<when>, C<~~>, C<goto LABEL>, C<enum>,
+named subs and closures, UFCS, C<subset>/C<multi>, C<struct> fields as
+hashes, junctions C<any>/C<all>, eager C<gather>/C<take>, substring
+regex via C<index>, C<use> (compile-time include), C<package>,
+NativeCall (C<nativecallbuild>/C<invoke>), C<system>/C<qx>,
+C<slurp>/C<open>/C<spurt>, TAP including C<is_deeply> and C<like>.
 
-Not compiled (hard error): arrays, hashes, C<for>, C<use>, C<struct>,
-C<subset>, C<is_deeply>, C<xx>, FFI, SQLite, regex, UFCS, closures.
+Not compiled (hard error): SQLite, sockets/HTTP, TUI, Perl 5 C<use>,
+and anything else the compiler cannot emit as CompUnit v7.
 
     raptor --moar -e 'say 40 + 2;'     # 42
-    raptor --moar test t/01_operators.t  # fails: is_deeply / xx
+    raptor --moar test t/01_operators.t
 
 =head1 --wasm
 

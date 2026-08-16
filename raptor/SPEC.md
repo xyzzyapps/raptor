@@ -381,9 +381,8 @@ go test ./...                  # Go unit test suites (58 suites in runtime/)
 ### 17.3 Running the Comparative Test Harness
 
 #### 1. Running Native Raptor Execution
-```powershell
-cd c:\Users\manic\Documents\PRODUCTION\LIBS\gperl\raptor
 
+```powershell
 # Run all TAP test suites natively in Raptor
 .\bin\raptor.exe test t/
 

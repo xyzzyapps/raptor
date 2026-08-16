@@ -51,6 +51,7 @@ const (
 	OpPopN         uint16 = 303
 	OpPopS         uint16 = 304
 	OpPopO         uint16 = 305
+	// shift/unshift live next to push/pop in ops.h (306–313).
 	OpAtKeyI       uint16 = 317
 	OpAtKeyN       uint16 = 318
 	OpAtKeyS       uint16 = 319

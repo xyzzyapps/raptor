@@ -95,6 +95,10 @@ func (l *Lexer) NextToken() Token {
 			l.advance(); l.advance(); l.advance()
 			return Token{Type: TokEllipsis, Literal: "...", Line: curLine, Col: curCol}
 		}
+		if triplet == "<=>" {
+			l.advance(); l.advance(); l.advance()
+			return Token{Type: TokCmp, Literal: "<=>", Line: curLine, Col: curCol}
+		}
 	}
 
 	// File test operators: -e, -f, -d, -s, -r, -w
@@ -667,6 +671,8 @@ func (l *Lexer) scanIdentOrKeyword() Token {
 		return Token{Type: TokMin, Literal: lit, Line: curLine, Col: curCol}
 	case "max":
 		return Token{Type: TokMax, Literal: lit, Line: curLine, Col: curCol}
+	case "cmp":
+		return Token{Type: TokCmp, Literal: lit, Line: curLine, Col: curCol}
 	case "given":
 		return Token{Type: TokGiven, Literal: lit, Line: curLine, Col: curCol}
 	case "when":

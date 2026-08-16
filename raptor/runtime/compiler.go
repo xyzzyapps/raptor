@@ -6,9 +6,10 @@ import (
 	"math"
 	"moarvm-go/engine"
 	"strconv"
+	"strings"
 )
 
-const moarMaxLocals = 256
+const moarMaxLocals = 1024
 
 // Compiler emits MoarVM CompUnit v7 bytecode for a Raptor program.
 // It does not fall back to the Go interpreter. Unsupported AST is an error.
@@ -17,6 +18,42 @@ type Compiler struct {
 	frame   *moargo.FrameEmitter
 	regMap  map[string]uint16
 	defMap  map[string]uint16
+	nextReg uint16
+	loops   []loopCtx
+	tapN    uint16
+	tapInit bool
+
+	stack     []compilerFrame
+	subs      map[string]int // name -> frame index
+	subArity  map[string]int
+	subRet    map[string]uint16
+	subParams map[string][]string // param kinds: "int"/"str"/"obj"
+	subClos   map[string]uint16   // mainline register holding takeclosure
+	subLex    map[string]uint16   // mainline lexical of that closure
+	labels    map[string]int32
+	gotoPatch map[string][]int32
+	subsets   map[string]Expr
+	multis    map[string][]*SubDeclStmt
+	structs   map[string]*CStructDeclStmt
+	natives   map[string]*NativeSubDeclStmt
+	pkg       string
+	used      map[string]bool
+	kinds     map[string]string
+	lexMap    map[string]uint16
+	lambdaN   int
+	gathers   []uint16
+	searchDir string
+	grammars  map[string]*GrammarDeclStmt
+	bound     map[string]bool
+}
+
+type compilerFrame struct {
+	frame   *moargo.FrameEmitter
+	regMap  map[string]uint16
+	defMap  map[string]uint16
+	lexMap  map[string]uint16
+	kinds   map[string]string
+	bound   map[string]bool
 	nextReg uint16
 	loops   []loopCtx
 	tapN    uint16
@@ -30,9 +67,10 @@ type loopCtx struct {
 }
 
 type mval struct {
-	reg uint16
-	def uint16
-	typ uint16
+	reg  uint16
+	def  uint16
+	typ  uint16
+	kind string // intarr, strarr, objarr, hash, code, native, struct, junc-any, …
 }
 
 // NewCompiler creates a new Raptor → MoarVM compiler.
@@ -43,11 +81,29 @@ func NewCompiler() *Compiler {
 		f.SetLocalType(i, moargo.RegInt64)
 	}
 	return &Compiler{
-		cu:      cu,
-		frame:   f,
-		regMap:  make(map[string]uint16),
-		defMap:  make(map[string]uint16),
-		nextReg: 0,
+		cu:        cu,
+		frame:     f,
+		regMap:    make(map[string]uint16),
+		defMap:    make(map[string]uint16),
+		nextReg:   0,
+		subs:      make(map[string]int),
+		subArity:  make(map[string]int),
+		subRet:    make(map[string]uint16),
+		subParams: make(map[string][]string),
+		subClos:   make(map[string]uint16),
+		subLex:    make(map[string]uint16),
+		labels:    make(map[string]int32),
+		gotoPatch: make(map[string][]int32),
+		subsets:   make(map[string]Expr),
+		multis:    make(map[string][]*SubDeclStmt),
+		structs:   make(map[string]*CStructDeclStmt),
+		natives:   make(map[string]*NativeSubDeclStmt),
+		used:      make(map[string]bool),
+		kinds:     make(map[string]string),
+		lexMap:    make(map[string]uint16),
+		grammars:  make(map[string]*GrammarDeclStmt),
+		searchDir: ".",
+		bound:     make(map[string]bool),
 	}
 }
 
@@ -181,12 +237,22 @@ func (c *Compiler) bindVar(name string, v mval) error {
 	if err != nil {
 		return err
 	}
-	// First bind may retarget an unused int slot to the value's type.
-	if c.kindOf(reg) != v.typ {
+	// First bind may retarget an unused int slot. Later binds coerce
+	// so a register never changes kind mid-frame (Moar validator).
+	if !c.bound[name] && c.kindOf(reg) != v.typ {
 		c.frame.SetLocalType(int(reg), v.typ)
 	}
+	c.bound[name] = true
 	if err := c.emitMove(reg, v.reg); err != nil {
 		return err
+	}
+	if v.kind != "" {
+		c.kinds[name] = v.kind
+	}
+	if lex, ok := c.lexMap[name]; ok {
+		if int(lex) < len(c.frame.Lexicals) && c.frame.Lexicals[lex].Type == c.kindOf(reg) {
+			c.emitBindLex(lex, 0, reg)
+		}
 	}
 	return c.emitMove(c.defMap[name], v.def)
 }
@@ -204,6 +270,18 @@ func (c *Compiler) coerceS(v mval) (uint16, error) {
 		c.frame.EmitReg(r)
 		c.frame.EmitReg(v.reg)
 		return r, nil
+	case moargo.RegObj:
+		if v.kind == "intarr" || v.kind == "strarr" || v.kind == "objarr" {
+			return c.joinArray(v.reg, v.kind, " ")
+		}
+		r, err := c.tempKind(moargo.RegStr)
+		if err != nil {
+			return 0, err
+		}
+		c.frame.EmitOp(moargo.OpCoerceIs)
+		c.frame.EmitReg(r)
+		c.frame.EmitReg(v.reg)
+		return r, nil
 	default:
 		r, err := c.tempKind(moargo.RegStr)
 		if err != nil {
@@ -213,6 +291,42 @@ func (c *Compiler) coerceS(v mval) (uint16, error) {
 		c.frame.EmitReg(r)
 		c.frame.EmitReg(v.reg)
 		return r, nil
+	}
+}
+
+func (c *Compiler) coerceI(v mval) (uint16, error) {
+	switch v.typ {
+	case moargo.RegInt64:
+		return v.reg, nil
+	case moargo.RegStr:
+		r, err := c.tempKind(moargo.RegInt64)
+		if err != nil {
+			return 0, err
+		}
+		c.frame.EmitOp(moargo.OpCoerceSI)
+		c.frame.EmitReg(r)
+		c.frame.EmitReg(v.reg)
+		return r, nil
+	case moargo.RegNum64:
+		r, err := c.tempKind(moargo.RegInt64)
+		if err != nil {
+			return 0, err
+		}
+		c.frame.EmitOp(moargo.OpCoerceNI)
+		c.frame.EmitReg(r)
+		c.frame.EmitReg(v.reg)
+		return r, nil
+	case moargo.RegObj:
+		r, err := c.tempKind(moargo.RegInt64)
+		if err != nil {
+			return 0, err
+		}
+		c.frame.EmitOp(moargo.OpUnboxI)
+		c.frame.EmitReg(r)
+		c.frame.EmitReg(v.reg)
+		return r, nil
+	default:
+		return v.reg, nil
 	}
 }
 
@@ -288,12 +402,49 @@ func unsupported(node any) error {
 	return fmt.Errorf("moar: unsupported construct %T", node)
 }
 
-// CompileAST compiles statements into a MoarVM compilation unit.
-func (c *Compiler) CompileAST(stmts []Stmt) ([]byte, error) {
+func (c *Compiler) compileStmts(stmts []Stmt) error {
 	for _, stmt := range stmts {
 		if err := c.compileStmt(stmt); err != nil {
-			return nil, err
+			return err
 		}
+	}
+	return nil
+}
+
+// CompileAST compiles statements into a MoarVM compilation unit.
+func (c *Compiler) CompileAST(stmts []Stmt) ([]byte, error) {
+	if _, err := c.allocReg("$_"); err != nil {
+		return nil, err
+	}
+	// $_ is used as both str and int (given, TAP). Keep it a string.
+	c.frame.SetLocalType(int(c.regMap["$_"]), moargo.RegStr)
+	c.bound["$_"] = true
+	// Hoist declarations so calls before the source line still resolve.
+	var rest []Stmt
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *SubDeclStmt, *NativeSubDeclStmt, *EnumDeclStmt, *SubsetDeclStmt, *CStructDeclStmt, *GrammarDeclStmt:
+			if err := c.compileStmt(s); err != nil {
+				return nil, err
+			}
+		case *UseStmt:
+			if err := c.compileUse(s); err != nil {
+				return nil, err
+			}
+		case *PackageDeclStmt:
+			if s.Body != nil {
+				if err := c.compilePackage(s); err != nil {
+					return nil, err
+				}
+			} else {
+				rest = append(rest, stmt)
+			}
+		default:
+			rest = append(rest, stmt)
+		}
+	}
+	if err := c.compileStmts(rest); err != nil {
+		return nil, err
 	}
 	c.frame.EmitOp(moargo.OpReturn)
 	return c.cu.Emit()
@@ -311,20 +462,30 @@ func (c *Compiler) CompileScript(source string) ([]byte, error) {
 func (c *Compiler) compileStmt(stmt Stmt) error {
 	switch s := stmt.(type) {
 	case *VarDeclStmt:
-		if s.Where != nil {
-			return unsupported(s.Where)
-		}
 		if _, err := c.allocReg(s.Name); err != nil {
 			return err
 		}
 		if s.Value == nil {
+			if s.Scope == "our" {
+				_ = c.bindQualified(s.Name)
+			}
 			return nil
 		}
 		v, err := c.compileVal(s.Value)
 		if err != nil {
 			return err
 		}
-		return c.bindVar(s.Name, v)
+		if err := c.bindVar(s.Name, v); err != nil {
+			return err
+		}
+		if s.Scope == "our" {
+			if q := c.qualifyName(s.Name); q != s.Name {
+				if err := c.bindVar(q, v); err != nil {
+					return err
+				}
+			}
+		}
+		return c.checkSubset(s.Type, s.Where, s.Name)
 
 	case *AssignStmt:
 		return c.compileAssign(s)
@@ -362,6 +523,11 @@ func (c *Compiler) compileStmt(stmt Stmt) error {
 		return nil
 
 	case *LabelStmt:
+		c.labels[s.Name] = c.frame.CurrentOffset()
+		for _, p := range c.gotoPatch[s.Name] {
+			c.patchU32(p, uint32(c.frame.CurrentOffset()))
+		}
+		delete(c.gotoPatch, s.Name)
 		if s.Stmt != nil {
 			return c.compileStmt(s.Stmt)
 		}
@@ -408,6 +574,30 @@ func (c *Compiler) compileStmt(stmt Stmt) error {
 	case *ExprStmt:
 		return c.compileExprStmt(s)
 
+	case *ForStmt:
+		return c.compileFor(s)
+	case *GivenStmt:
+		return c.compileGiven(s)
+	case *EnumDeclStmt:
+		return c.compileEnum(s)
+	case *SubDeclStmt:
+		return c.compileSubDecl(s)
+	case *UseStmt:
+		return c.compileUse(s)
+	case *PackageDeclStmt:
+		return c.compilePackage(s)
+	case *SubsetDeclStmt:
+		return c.compileSubsetDecl(s)
+	case *CStructDeclStmt:
+		return c.compileStructDecl(s)
+	case *NativeSubDeclStmt:
+		return c.compileNativeDecl(s)
+	case *GotoStmt:
+		return c.compileGoto(s)
+	case *TakeStmt:
+		return c.compileTake(s)
+	case *GrammarDeclStmt:
+		return c.compileGrammar(s)
 	case *AssertStmt:
 		cond, err := c.compileVal(s.Condition)
 		if err != nil {
@@ -441,6 +631,14 @@ func (c *Compiler) compileStmt(stmt Stmt) error {
 }
 
 func (c *Compiler) compileAssign(s *AssignStmt) error {
+	switch tgt := s.Target.(type) {
+	case *IndexExpr:
+		return c.compileIndexAssign(tgt, s.Op, s.Value)
+	case *HashAccessExpr:
+		return c.compileHashAssign(tgt, s.Op, s.Value)
+	case *MethodCallExpr:
+		return c.compileFieldAssign(tgt, s.Op, s.Value)
+	}
 	ve, ok := s.Target.(*VarExpr)
 	if !ok {
 		return unsupported(s.Target)
@@ -642,6 +840,10 @@ func (c *Compiler) compileModifier(s *ModifierStmt) error {
 	case ModUntil:
 		ws := &WhileStmt{IsUntil: true, Condition: s.Condition, Body: &BlockStmt{Stmts: []Stmt{s.Target}}}
 		return c.compileWhile(ws)
+	case ModFor:
+		return c.compileFor(&ForStmt{Iterable: s.Condition, VarName: s.VarName, Body: &BlockStmt{Stmts: []Stmt{s.Target}}})
+	case ModGiven:
+		return c.compileGiven(&GivenStmt{Topic: s.Condition, Whens: nil, Default: &BlockStmt{Stmts: []Stmt{s.Target}}})
 	default:
 		return unsupported(s)
 	}
@@ -726,13 +928,43 @@ func (c *Compiler) compileVal(expr Expr) (mval, error) {
 			return mval{}, err
 		}
 		if ve, ok := e.Target.(*VarExpr); ok {
-			return mval{reg: c.regMap[ve.Name], def: c.defMap[ve.Name], typ: c.kindOf(c.regMap[ve.Name])}, nil
+			return mval{reg: c.regMap[ve.Name], def: c.defMap[ve.Name], typ: c.kindOf(c.regMap[ve.Name]), kind: c.kinds[ve.Name]}, nil
 		}
-		return mval{}, unsupported(e)
+		return c.compileVal(e.Value)
 	case *InterpStringExpr:
 		return c.compileInterp(e)
 	case *ChainedCompExpr:
 		return c.compileChained(e)
+	case *ArrayLiteralExpr:
+		return c.compileArrayLit(e)
+	case *HashLiteralExpr:
+		return c.compileHashLit(e)
+	case *IndexExpr:
+		return c.compileIndex(e)
+	case *HashAccessExpr:
+		return c.compileHashGet(e)
+	case *MethodCallExpr:
+		return c.compileMethod(e)
+	case *ClosureExpr:
+		return c.compileClosure(e)
+	case *SmartMatchExpr:
+		lv, err := c.compileVal(e.Left)
+		if err != nil {
+			return mval{}, err
+		}
+		rv, err := c.compileVal(e.Right)
+		if err != nil {
+			return mval{}, err
+		}
+		return c.compileSmartMatchVals(lv, rv, e.Right)
+	case *GatherExpr:
+		return c.compileGather(e)
+	case *BacktickExpr:
+		return c.compileBacktick(e)
+	case *RefExpr:
+		return c.compileVal(e.Expr)
+	case *DerefExpr:
+		return c.compileDeref(e)
 	default:
 		return mval{}, unsupported(expr)
 	}
@@ -817,12 +1049,48 @@ func (c *Compiler) compileName(name string) (mval, error) {
 			return mval{}, err
 		}
 		return c.definedVal(r, moargo.RegInt64)
+	case "Int", "Str", "Num", "Array", "Hash", "Bool":
+		r, err := c.constS(name)
+		if err != nil {
+			return mval{}, err
+		}
+		return c.definedVal(r, moargo.RegStr)
+	}
+	if strings.HasPrefix(name, "%") && strings.HasSuffix(name, "::") {
+		pkg := strings.TrimPrefix(name, "%")
+		pkg = strings.TrimPrefix(pkg, "::")
+		pkg = strings.TrimSuffix(pkg, "::")
+		return c.builtinPkgSymbols([]Expr{&LiteralExpr{Type: TokString, Value: pkg}})
+	}
+	if reg, ok := c.regMap[name]; ok {
+		return mval{reg: reg, def: c.defMap[name], typ: c.kindOf(reg), kind: c.kinds[name]}, nil
+	}
+	// Capture from an outer frame lexical.
+	outers := uint16(1)
+	for i := len(c.stack) - 1; i >= 0; i-- {
+		if lex, ok := c.stack[i].lexMap[name]; ok {
+			typ := moargo.RegInt64
+			if r, ok := c.stack[i].regMap[name]; ok && int(r) < len(c.stack[i].frame.LocalTypes) {
+				typ = c.stack[i].frame.LocalTypes[r]
+			}
+			dst, err := c.tempKind(typ)
+			if err != nil {
+				return mval{}, err
+			}
+			c.emitGetLex(dst, lex, outers)
+			def, err := c.constI(1)
+			if err != nil {
+				return mval{}, err
+			}
+			return mval{reg: dst, def: def, typ: typ, kind: c.stack[i].kinds[name]}, nil
+		}
+		outers++
 	}
 	reg, err := c.allocReg(name)
 	if err != nil {
 		return mval{}, err
 	}
-	return mval{reg: reg, def: c.defMap[name], typ: c.kindOf(reg)}, nil
+	return mval{reg: reg, def: c.defMap[name], typ: c.kindOf(reg), kind: c.kinds[name]}, nil
 }
 
 func (c *Compiler) compileUnary(e *UnaryExpr) (mval, error) {
@@ -863,6 +1131,12 @@ func (c *Compiler) compileBinary(e *BinaryExpr) (mval, error) {
 		return c.compileOr(e)
 	case "//", "orelse":
 		return c.compileDefinedOr(e)
+	}
+	if k, args, ok := junctionOf(e.Right); ok {
+		return c.compileJunctionCmp(e.Op, e.Left, k, args, false)
+	}
+	if k, args, ok := junctionOf(e.Left); ok {
+		return c.compileJunctionCmp(e.Op, e.Right, k, args, true)
 	}
 
 	l, err := c.compileVal(e.Left)
@@ -922,6 +1196,24 @@ func (c *Compiler) compileBinary(e *BinaryExpr) (mval, error) {
 	if e.Op == "min" || e.Op == "max" {
 		return c.compileMinMax(e.Op == "min", l, r)
 	}
+	if e.Op == ".." {
+		return c.compileRange(l, r)
+	}
+	if e.Op == "xx" {
+		return c.compileXX(l, r)
+	}
+	if e.Op == "<=>" || e.Op == "cmp" {
+		return c.compileCmp(e.Op == "cmp", l, r)
+	}
+	if e.Op == "~~" {
+		return c.compileSmartMatchVals(l, r, e.Right)
+	}
+	if e.Op == "=~" {
+		return c.compileRegexMatch(l, r, false)
+	}
+	if e.Op == "!~" {
+		return c.compileRegexMatch(l, r, true)
+	}
 
 	dst, err := c.tempKind(moargo.RegInt64)
 	if err != nil {
@@ -946,10 +1238,18 @@ func (c *Compiler) compileBinary(e *BinaryExpr) (mval, error) {
 		c.frame.EmitReg(rs)
 		return c.definedVal(dst, moargo.RegInt64)
 	}
+	li, err := c.coerceI(l)
+	if err != nil {
+		return mval{}, err
+	}
+	ri, err := c.coerceI(r)
+	if err != nil {
+		return mval{}, err
+	}
 	c.frame.EmitOp(op)
 	c.frame.EmitReg(dst)
-	c.frame.EmitReg(l.reg)
-	c.frame.EmitReg(r.reg)
+	c.frame.EmitReg(li)
+	c.frame.EmitReg(ri)
 	return c.definedVal(dst, moargo.RegInt64)
 }
 
@@ -1248,6 +1548,35 @@ func (c *Compiler) compileCall(e *CallExpr) (mval, error) {
 		c.frame.EmitReg(dst)
 		c.frame.EmitReg(v.reg)
 		return c.definedVal(dst, moargo.RegInt64)
+	case "ord":
+		if len(e.Args) < 1 {
+			z, err := c.constI(0)
+			if err != nil {
+				return mval{}, err
+			}
+			return c.definedVal(z, moargo.RegInt64)
+		}
+		v, err := c.compileVal(e.Args[0])
+		if err != nil {
+			return mval{}, err
+		}
+		s, err := c.coerceS(v)
+		if err != nil {
+			return mval{}, err
+		}
+		z, err := c.constI(0)
+		if err != nil {
+			return mval{}, err
+		}
+		dst, err := c.tempKind(moargo.RegInt64)
+		if err != nil {
+			return mval{}, err
+		}
+		c.frame.EmitOp(moargo.OpGetCPS)
+		c.frame.EmitReg(dst)
+		c.frame.EmitReg(s)
+		c.frame.EmitReg(z)
+		return c.definedVal(dst, moargo.RegInt64)
 	case "chars", "length":
 		if len(e.Args) < 1 {
 			z, err := c.constI(0)
@@ -1336,7 +1665,7 @@ func (c *Compiler) compileCall(e *CallExpr) (mval, error) {
 		}
 		return c.definedVal(v.def, moargo.RegInt64)
 	default:
-		return mval{}, fmt.Errorf("moar: unsupported call %s", name)
+		return c.compileCallDispatch(name, e)
 	}
 }
 

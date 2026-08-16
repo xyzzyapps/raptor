@@ -92,6 +92,7 @@ const (
 	TokDivisible // %%
 	TokMin // min
 	TokMax // max
+	TokCmp // cmp / <=>
 	TokFileTest // -e, -f, -d, -s, -r, -w
 	TokFatArrow    // =>
 	TokArrow       // ->

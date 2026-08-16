@@ -691,6 +691,14 @@ body {
   cursor: grabbing;
 }
 
+#wasmWebGPUCanvas {
+  background: #0b1220;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+}
+
 /* DOM Viewport */
 .dom-preview-wrapper {
   flex: 1;

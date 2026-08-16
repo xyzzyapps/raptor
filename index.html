@@ -136,8 +136,17 @@
             <option value="9">10. PodLit Literate Programming</option>
             <option value="10">11. HTML5 Canvas 2D Graphics</option>
             <option value="11">12. WebGL 3D Hardware Graphics</option>
-            <option value="12">13. WebAudio Sound Synthesizer</option>
+            <option value="12">13. WebAudio Node Graph &amp; Timeline</option>
             <option value="13">14. Full-Stack In-Browser App</option>
+            <option value="14">15. Topic variable $_ and Unicode math</option>
+            <option value="15">16. Scoping: my, our, state</option>
+            <option value="16">17. Statement modifiers, labels, goto</option>
+            <option value="17">18. Contextual variables</option>
+            <option value="18">19. References</option>
+            <option value="19">20. Packages and AUTOLOAD</option>
+            <option value="20">21. Grammars (gcre)</option>
+            <option value="21">22. TAP tests</option>
+            <option value="22">23. Lists, hashes, and backends</option>
           </select>
         </div>
         <button id="btnNextLesson" class="header-stepper-btn" title="Next Page (&rarr;)">&gt;</button>
@@ -199,6 +208,7 @@
           <button id="tabConsole" class="view-switch-btn active">Output</button>
           <button id="tabCanvas" class="view-switch-btn">Canvas 2D</button>
           <button id="tabWebGL" class="view-switch-btn">WebGL 3D</button>
+          <button id="tabWebGPU" class="view-switch-btn" hidden>WebGPU</button>
           <button id="tabDom" class="view-switch-btn">Live DOM</button>
         </div>
 
@@ -235,7 +245,14 @@
           </div>
         </div>
 
-        <!-- Viewport 4: Live DOM Inspector -->
+        <!-- Viewport 4: WebGPU compute / tiny LLM -->
+        <div id="webgpuView" class="output-view-pane">
+          <div class="canvas-center-wrapper">
+            <canvas id="wasmWebGPUCanvas" width="640" height="320"></canvas>
+          </div>
+        </div>
+
+        <!-- Viewport 5: Live DOM Inspector -->
         <div id="domView" class="output-view-pane">
           <div class="dom-preview-wrapper">
             <div id="wasmDomContainer">
@@ -252,6 +269,7 @@
 
   <!-- Runtime Scripts -->
   <script src="wasm_exec.js"></script>
+  <script src="raptor_bridge.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

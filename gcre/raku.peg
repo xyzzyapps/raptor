@@ -29,7 +29,10 @@ RxAngle <- "<" DotOpt AngleBody ">"
 
 DotOpt <- "." / ""
 
-AngleBody <- ClassSpec / NameTok
+AngleBody <- ClassSpec / HostName / NameTok
+
+# Organic host hatch. Still PEG. Spelled <HOST_name> in .raku.
+HostName <- "HOST_" NameTok
 
 ClassSpec <- "-"? "[" ClassInner "]"
 

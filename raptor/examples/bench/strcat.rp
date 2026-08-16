@@ -1,0 +1,6 @@
+# 50_000 concatenations
+my $s = "";
+loop (my $i = 1; $i <= 50000; $i += 1) {
+    $s = $s ~ "x";
+}
+say $s.chars();

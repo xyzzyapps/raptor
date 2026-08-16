@@ -1,0 +1,9 @@
+# 1M string eq/lt
+my $a = "delta";
+my $b = "delt" ~ "a";
+my $c = 0;
+loop (my $i = 1; $i <= 1000000; $i += 1) {
+    if $a eq $b { $c = $c + 1; }
+    if $a lt $b { $c = $c - 1; }
+}
+say $c;

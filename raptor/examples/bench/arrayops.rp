@@ -1,0 +1,8 @@
+# grep %% 3, map +1, sum over 1..200000
+my $result = 0;
+loop (my $i = 1; $i <= 200000; $i += 1) {
+    if $i %% 3 {
+        $result = $result + ($i + 1);
+    }
+}
+say $result;

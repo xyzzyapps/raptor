@@ -1,0 +1,12 @@
+# 100_000 hash increments
+my %counts = {};
+loop (my $i = 1; $i <= 100000; $i += 1) {
+    my $k = $i % 1000;
+    my $v = %counts{$k};
+    if $v {
+        %counts{$k} = $v + 1;
+    } else {
+        %counts{$k} = 1;
+    }
+}
+say %counts.elems(), " ", %counts{0};

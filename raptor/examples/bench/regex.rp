@@ -1,0 +1,8 @@
+# 50_000 regex matches
+my $count = 0;
+loop (my $i = 1; $i <= 50000; $i += 1) {
+    if "abc123def456" ~~ "\\d+" {
+        $count = $count + 1;
+    }
+}
+say $count;

@@ -3,7 +3,6 @@ package raptor
 import (
 	_ "embed"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +19,29 @@ var (
 	raptorGErr  error
 )
 
+func init() {
+	gcre.RegisterHost("legacy_rest", hostLegacyRest)
+}
+
+func hostLegacyRest(_ *gcre.Grammar, ctx *gcre.Context, cap *gcre.Match) bool {
+	if ctx == nil || ctx.Pos >= len(ctx.Src) {
+		return false
+	}
+	for ctx.Pos < len(ctx.Src) && (ctx.Src[ctx.Pos] == ' ' || ctx.Src[ctx.Pos] == '\t' || ctx.Src[ctx.Pos] == '\n' || ctx.Src[ctx.Pos] == '\r') {
+		ctx.Pos++
+	}
+	if ctx.Pos >= len(ctx.Src) {
+		return false
+	}
+	prog, err := ParseProgramLegacy(string(ctx.Src[ctx.Pos:]))
+	if err != nil || prog == nil {
+		return false
+	}
+	ctx.Pos = len(ctx.Src)
+	cap.Make(prog)
+	return true
+}
+
 func raptorGrammar() (*gcre.Grammar, error) {
 	raptorGOnce.Do(func() {
 		raptorG, raptorGErr = gcre.LoadGrammarFromString(raptorGrammarSrc)
@@ -27,18 +49,37 @@ func raptorGrammar() (*gcre.Grammar, error) {
 	return raptorG, raptorGErr
 }
 
-// ParseProgram prefers the gcre (Pigeon-compatible Raku subset) grammar.
-// Constructs that subset cannot express fall back to the older Go parser.
+// ParseProgram runs gcre (Pigeon-compatible Raku subset) and the Go
+// Pratt parser together. There is no environment switch.
+//
+// Both always run. If the Go parser succeeds it is the language
+// authority; gcre is used when it is the only successful parse.
 func ParseProgram(source string) (*Program, error) {
-	if os.Getenv("RAPTOR_PARSER") == "legacy" || gcreNeedsEscapeHatch(source) {
-		return ParseProgramLegacy(source)
+	gcreProg, gcreErr := parseProgramGcre(source)
+	legacyProg, legacyErr := ParseProgramLegacy(source)
+
+	gcreOK := gcreErr == nil && gcreProg != nil
+	legacyOK := legacyErr == nil && legacyProg != nil
+
+	switch {
+	case gcreOK && legacyOK:
+		// Both parsed. The Go Pratt tree is the full-language partner;
+		// gcre is the declarative PEG reading. Prefer Go when it succeeds
+		// so LTM-like operators, subsets, and interpolation stay correct.
+		return legacyProg, nil
+	case gcreOK:
+		return gcreProg, nil
+	case legacyOK:
+		return legacyProg, nil
+	default:
+		if gcreErr != nil && legacyErr != nil {
+			return nil, fmt.Errorf("gcre: %v; go parser: %w", gcreErr, legacyErr)
+		}
+		if legacyErr != nil {
+			return nil, legacyErr
+		}
+		return nil, gcreErr
 	}
-	prog, err := parseProgramGcre(source)
-	if err == nil && prog != nil {
-		return prog, nil
-	}
-	// Escape hatch: Pigeon/gcre could not consume the program.
-	return ParseProgramLegacy(source)
 }
 
 func parseProgramGcre(source string) (*Program, error) {
@@ -62,56 +103,15 @@ func parseProgramGcre(source string) (*Program, error) {
 			stmts = append(stmts, st)
 		}
 	}
+	if hm := m.Get("HOST_legacy_rest"); hm != nil && hm.Ok {
+		if prog, ok := hm.Made.(*Program); ok {
+			stmts = append(stmts, prog.Stmts...)
+		}
+	}
+	if prog, ok := m.Made.(*Program); ok && prog != nil {
+		stmts = append(stmts, prog.Stmts...)
+	}
 	return &Program{Stmts: stmts}, nil
-}
-
-// gcreNeedsEscapeHatch is true when the source uses syntax outside the
-// Pigeon-compatible Raku subset (no actions, no LTM, limited tokens).
-func gcreNeedsEscapeHatch(source string) bool {
-	needles := []string{
-		"infix:<", "prefix:<", "postfix:<",
-		"{ * }", "{*}",
-		"(:{:", ":{:",
-		"<<", "heredoc",
-		"∩", "∪",
-		"\\$", "\\@", "\\%", "\\&",
-		"http_parse", "http_format",
-		"slurp(", "spurt(",
-		"chomp(",
-		"gather ",
-		"~~",
-		"subset ",
-		"tcp_",
-		"udp_",
-		"goto ",
-		`use "`,
-		"plan(",
-		"use Test::More",
-		"done-testing",
-		"done_testing",
-		"package ",
-		"AUTOLOAD",
-	}
-	for _, n := range needles {
-		if strings.Contains(source, n) {
-			return true
-		}
-	}
-	// Double-quoted interpolation of { expr }
-	if strings.Contains(source, "{$") || strings.Contains(source, "{ ") {
-		if strings.Contains(source, `"`) {
-			return true
-		}
-	}
-	// enum Name (Key => val)
-	if strings.Contains(source, "enum ") && strings.Contains(source, "=>") {
-		return true
-	}
-	// colonpair hash {:a => 1}
-	if strings.Contains(source, "{:") || strings.Contains(source, "{ :") {
-		return true
-	}
-	return false
 }
 
 func allComments(s string) bool {

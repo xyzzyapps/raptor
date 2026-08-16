@@ -21,6 +21,9 @@ Raptor's predicate type, continuous contract, and literate programming systems a
 - **Patrick Maxim Rondon (PhD Thesis, UC San Diego, 2012)**: *Liquid Types* (supervised by Ranjit Jhala, built on Frank Pfenning's 1991 *Refinement Types for ML*). Refinement types via predicate subtyping where standard base types are enriched with logical predicates evaluated against values and assignments.
 - **Johan Hidding (Netherlands eScience Center, 2023)**: *Entangled, a Bidirectional System for Sustainable Literate Programming*, 2023 IEEE 19th International Conference on e-Science (e-Science), pp. 1-10, [DOI: 10.1109/e-Science58273.2023.10254816](https://doi.org/10.1109/e-Science58273.2023.10254816). Formulated the model and grammar for bidirectional, round-trip literate programming where external code modifications are synchronized and reverse-stitched back into literate narrative documents without disturbing narrative prose.
 
+### 3. [gcre (`gcre/`)](gcre/README.md)
+**Grammar Compatible Regular Expressions** — a **subset of Raku** that is **PEG-compatible** (1-to-1 with Pigeon). Authors write `.raku` (no action blocks). Unique feature: organic host hatches `<HOST_name>` so a grammar can name a Go matcher (for example Pratt / LTM leftovers) without breaking Pigeon.
+
 ## Core Subprojects
 
 ### 1. [Raptor (`raptor/`)](raptor/README.md)
@@ -38,8 +41,8 @@ Raptor is the core execution platform and post-LLM language runtime:
 A high-performance Go host and FFI binding for **MoarVM** (64-bit 6Model JIT virtual machine via `moar.dll`).
 - **CompUnit v7 Emitter**: Serializes valid binary bytecode with Serialization Contexts (SC), frame tables, and register descriptors.
 - **Metamodel (6Model)**: Pluggable object representations (`P6opaque`, `MVMArray`, `MVMHash`).
-- **Declarative Raku Grammars**: Pure-Go pattern matching and Pratt operator precedence parsing engine.
-- **Tcl Reference Frontend**: Strict Tcl language implementation with C and Go FFI.
+- **gcre grammars**: Tcl (`tcl/tcl.raku`) is loaded via gcre; CompUnit v7 runs on `moar.dll`.
+- **Tcl Reference Frontend**: Tcl frontend that parses with gcre and emits real MoarVM opcodes.
 
 ## Quickstart Feature Tutorial
 

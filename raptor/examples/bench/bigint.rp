@@ -1,0 +1,6 @@
+# factorial(500) digit count — 5000 is too slow without native BigInt
+my $f = 1;
+loop (my $i = 1; $i <= 500; $i += 1) {
+    $f = $f * $i;
+}
+say $f.chars();

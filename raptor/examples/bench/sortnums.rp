@@ -1,0 +1,7 @@
+# sort 50_000 pseudo-random ints
+my @nums = [];
+loop (my $i = 1; $i <= 50000; $i += 1) {
+    push(@nums, ($i * 2654435761) % 100000);
+}
+my @sorted = @nums.sort();
+say @sorted[0], " ", @sorted[49999], " ", @sorted.elems();

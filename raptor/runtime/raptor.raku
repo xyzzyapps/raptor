@@ -2,7 +2,7 @@
 # Subset of Raku that is PEG-compatible. No action blocks.
 
 grammar Raptor {
-    rule TOP { <statement>* }
+    rule TOP { <statement>* <HOST_legacy_rest>? }
 
     token comment { '#' <-[\n]>* }
 

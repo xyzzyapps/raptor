@@ -352,7 +352,9 @@ func packScript(srcPath, outPath string) {
 	defer os.RemoveAll(tempDir)
 
 	raptorRoot := findRaptorModuleRoot()
-	moarvmRoot := filepath.Join(filepath.Dir(raptorRoot), "moarvm-go")
+	parent := filepath.Dir(raptorRoot)
+	moarvmRoot := filepath.Join(parent, "moarvm-go")
+	gcreRoot := filepath.Join(parent, "gcre")
 
 	goModContent := fmt.Sprintf(`module raptorapp
 
@@ -361,11 +363,13 @@ go 1.22
 require (
 	raptor v0.0.0
 	moarvm-go v0.0.0
+	gcre v0.0.0
 )
 
 replace raptor => %s
 replace moarvm-go => %s
-`, strings.ReplaceAll(raptorRoot, "\\", "/"), strings.ReplaceAll(moarvmRoot, "\\", "/"))
+replace gcre => %s
+`, strings.ReplaceAll(raptorRoot, "\\", "/"), strings.ReplaceAll(moarvmRoot, "\\", "/"), strings.ReplaceAll(gcreRoot, "\\", "/"))
 
 
 	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goModContent), 0644); err != nil {
@@ -401,7 +405,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	cmd := exec.Command("go", "build", "-o", absOut, ".")
+	cmd := exec.Command("go", "build", "-mod=mod", "-o", absOut, ".")
 	cmd.Dir = tempDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -1,30 +1,11 @@
-# Breakout — full CFFI workout for Raylib (keyboard, mouse, collision, timing).
-# Requires libraylib.dll next to the raptor binary (or on PATH).
+# Breakout — Raylib CFFI. Scalars in the hot loop (no per-frame
+# struct alloc / infix:<+>) so the interpreter can hold 60 FPS.
 
 struct Color {
     uint8 $r;
     uint8 $g;
     uint8 $b;
     uint8 $a;
-}
-
-struct Vec2 {
-    num64 $x;
-    num64 $y;
-}
-
-struct Rect {
-    num64 $x;
-    num64 $y;
-    num64 $w;
-    num64 $h;
-}
-
-multi sub infix:<+>(Vec2 $a, Vec2 $b) {
-    my $res = Vec2.new();
-    $res.x = $a.x + $b.x;
-    $res.y = $a.y + $b.y;
-    return $res;
 }
 
 sub InitWindow(int32 $width, int32 $height, Str $title) returns void is native('libraylib.dll') { * }
@@ -40,152 +21,115 @@ sub DrawRectangle(int32 $x, int32 $y, int32 $w, int32 $h, Color $color) returns 
 sub DrawText(Str $text, int32 $x, int32 $y, int32 $size, Color $color) returns void is native('libraylib.dll') { * }
 sub DrawFPS(int32 $x, int32 $y) returns void is native('libraylib.dll') { * }
 sub IsKeyDown(int32 $key) returns bool is native('libraylib.dll') { * }
-sub IsKeyPressed(int32 $key) returns bool is native('libraylib.dll') { * }
-sub IsMouseButtonDown(int32 $btn) returns bool is native('libraylib.dll') { * }
 sub GetMouseX() returns int32 is native('libraylib.dll') { * }
-sub GetMouseY() returns int32 is native('libraylib.dll') { * }
-sub CheckCollisionCircleRec(num64 $cx, num64 $cy, num64 $radius, num64 $rx, num64 $ry, num64 $rw, num64 $rh) returns bool is native('libraylib.dll') is symbol('CheckCollisionCircleRec') { * }
 
-sub mkcolor($r, $g, $b) {
+sub mkc($r, $g, $b) {
     my $c = Color.new();
     $c.r = $r; $c.g = $g; $c.b = $b; $c.a = 255;
     return $c;
 }
 
-my $KEY_LEFT = 263;
-my $KEY_RIGHT = 262;
-my $KEY_A = 65;
-my $KEY_D = 68;
-my $KEY_SPACE = 32;
-my $MOUSE_LEFT = 0;
-
-my $W = 960;
-my $H = 640;
-InitWindow($W, $H, "Raptor Breakout — Raylib CFFI");
+my $W = 900;
+my $H = 650;
+InitWindow($W, $H, "Raptor Breakout");
 SetTargetFPS(60);
 
-my $bg = mkcolor(12, 18, 32);
-my $fg = mkcolor(226, 232, 240);
-my $accent = mkcolor(56, 189, 248);
-my $ballC = mkcolor(244, 63, 94);
-my $paddleC = mkcolor(74, 222, 128);
-my $brickC = mkcolor(250, 204, 21);
-my $deadC = mkcolor(51, 65, 85);
+my $bg = mkc(15, 23, 42);
+my $cyan = mkc(56, 189, 248);
+my $mag = mkc(244, 63, 94);
+my $yel = mkc(250, 204, 21);
+my $grn = mkc(74, 222, 128);
+my $wht = mkc(248, 250, 252);
 
-my $px = 400.0;
+my $bx = 450.0;
+my $by = 280.0;
+my $vx = 260.0;
+my $vy = 200.0;
+my $br = 12.0;
 my $pw = 140.0;
 my $ph = 16.0;
-my $py = $H - 48.0;
-
-my $bx = 480.0;
-my $by = 400.0;
-my $br = 10.0;
-my $vx = 280.0;
-my $vy = -320.0;
-my $live = 1;
-
-my $cols = 10;
-my $rows = 5;
-my $bw = 84.0;
-my $bh = 22.0;
-my $alive = [];
-my $i = 0;
-while $i < $cols * $rows {
-    push($alive, 1);
-    $i = $i + 1;
-}
-
+my $px = 380.0;
 my $score = 0;
 my $lives = 3;
-my $won = 0;
 
-say "Breakout: arrows/A-D or mouse to move, Space to serve. Close the window to quit.";
+# Precomputed brick rectangles (8 x 4)
+my $nb = 32;
+my @alive = [];
+my @rx = [];
+my @ry = [];
+loop (my $i = 0; $i < 32; $i += 1) {
+    push(@alive, 1);
+    my $col = $i - 8 * ($i / 8);
+    my $row = $i / 8;
+    push(@rx, 42.0 + $col * 105.0);
+    push(@ry, 72.0 + $row * 28.0);
+}
+
+say "Breakout: mouse / arrows. Close the window to quit.";
 
 while !WindowShouldClose() {
     my $dt = GetFrameTime();
-    if $dt <= 0.0 || $dt > 0.08 { $dt = 0.016; }
+    if $dt <= 0.0 || $dt > 0.05 { $dt = 0.016; }
 
     my $mx = GetMouseX();
-    if $mx > 0 && $mx < $W {
-        $px = $mx - ($pw / 2.0);
-    }
-    if IsKeyDown($KEY_LEFT) || IsKeyDown($KEY_A) { $px = $px - 520.0 * $dt; }
-    if IsKeyDown($KEY_RIGHT) || IsKeyDown($KEY_D) { $px = $px + 520.0 * $dt; }
+    if $mx > 0 && $mx < $W { $px = $mx - 70.0; }
+    if IsKeyDown(263) { $px = $px - 480.0 * $dt; }
+    if IsKeyDown(262) { $px = $px + 480.0 * $dt; }
     if $px < 8.0 { $px = 8.0; }
-    if $px > $W - $pw - 8.0 { $px = $W - $pw - 8.0; }
+    if $px > 752.0 { $px = 752.0; }
 
-    if !$live {
-        $bx = $px + $pw / 2.0;
-        $by = $py - 20.0;
-        if IsKeyPressed($KEY_SPACE) || IsMouseButtonDown($MOUSE_LEFT) {
-            $live = 1;
-            $vy = -320.0;
-        }
-    } else {
-        $bx = $bx + $vx * $dt;
-        $by = $by + $vy * $dt;
-        if $bx < $br || $bx > $W - $br { $vx = 0 - $vx; }
-        if $by < $br { $vy = 0 - $vy; }
+    $bx = $bx + $vx * $dt;
+    $by = $by + $vy * $dt;
 
-        if $by + $br >= $py && $by < $py + $ph && $bx >= $px && $bx <= $px + $pw {
-            $vy = 0 - abs($vy);
-            my $hit = ($bx - $px) / $pw - 0.5;
-            $vx = $vx + $hit * 240.0;
-        }
+    if $bx < $br || $bx > 888.0 { $vx = 0 - $vx; }
+    if $by < $br { $vy = 0 - $vy; }
 
-        my $bi = 0;
-        while $bi < $cols * $rows {
-            if $alive[$bi] {
-                my $col = $bi % $cols;
-                my $row = int($bi / $cols);
-                my $rx = 30.0 + $col * ($bw + 8.0);
-                my $ry = 80.0 + $row * ($bh + 8.0);
-                if $bx + $br > $rx && $bx - $br < $rx + $bw && $by + $br > $ry && $by - $br < $ry + $bh {
-                    $alive[$bi] = 0;
-                    $vy = 0 - $vy;
-                    $score = $score + 10 * ($rows - $row);
-                }
+    if $by >= 600.0 && $by <= 628.0 && $bx >= $px && $bx <= $px + $pw {
+        $vy = 0 - abs($vy);
+        $score = $score + 5;
+    }
+
+    loop (my $j = 0; $j < 32; $j += 1) {
+        if @alive[$j] == 1 {
+            my $x = @rx[$j];
+            my $y = @ry[$j];
+            if $bx + $br > $x && $bx - $br < $x + 96.0 && $by + $br > $y && $by - $br < $y + 22.0 {
+                @alive[$j] = 0;
+                $vy = 0 - $vy;
+                $score = $score + 15;
             }
-            $bi = $bi + 1;
         }
+    }
 
-        if $by > $H {
-            $lives = $lives - 1;
-            $live = 0;
-            if $lives <= 0 {
-                $score = 0;
-                $lives = 3;
-                $bi = 0;
-                while $bi < $cols * $rows {
-                    $alive[$bi] = 1;
-                    $bi = $bi + 1;
-                }
+    if $by > $H {
+        $lives = $lives - 1;
+        $bx = 450.0;
+        $by = 280.0;
+        $vy = 200.0;
+        if $lives <= 0 {
+            $score = 0;
+            $lives = 3;
+            loop (my $k = 0; $k < 32; $k += 1) {
+                @alive[$k] = 1;
             }
         }
     }
 
     BeginDrawing();
     ClearBackground($bg);
-    DrawText("RAPTOR BREAKOUT", 24, 16, 28, $accent);
-    DrawText("Score " ~ $score ~ "   Lives " ~ $lives, 24, 48, 20, $fg);
+    DrawText("RAPTOR BREAKOUT", 20, 16, 26, $cyan);
+    DrawText("Score " ~ $score ~ "  Lives " ~ $lives, 620, 18, 20, $yel);
 
-    $i = 0;
-    while $i < $cols * $rows {
-        if $alive[$i] {
-            my $col = $i % $cols;
-            my $row = int($i / $cols);
-            my $rx = 30.0 + $col * ($bw + 8.0);
-            my $ry = 80.0 + $row * ($bh + 8.0);
-            DrawRectangle(int($rx), int($ry), int($bw), int($bh), $brickC);
+    loop (my $d = 0; $d < 32; $d += 1) {
+        if @alive[$d] == 1 {
+            DrawRectangle(@rx[$d], @ry[$d], 96, 22, $yel);
         }
-        $i = $i + 1;
     }
-
-    DrawRectangle(int($px), int($py), int($pw), int($ph), $paddleC);
-    DrawCircle(int($bx), int($by), $br, $ballC);
-    DrawFPS(24, $H - 28);
+    DrawRectangle($px, 614, $pw, $ph, $grn);
+    DrawCircle($bx, $by, $br, $mag);
+    DrawFPS(20, 624);
     EndDrawing();
 }
 
 CloseWindow();
-say "Breakout closed. Final score: $score";
+say "Game closed. Score $score";

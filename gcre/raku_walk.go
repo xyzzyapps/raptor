@@ -219,6 +219,10 @@ func walkRxAngle(x []any) (rx, error) {
 	if name == "" {
 		return nil, fmt.Errorf("raku: empty <subrule>")
 	}
+	// Organic hatch: <HOST_name> / <.HOST_name> is a host hook, not a rule.
+	if strings.HasPrefix(name, "HOST_") {
+		return &rxHost{name: strings.TrimPrefix(name, "HOST_"), capture: capture, quant: ' '}, nil
+	}
 	return &rxSub{name: name, capture: capture, quant: ' '}, nil
 }
 

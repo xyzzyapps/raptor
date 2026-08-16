@@ -71,6 +71,25 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 
 **Not implemented:** `local`, `eval STRING` / `eval { }`, `bless` / `@ISA` / Moose / `class` / `has`, prototypes, `wantarray` (no list/scalar context), `s///` / `tr///`.
 
+Raptor is also engineered for the Post-LLM paradigm:
+
+1. **High Token Density & Brief Syntax**: By adopting the concise syntax of Perl 5 and modern Raku (variables using `$` `@` `%` sigils, canonical `Nil`, built-in operators) while completely omitting `class`, `has`, and `is` boilerplate, Raptor maximizes LLM context window efficiency and reduces model hallucinations.
+2. **Verification-First by Default**: LLMs generate code rapidly, but need tight, verifiable guardrails. Raptor builds formal Design-by-Contract (`PRE`, `POST`, `INVARIANT`), inline testing (`TEST`), and randomized property-based quickcheck fuzzing (`PROPERTY`) directly into the core grammar.
+3. **Continuous Invariant Checking on Every Assignment**: Unlike static types checked once at compile time, every variable in Raptor can hold a dynamic `where` predicate that is rigorously evaluated upon **every mutation and assignment**. If an LLM or runtime mutation produces an invalid state, it is caught immediately at the point of failure.
+4. **Uniform Function Call Syntax (UFCS)**: Functional method chaining (`$val.func().transform()`) allows LLMs to construct clean data transformation pipelines without wrapping primitives in artificial classes.
+5. **C-ABI Struct Memory & Closures**: Contiguous C-compatible memory layout records (`struct Vector2 { num64 $x; num64 $y; }`) with first-class closure fields provide native C performance without OOP overhead.
+6. **Literate Programming with PodLit**: Knuth-style chunk weaving, source tangling, and reverse-stitching allow LLMs to maintain human-readable architectural specifications and executable source code side-by-side.
+
+## Academic & Theoretical Foundations
+
+Raptor's predicate type, continuous contract, and literate programming systems are grounded in seminal computer science research:
+
+- **Robert Bruce Findler (PhD Thesis, Rice University, 2002)**: *Behavioral Software Contracts* (supervised by Matthias Felleisen). Established the mathematical and runtime foundations of higher-order dynamic contracts, continuous invariant monitoring on mutable reference cells, and assignment-level contract enforcement.
+- **Predicate Dispatching**: A Unified Theory of Dispatch* (with Craig Kaplan & Craig Chambers). Introduced the formal model for evaluating arbitrary user-defined boolean predicates over variables and parameter values to drive runtime dispatch and enforce state invariants.
+- **Patrick Maxim Rondon (PhD Thesis, UC San Diego, 2012)**: *Liquid Types* (supervised by Ranjit Jhala, built on Frank Pfenning's 1991 *Refinement Types for ML*). Refinement types via predicate subtyping where standard base types are enriched with logical predicates evaluated against values and assignments.
+- **Johan Hidding (Netherlands eScience Center, 2023)**: *Entangled, a Bidirectional System for Sustainable Literate Programming*, 2023 IEEE 19th International Conference on e-Science (e-Science), pp. 1-10, [DOI: 10.1109/e-Science58273.2023.10254816](https://doi.org/10.1109/e-Science58273.2023.10254816). Formulated the model and grammar for bidirectional, round-trip literate programming where external code modifications are synchronized and reverse-stitched back into literate narrative documents without disturbing narrative prose.
+
+
 ```
 cd raptor
 go build -mod=mod -o bin/raptor.exe ./cmd/raptor

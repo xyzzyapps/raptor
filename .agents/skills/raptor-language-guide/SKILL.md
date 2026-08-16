@@ -130,3 +130,7 @@ property "addition commutativity", sub ($a, $b) {
     return ($a + $b) == ($b + $a);
 };
 ```
+
+## AI credit
+
+The first prototype was written by **Gemini**. The language was mostly written by Anti Gravity — Gemini 3.6. Library bindings and PodLit were written by Gemini 3.7. Later work was modified by **Grok**.

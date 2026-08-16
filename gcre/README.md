@@ -69,3 +69,8 @@ That is still PEG (ordered choice) and still valid Raku angle syntax
 (`<HOST_stmt>`). Pigeon does not need action blocks. The host supplies
 Pratt parsing only where the grammar names it. There is no second
 full-file parser pass.
+
+## AI credit
+
+The first prototype was written by **Gemini**. Later work was modified
+by **Grok**.

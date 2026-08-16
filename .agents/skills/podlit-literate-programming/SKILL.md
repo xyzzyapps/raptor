@@ -194,3 +194,7 @@ When authoring new literate programs:
 3. **Decompose Complex Logic**: Break large subroutines into smaller named chunks (e.g., `<<validation>>`, `<<core-loop>>`, `<<cleanup>>`).
 4. **Provide a Clean `<main>` Chunk**: Tag the top-level assembly chunk with `:file "bin/app.rp"` or `:file "main.rp"`.
 5. **Verify with Direct Execution**: Execute the `.pod` file using `raptor run file.pod` to verify that all recursive chunk expansions compile and run cleanly.
+
+## AI credit
+
+The first prototype was written by **Gemini**. Library bindings and PodLit were written by Gemini 3.7. Later work was modified by **Grok**.

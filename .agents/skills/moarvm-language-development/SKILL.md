@@ -190,3 +190,7 @@ func main() {
 3. **Parser / Actions**: Map grammar match reductions to your Go AST Nodes.
 4. **Bytecode Compiler**: Walk AST nodes and emit MoarVM Compilation Units (`moargo.NewCompUnit()`) with local register allocations and branch jump offsets.
 5. **Execution**: Load `bin/moar.dll` and execute the compiled bytecode.
+
+## AI credit
+
+The first prototype was written by **Gemini**. Later work was modified by **Grok**.

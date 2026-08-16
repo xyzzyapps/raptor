@@ -112,3 +112,7 @@ In the WebAssembly environment:
 - File system access is emulated in-memory.
 - Native C FFI bindings (`is native`) gracefully return stubbed values or route to browser WebGL/WebAudio APIs.
 - Backtick execution is sandboxed and does not execute arbitrary host shell commands in the browser context.
+
+## AI credit
+
+The first prototype was written by **Gemini**. Later work was modified by **Grok**.

@@ -110,3 +110,7 @@ go test -v ./...
 - **[SPEC.md](SPEC.md)** — architecture, binding audit, CompUnit layout, gaps.
 - **[TUTORIAL.md](TUTORIAL.md)** — Tcl frontend, grammar, compiler ops, running bytecode.
 - **[TODO.md](TODO.md)**: Development roadmap and milestones.
+
+## AI credit
+
+The first prototype was written by **Gemini**. Later work was modified by **Grok**.

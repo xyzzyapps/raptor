@@ -4,315 +4,198 @@
 
 # Raptor
 
+A **Perl 5–shaped** dynamic language: the non-OO subset of Raku. No `class`, `has`, or inheritance. Records are C structs. Types are optional `subset` refinements checked on every assignment.
+
 **Parse:** [gcre](../gcre) loads [`runtime/raptor.raku`](runtime/raptor.raku). Pratt is only `<HOST_stmt>` / `<HOST_expr>` inside that grammar — not a second full-file parser.
 
-**Backends:** `--go` (default interpreter), `--moar` (CompUnit v7 on `moar.dll`, same opcode family as Tcl), `--wasm` (TinyGo if available, else `GOOS=js`; `--wasm-compiler=go|tinygo`). `raptor -S localhost:8000` is the PHP-style RaptorHP server.
+**Backends:** `--go` (default tree-walk), `--moar` (CompUnit v7 on `moar.dll`, same opcode family as Tcl in [../moarvm-go](../moarvm-go)), `--wasm` (TinyGo if available, else `GOOS=js`; `--wasm-compiler=go|tinygo`).
 
-**Docs:** PodLit in `docs/` — `raptor doc perlraptor`, `raptor weave docs/index.pod`, numbered `01_*.md` chapters. Topic `$_` is supported. `raptor pack` embeds gcre + the runtime (`replace gcre => ../gcre`).
+**Docs:** PodLit in `docs/` — `raptor doc perlraptor`, `raptor weave docs/index.pod`, numbered `01_*.md` chapters. `raptor pack` embeds gcre + the runtime (`replace gcre => ../gcre`).
 
-Raptor is a post-LLM dynamic language — a Perl 5 subset of Raku targeting **MoarVM** in Go. Engineered for AI-assisted software generation, it combines high token density, verification-first contracts, continuous assignment predicate invariants, Uniform Function Call Syntax (UFCS), backticks & shell execution (`` `...` ``, `qx{}`), dynamic grammars (`grammar`, `rule`, `token`, `regex`), standard contextual variables (`@*ARGS`, `%*ENV`, `$*RAPTOR`, `$*KERNEL`, `$*PID`, `$?`, `$!`), statement modifiers, heredocs, labels and goto, first-class references, dynamic `AUTOLOAD` dispatch, lexical and persistent variable scoping (`my`, `our`, `state`), package namespaces and symbol table metaprogramming (`%Package::`, `package_symbols`), pluggable regex engines (`samre`), C-ABI struct memory, Charmbracelet terminal styling, literate programming with PodLit, and standalone binary packaging (`raptor pack`).
+If you know Perl 5, you already know Raptor.
 
-1. **Backtick & Shell Command Execution**:
-   Expressive `` `cmd` `` and `qx{cmd}` process execution with variable and expression interpolation, exit status tracking (`$?`), and error reporting (`$!`).
-2. **Declarative Dynamic Grammars**:
-   Parsing grammars (`grammar Name { rule TOP { ... } token id { \d+ } }`) with rule, token, and regex definitions.
-3. **Special Dynamic Contextual Variables**:
-   Standard Raku contextual variables (`@*ARGS`, `%*ENV`, `$*PROGRAM`, `$*RAPTOR.version`, `$*KERNEL.name`, `$*PID`) and punctuation variables (`$?`, `$!`, `$$`, `$0`).
-4. **Dynamic Subroutine & Method Dispatch (`AUTOLOAD`)**:
-   Fallback dispatch for unresolved functions and methods with `$AUTOLOAD` target string binding and parameter forwarding.
-5. **Scoping Suite (`my`, `our`, `state`)**:
-   Standard lexical block scopes (`my`), package-level variables aliased into lexical scope (`our`), and persistent static local variables (`state`) preserved across calls.
-6. **Package Namespaces & Symbol Metaprogramming**:
-   Package declarations (`package Foo;`, `package Foo { ... }`, `unit module Foo;`), direct `%Package::` stash reflection, and metaprogramming built-ins (`package_symbols`, `package_set`, `package_get`, `package_delete`).
-7. **Statement Modifiers & Heredocs**:
-   Postfix `if`, `unless`, `while`, `until`, `for`, and `given` modifiers, alongside multi-line interpolated, raw, and auto-indented (`<<~EOF`) heredoc strings.
-8. **First-Class References & Dereferencing**:
-   Full reference support (`\$s`, `\@a`, `\%h`, `\&sub`) with dereferencing (`$$s`, `@$a`, `$a->[0]`, `$h->{"k"}`, `$sub->()`), `ref()`, and `is_ref()`.
-9. **Labels, Goto & Subroutine Tail Calls**:
-   Direct block jumps (`LABEL:`, `goto LABEL;`) and seamless subroutine tail-call forwarding (`goto &target_sub;`).
-10. **Pluggable Regex Engines & `samre` Adapter**:
-    Unified `RegexEngine` interface supporting Go standard regexp and `samre` engines (`regex_engine("samre")`).
-11. **Defensive Programming & Uppercase Verification Suite**:
-    Hoare logic contracts and QuickCheck fuzzing: `TEST`, `PRE`, `POST`, `INVARIANT`, `PROPERTY`, `SUBTEST`, `CHECK`, `ASSERT`.
-12. **Uniform Function Call Syntax (UFCS)**:
-    Invoke any subroutine or multi-sub candidate using method invocation syntax on the first argument (`$val.func()`, `20.double()`, `"raptor".uc()`, `@list.map(...)`).
-13. **Charmbracelet TUI & Terminal Styling Engine**:
-    Lip Gloss ANSI 24-bit TrueColor styling (`tui_style`), framed boxes (`tui_box`), data tables (`tui_table`), progress bars (`tui_progress`), terminal markdown rendering (`tui_markdown`), and Bubble Tea state-machine event loops (`tui_app_run`).
-14. **PortAudio Sound Engine & Waveform Synthesizer**:
-    Real-time audio engine integration (`pa_init`, `pa_terminate`, `pa_device_count`, `pa_device_info`, `pa_sine_wave`).
-15. **Native SQLite Database & Fast JSON**:
-    Embedded database support (`sqlite_open`, `sqlite_exec`, `sqlite_query`, `sqlite_close`) and JSON serialization (`to_json`, `from_json`).
-16. **Procedural Sockets Networking (TCP & UDP)**:
-    Fast, low-level socket primitives: `tcp_listen`, `tcp_accept`, `tcp_connect`, `tcp_send`, `tcp_recv`, `tcp_close`, `udp_bind`, `udp_send`, `udp_recv`.
-17. **Sockets-Based HTTP/1.1 & RFC 6455 WebSockets**:
-    Direct protocol implementation over sockets: `http_get`, `http_post`, `http_server_start`, `ws_frame_text`, `ws_parse_frame`.
-18. **Raylib 5.5 Hardware Graphics Engine Integration**:
-    60 FPS desktop window rendering with Windows x64 ABI struct-by-value packing and UTF-8 string marshalling ([examples/raylib_game.rp](examples/raylib_game.rp)).
+| Perl 5 | Raptor |
+| :--- | :--- |
+| `my $x`, `my @a`, `my %h` | same |
+| `$_` topic | same (`for`, `given`, bare `say`) |
+| `.` concat | `~` |
+| `x` / `//` / `eq ne lt gt` | same (`//=` too; also `==` numeric) |
+| `$obj->method` | `$obj.method()` **UFCS** (any `sub method($obj, …)`) |
+| `bless` / `@ISA` | no classes — `struct` + `multi sub` |
+| `package Foo;` | same; `%Foo::` stash |
+| TAP `ok` / `is` | built in (`raptor test t/`) |
+| XS | `is native('lib.dll')` NativeCall |
+
+```perl
+my $name = "Raptor";
+my @nums = [1, 2, 3];
+my %cfg  = { "port" => 8080 };
+$_ = $name;
+say;                          # topic
+say 2 ** 10;                  # 1024
+say 6 × 7;                    # unicode ops
+say $cfg{"port"} // 80;
+
+struct Point { num64 $x; num64 $y; }
+subset Positive where { $_ > 0 };
+my Positive $n = 10;
+```
 
 Licensed under the **Artistic License 2.0**.
 
-## Binaries & Build Artifacts
+---
 
-Pre-built executables and bundled runtime libraries ship in `raptor/bin/`; the WebAssembly target lives at `web/raptor.wasm`.
+## Feature catalog
 
-### Compiled from Go source
+1. **Sigils, `Nil`, operators** — `$scalar`, `@array`, `%hash`; defined-or (`//`, `//=`), `**`, ternary (`?? !!` / `?:`), bitwise (`+&` `+|` `+^` `+<` `+>`), `x` / `xx`, `div` / `mod` / `%%`, `min` / `max`, file tests (`-e -f -d -s -r -w`), `=~` / `!~`, unicode `× ÷ √ ∑ ∏`.
+2. **Topic `$_`** — `for`, `given` / `when`, bare `say`, statement modifiers.
+3. **UFCS** — `$val.func()`, `20.double()`, `"raptor".uc()`, `@list.map(...)`.
+4. **`subset` + predicate dispatch** — `subset Positive where { $_ > 0 }`; `multi sub fib($n where { $n <= 1 })`; invariants on every assignment.
+5. **C-ABI `struct` + closures** — `struct Vector2 { num64 $x; num64 $y; }`; `$btn.onClick = sub ($v) { ... }`; `multi sub infix:<+>(Vec2 $a, Vec2 $b)`.
+6. **Junctions** — `any` / `all` / `one` / `none` autothreading.
+7. **`gather` / `take`** — lazy sequences.
+8. **Statement modifiers & heredocs** — postfix `if` / `unless` / `while` / `until` / `for` / `given`; `<<EOF` / `<<~EOF`.
+9. **References** — `\$s`, `\@a`, `\%h`, `\&sub`; `$$s`, `$a->[0]`, `$h->{"k"}`, `ref()`, `is_ref()`.
+10. **Labels & goto** — `LABEL:`, `goto LABEL;`, `goto &target_sub;`.
+11. **Scoping** — `my`, `our`, `state`.
+12. **Packages & AUTOLOAD** — `package Foo;`, `%Foo::`, `package_symbols` / `package_set` / `package_get` / `package_delete`; `$AUTOLOAD`.
+13. **Contextual vars** — `@*ARGS`, `%*ENV`, `$*PROGRAM`, `$*RAPTOR`, `$*KERNEL`, `$*PID`, `$?`, `$!`, `$$`, `$0`.
+14. **Backticks** — `` `cmd` ``, `qx{cmd}`; `$?` / `$!`.
+15. **Grammars** — `grammar` / `rule` / `token` / `regex` (gcre). Language parse is gcre + HOST Pratt.
+16. **Regex / `samre`** — `regex_engine("samre")`.
+17. **Verification** — `pre` / `post` / `invariant`; `TEST`, `PRE`, `POST`, `INVARIANT`, `PROPERTY`, `SUBTEST`, `CHECK`, `ASSERT`; TAP `plan` / `ok` / `is` / `is_deeply` / `like` / `done_testing`; `raptor test t/` (like `prove`).
+18. **TUI (Charmbracelet)** — `tui_style`, `tui_box`, `tui_table`, `tui_progress`, `tui_markdown`, `tui_app_run`.
+19. **PortAudio** — `pa_init`, `pa_device_count`, `pa_sine_wave`, … (`lib/PortAudio.rp`).
+20. **SQLite & JSON** — `sqlite_open` / `exec` / `query` / `close`; `to_json` / `from_json`.
+21. **Sockets** — `tcp_listen` / `accept` / `connect` / `send` / `recv`; `udp_bind` / `send` / `recv`.
+22. **HTTP/1.1 & WebSockets** — `http_get`, `http_post`, `http_server_start`, `http_format_response`; `ws_frame_text`, `ws_parse_frame`.
+23. **Raylib 5.5** — NativeCall (`lib/Raylib.rp`); [examples/raylib_game.rp](examples/raylib_game.rp).
+24. **Concurrency** — `start` / `await`, `Channel`, `Mutex`, `Semaphore`, `WaitGroup`, `parallel_map`, `Supply`, `atomic_add` / `cas`.
+25. **Advice** — `before` / `after` / `around` on multi-subs.
+26. **NativeCall / FFI** — `is native('lib.dll')`; `ffi_load` / `ffi_call`.
+27. **GGML tensor C API** — `ggml_init`, `ggml_new_tensor_2d`, `ggml_mul_mat` (`A^T * B`), `ggml_relu` / `gelu` / `soft_max`, `ggml_graph_compute_with_ctx` (software; optional `ggml.dll`). [lib/GGML.rp](lib/GGML.rp), [examples/ggml_tensors.rp](examples/ggml_tensors.rp).
+28. **Tiny char LM** — `llm_tiny_load` / `generate` / `logits` (CPU; WebGPU matmul when the adapter is ready). Tour lesson currently off.
+29. **Package manager** — `raptor init`, `raptor get <repo>`, `raptor install` → `./raptor_modules/`.
+30. **`raptor pack`** — script + runtime into one `.exe` (same interpreter, not a speed win).
+31. **PodLit** — `raptor weave` / `tangle` / `stitch`; run `.pod` directly; `raptor doc`.
+32. **RaptorHP** — PHP-style `<?raptor ?>` / `<?= ?>` in `.phtml`. `raptor -S localhost:8000` (or `raptorhp -S`) like `php -S`; `-t` docroot; optional router. `%_GET` / `%_POST` / `%_SERVER`.
+33. **WASM tour** — `raptor serve` → http://localhost:8080/. Canvas 2D, WebGL, WebAudio **node graph** (osc / filter / compressor / delay / LFO on `AudioContext.currentTime`). WebGPU and HTTP tour pages are disabled for now. `raptor --wasm` prefers TinyGo; writes `raptor_bridge.js` + `wasm_exec.js` next to the `.wasm`.
+34. **Embedded / TinyGo** — ESP32 / RP2040 profile: `gpio_*`, `pwm_*`, `i2c_*`, `spi_transfer`, UART REPL. [examples/esp32_blink.rp](examples/esp32_blink.rp).
+35. **Memory (interpreter)** — interned ±256 ints, in-place `+=` / `$s = $s ~ x`, recycled loop `Env`s, one-shot HOST lex, int64 array lane. See [SPEC.md](SPEC.md) §8.
+
+---
+
+## Language sketches
+
+**UFCS**
+```perl
+sub format_id($n) { return "ID-#" ~ $n; }
+say 1001.format_id();
+say "welcome".uc();
+```
+
+**Predicates**
+```perl
+subset PortNum where { 1 <= $_ <= 65535 };
+my PortNum $port = 8080;
+multi sub fib($n where { $n <= 1 }) { return $n; }
+multi sub fib($n) { return fib($n - 1) + fib($n - 2); }
+```
+
+**Structs**
+```perl
+struct Vector2 { num64 $x; num64 $y; }
+multi sub infix:<+>(Vector2 $a, Vector2 $b) {
+    my $r = Vector2.new();
+    $r.x = $a.x + $b.x;
+    $r.y = $a.y + $b.y;
+    return $r;
+}
+```
+
+**Contracts & TAP**
+```perl
+sub safe_divide($a, $b) {
+    pre({ $b != 0 });
+    post({ $_ >= 0 });
+    return $a div $b;
+}
+property "addition commutativity", sub ($x, $y) { return ($x + $y) == ($y + $x); };
+plan(1); ok(1 + 1 == 2, "math"); done_testing();
+```
+
+**TUI**
+```perl
+say tui_style("RAPTOR", {:fg => "#00ADD8", :bold => True});
+say tui_box("ok", {:title => "status", :border => "rounded"});
+```
+
+**WebAudio (WASM)** — graph in Raptor, timeline on `currentTime` (C4–E4–G4–B4–C5 in the tour):
+```perl
+my $ctx = audio_context_create();
+my $t0 = audio_get_current_time($ctx);
+my $osc = audio_create_oscillator($ctx);
+my $env = audio_create_gain($ctx);
+audio_set_frequency($osc, 261.63, $t0);
+audio_connect($osc, $env);
+audio_connect_destination($env, $ctx);
+audio_osc_start($osc, $t0);
+```
+
+---
+
+## Binaries
 
 | Binary | Source | Description |
 | :--- | :--- | :--- |
-| **`bin/raptor.exe`** | `cmd/raptor/main.go` | Unified CLI: script runner, interactive REPL, MoarVM bytecode compiler (`raptor compile`), TAP test harness (`raptor test`), terminal manual reader (`raptor doc`), PodLit weave/tangle/stitch, package manager (`raptor init`/`get`/`install`), WebAssembly playground server (`raptor serve`), and standalone packager (`raptor pack`) |
-| **`bin/raptorhp.exe`** | `cmd/raptorhp/main.go` | RaptorHP PHP-style embedded template engine & development web server: `raptorhp <file.phtml>`, `raptorhp -r "<code>"`, `raptorhp -S localhost:8000` |
-| **`web/raptor.wasm`** | `cmd/wasm/main.go` | WebAssembly browser runtime exporting `raptorEval`, `raptorWeave`, `raptorTangle`, `raptorStitch`, and `raptorVersion`; served by `raptor serve` |
+| **`bin/raptor`** | `cmd/raptor/main.go` | Run, REPL, `--go` / `--moar` / `--wasm`, `test`, `doc`, weave/tangle/stitch, `init`/`get`/`install`, `serve`, `pack`, **`-S`** (RaptorHP) |
+| **`bin/raptorhp`** | `cmd/raptorhp/main.go` | Templates: `raptorhp file.phtml`, `-r '…'`, `-S localhost:8000 -t public` |
+| **`web/raptor.wasm`** | `cmd/wasm/main.go` | Browser engine (`raptorEval`, weave/tangle/stitch) |
 
-### Packaged applications (`raptor pack`)
-
-`raptor pack <script.rp> -o <app.exe>` embeds a Raptor script plus the full runtime into a self-contained executable:
-
-| Binary | Packed script | Description |
-| :--- | :--- | :--- |
-| **`bin/demo_app.exe`** | `examples/demo_showcase.rp` | Feature showcase: operator suite, C-structs, TUI styling, sockets, PortAudio synthesis, concurrency, environment globals |
-| **`bin/raylib_game.exe`** | `examples/raylib_game.rp` | Interactive 60 FPS Raylib 5.5 desktop game window |
-
-### Bundled runtime libraries (not built by this repository)
-
-These DLLs are copied into `bin/` so every executable is zero-dependency. At runtime `ffi_load` searches `bin/`, the executable directory, and the system `PATH` (see `runtime/ffi.go`).
-
-| Library | Origin | Used for |
-| :--- | :--- | :--- |
-| **`bin/moar.dll`** | Built from the MoarVM C source tree in `../moarvm-go/vendor/MoarVM` (see "Building from Source" below) | MoarVM 64-bit JIT / 6model engine executing `raptor compile` bytecode |
-| **`bin/libraylib.dll`** | Raylib 5.5 from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin\libraylib.dll`) | Raylib desktop graphics engine (`lib/Raylib.rp`, `examples/raylib_game.rp`) |
-| **`bin/sqlite3.dll`** | SQLite from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin\libsqlite3-0.dll`) | Native SQLite database (`sqlite_open`, `sqlite_query`, `sqlite_close`) |
-
-## Building & Testing from Source
-
-### Prerequisites
-
-- **Go 1.22+** (developed and verified on Go 1.22–1.26 across Windows and Linux/WSL)
-- **Local Module Links**: `go.mod` has `replace moarvm-go => ../moarvm-go` and `replace gcre => ../gcre`. Build with `go test -mod=mod` / `go build -mod=mod` (do not `go mod vendor` — `vendor/` is MoarVM C, not Go modules).
-
-#### Package Dependencies by Operating System:
-- **Alpine Linux / WSL**:
-  ```sh
-  apk add go gcc musl-dev sqlite-dev portaudio-dev git make perl
-  ```
-- **Debian / Ubuntu / WSL**:
-  ```sh
-  sudo apt update && sudo apt install -y golang gcc libsqlite3-dev libportaudio2 portaudio19-dev git make perl
-  ```
-- **Fedora / RHEL**:
-  ```sh
-  sudo dnf install -y golang gcc sqlite-devel portaudio-devel git make perl
-  ```
-- **Arch Linux**:
-  ```sh
-  sudo pacman -S go gcc sqlite portaudio git make perl
-  ```
-- **Windows**:
-  - MSYS2 UCRT64 toolchain (`C:\msys64\ucrt64\bin`) with `gcc`, `raylib`, `sqlite3`.
+`raptor pack script.rp -o app.exe` embeds the script + runtime. Bundled DLLs in `bin/` (not built here): `moar.dll`, `libraylib.dll`, `sqlite3.dll`. `ffi_load` searches `bin/`, the exe dir, and `PATH`.
 
 ---
 
-### 1. Compile on Linux (WSL / Native)
+## Building & testing
 
-```bash
-cd raptor
-
-# 1. Build Raptor unified CLI executable
-go build -o bin/raptor ./cmd/raptor
-
-# 2. Build RaptorHP template engine & web server
-go build -o bin/raptorhp ./cmd/raptorhp
-
-# 3. Build WebAssembly browser runtime (optional)
-GOOS=js GOARCH=wasm go build -o web/raptor.wasm ./cmd/wasm
-```
-
-#### Run Tests & Verification on Linux:
-```bash
-# Run all Go unit test suites
-go test -v ./...
-
-# Run the complete TAP test harness (21 files)
-./bin/raptor test t/
-
-# Weave manuals (PodLit)
-./bin/raptor weave docs/perlraptor.pod
-./bin/raptor doc perlraptor
-
-# Run the comprehensive feature showcase
-./bin/raptor run examples/demo_showcase.rp
-
-# Execute a one-liner
-./bin/raptor -e 'say "Hello from Raptor on Linux!"; my @arr = [10, 20, 30]; say "Elements: " ~ @arr.elems();'
-
-# Start the RaptorHP template server
-./bin/raptorhp -S localhost:8000
-```
-
----
-
-### 2. Compile on Windows (PowerShell)
+**Need:** Go 1.22+, `replace gcre => ../gcre` and `replace moarvm-go => ../moarvm-go`. Use `-mod=mod` (do not `go mod vendor` — `vendor/` under moarvm-go is MoarVM C).
 
 ```powershell
 cd raptor
-
-# 1. Build executables
-go build -o bin/raptor.exe ./cmd/raptor
-go build -o bin/raptorhp.exe ./cmd/raptorhp
-
-# 2. Build WebAssembly browser runtime
-$env:GOOS = "js"; $env:GOARCH = "wasm"
-go build -o web/raptor.wasm ./cmd/wasm
-Remove-Item Env:GOOS, Env:GOARCH
-
-# 3. Package standalone applications (optional)
-.\bin\raptor.exe pack examples\demo_showcase.rp -o bin\demo_app.exe
-.\bin\raptor.exe pack examples\raylib_game.rp -o bin\raylib_game.exe
-```
-
-#### Run Tests & Verification on Windows:
-```powershell
-go test ./...                      # Go unit test suites
-.\bin\raptor.exe test t\           # Raptor TAP test harness (6 files, 47 assertions)
-.\bin\raptor.exe -e 'say "Hello, Raptor!"'
-.\bin\raptorhp.exe -r '<b><?= 6 * 7 ?></b>'
-.\bin\raptorhp.exe -S localhost:8000   # development template server
-```
-
-## Key Features
-
-1. **Pure Dynamic Typing & No-OO Architecture**:
-   Built on dynamic variables (`$scalar`, `@array`, `%hash`), subroutines, modules, first-class functions, and C-structs without `class`, `has`, or `is` keyword overhead.
-2. **Uniform Function Call Syntax (UFCS)**:
-   Invoke any subroutine or multi-sub candidate using method invocation syntax on the first argument (`$val.func()`, `20.double()`, `"raptor".uc()`, `@list.map(...)`), enabling clean functional pipelines and method chaining without OOP classes.
-3. **Perl5 TAP Testing Framework & Test Harness (`raptor test`)**:
-   Standard Test Anything Protocol v13 producer (`plan`, `ok`, `is`, `isnt`, `is_deeply`, `like`, `unlike`, `cmp_ok`, `subtest`, `done_testing`) and test harness runner (like `prove`).
-4. **Verification-Friendly Architecture**:
-   Zero-overhead inline tests (`TEST "desc" { ... }`), Design-by-Contract (`pre`, `post`, `invariant`), and Property-Based QuickCheck fuzzing (`property "name", sub ($a, $b) { ... }`).
-5. **PodLit Literate Programming Subsystem (Weave, Tangle, Mangle & Stitch) & `raptor doc`**:
-    Knuth-style literate programming via extended POD: weave Markdown docs (`raptor weave`), tangle executable source code with macro chunk expansion (`raptor tangle`), reverse-tangle modified code back into POD (`raptor stitch`), apply mangle filters, and directly execute `.pod` documents ([examples/literate_game.pod](examples/literate_game.pod)).
-   Comprehensive manual documentation in `docs/` rendered directly in the terminal with ANSI colors: `raptor doc operators`, `raptor doc subsets`, `raptor doc tui`, `raptor doc structs`.
-6. **C-ABI Struct Records & Function Pointers**:
-   C memory layout records (`struct Point { int32 $x; int32 $y; }`) with first-class function pointer / closure fields (`$btn.onClick = sub ($v) { ... }; $btn.onClick(42)`).
-7. **Dynamic Refinement Types (`subset`) & Predicate Dispatching**:
-   Enforce dynamic value invariants using Raku-style `subset` and `where` predicates (`subset Positive where { $_ > 0 }`, `multi sub fib($n where { $n <= 1 })`).
-8. **Custom Operator Overloading on Structs**:
-   Seamless multi-dispatch overloading for structs (`multi sub infix:<+>(Vec2 $a, Vec2 $b)`, `multi sub prefix:<->(Vec2 $v)`).
-9. **Comprehensive Perl5 & Raku Operator Suite**:
-    Defined-or (`//`, `//=`), Exponentiation (`**`), Ternary (`?? !!`, `? :`), Bitwise numeric (`+&`, `+|`, `+^`, `+<`, `+>`), Repetition (`x`, `xx`), Divisibility (`div`, `mod`, `%%`), Min/Max (`min`, `max`), File tests (`-e`, `-f`, `-d`, `-s`, `-r`, `-w`), and Regex (`=~`, `!~`).
-10. **Advanced Concurrency & Atomics**:
-    `Mutex`, `Semaphore`, `WaitGroup`, `parallel_map`, reactive `Supply` streams, `Promise` (`start { ... }`), `Channel`, and hardware atomic primitives.
-11. **Raptor Package Manager (`raptor init`, `raptor get`, `raptor install`)**:
-    Git-based package management cloning dependencies directly into `./raptor_modules/` with automatic runtime module discovery.
-12. **Standalone Binary Packaging & Bundled DLLs**:
-    Package any script into a self-contained `.exe` executable (`raptor pack`), with `moar.dll`, `libraylib.dll`, and `sqlite3.dll` residing directly in `bin/` for zero-dependency portability.
-13. **WebAssembly (Wasm) In-Browser IDE & REPL**:
-    Run 100% client-side in the browser via `web/raptor.wasm`, featuring interactive REPL prompt, code playground, presets, and live PodLit literate inspector (`raptor serve`).
-
-## Quick Start
-
-```powershell
-# 1. Run the comprehensive feature showcase
+go build -mod=mod -o bin/raptor.exe ./cmd/raptor
+go build -mod=mod -o bin/raptorhp.exe ./cmd/raptorhp
+go test -mod=mod ./...
+.\bin\raptor.exe test t\
 .\bin\raptor.exe run examples/demo_showcase.rp
-
-# 2. Launch the WebAssembly In-Browser REPL & Playground
 .\bin\raptor.exe serve --port 8080
-# Open http://localhost:8080/ in your browser!
-
-# 3. Run the interactive 60 FPS Raylib desktop game GUI window
-.\bin\raptor.exe run examples/raylib_game.rp
-
-# 4. Weave, tangle, and stitch a Literate POD document
-.\bin\raptor.exe weave examples/literate_game.pod -o docs/literate_game.md
-.\bin\raptor.exe tangle examples/literate_game.pod -o src/
-.\bin\raptor.exe stitch examples/literate_game.pod src/lib/LiterateTypes.rp
-.\bin\raptor.exe run examples/literate_game.pod
-
-# 5. Run the performance benchmark suite
-.\bin\raptor.exe run examples/benchmark.rp
-
-# 6. Run the TAP test harness across all test suites (like prove)
-.\bin\raptor.exe test t/
-
-# 7. Read terminal documentation manual with ANSI styling
-.\bin\raptor.exe doc operators
-.\bin\raptor.exe doc 01_introduction
-
-# 8. Package into a standalone executable (.exe)
+.\bin\raptor.exe -S localhost:8000
+.\bin\raptor.exe --wasm --wasm-compiler=go -o web/raptor.wasm
 .\bin\raptor.exe pack examples/raylib_game.rp -o bin/raylib_game.exe
-.\bin\raptor.exe pack examples/demo_showcase.rp -o bin/demo_app.exe
-
-# 9. Execute the standalone executable directly
-.\bin\raylib_game.exe
-.\bin\demo_app.exe
-
-# 10. Start the interactive terminal REPL
-.\bin\raptor.exe
-
-# 11. Run the PHP-Style Template Server (RaptorHP)
-.\bin\raptorhp.exe -r '<h1><?= "Hello from RaptorHP" ?></h1>'
-.\bin\raptorhp.exe -S localhost:8000
-
-# 12. Run the Interactive WebAssembly Playground (25-lesson tour, WebAudio + WebGPU)
-.\bin\raptor.exe serve 8085
-
-# 13. Run full Go test suite across all subsystems
-go test -v ./...
+.\bin\raptor.exe doc perlraptor
 ```
 
-## Interactive WebAssembly Tour & In-Browser Execution
+Linux: `go build -o bin/raptor ./cmd/raptor` and the same `test` / `serve` / `-S` commands. Packages: `gcc`, `libsqlite3-dev`, `portaudio` as needed.
 
-Raptor includes a 1:1 Go Tour-style interactive WebAssembly environment (`web/index.html`):
-- **25 Interactive Chapters**: Language tour plus Canvas 2D, WebGL 3D, a WebAudio **node graph** (oscillator / filter / compressor / delay / LFO, scheduled on `AudioContext.currentTime`), and a WebGPU tiny character-level LLM.
-- **Pure Raptor Graphics, Audio & Tensors**: GLSL, 4x4 math, ADSR envelopes, and the tiny-LM loop are authored in Raptor. The JS layer is 1:1 Web Audio / WebGPU / Canvas. Desktop tensors use the GGML C API (`ggml_*`, optional `ggml.dll`).
-- **Resizable Multi-Pane Workspace**: Drag-to-resize split gutters and 2-axis scrollbar canvas viewport.
+Rakupp-style kernels: `examples/bench/*.rp`. Memory/time table: [SPEC.md](SPEC.md) §8.
 
-## Embedded Systems, ESP32 Microcontrollers & TinyGo
+---
 
-Raptor compiles directly to bare-metal microcontrollers (such as **ESP32**, **ESP32-S3**, **ESP32-C3**, and **RP2040**) using TinyGo and embedded build profiles:
+## WASM tour & embedded
 
-```powershell
-# 1. Run automated binary size optimization & stripped builds
-powershell -ExecutionPolicy Bypass -File .\scripts\build_optimized.ps1
+`raptor serve` hosts `web/` (Canvas, WebGL, WebAudio node graph). Tour HTTP and WebGPU lessons are off for now. Live Pages: [xyzzyapps.github.io/raptor](https://xyzzyapps.github.io/raptor/).
 
-# 2. Run embedded examples on host (simulated hardware peripherals)
-.\bin\raptor.exe run examples/esp32_blink.rp
-.\bin\raptor.exe run examples/esp32_sensor_contracts.rp
-.\bin\raptor.exe run examples/esp32_i2c_display.rp
+TinyGo / ESP32: `scripts/build_optimized.ps1`; `tinygo flash -target=esp32 ./cmd/esp32`. Host-sim: `examples/esp32_blink.rp`.
 
-# 3. Flash to ESP32 board via TinyGo over USB/Serial
-tinygo flash -target=esp32 --port=/dev/ttyUSB0 ./cmd/esp32
-tinygo flash -target=esp32s3 ./cmd/esp32
-```
+| Profile | Notes |
+| :--- | :--- |
+| Desktop CLI | `go build -ldflags="-s -w"` ≈ 8 MB stripped |
+| WASM (`gc`) | `GOOS=js` playground (TinyGo smaller if `wasm-opt` is new enough) |
+| ESP32 | TinyGo, ~380 KB flash |
 
-### Embedded Hardware Features:
-- **Low Footprint**: ~380 KB Flash binary, ~45 KB RAM runtime heap.
-- **Physical I/O Primitives**: `gpio_pin_mode`, `gpio_set`, `gpio_get`, `gpio_toggle`, `analog_read`, `pwm_write`, `pwm_freq`, `i2c_write`, `i2c_read`, `spi_transfer`.
-- **UART Serial REPL**: Boots directly into an interactive `raptor>` prompt over 115200 baud serial connection.
-- **Continuous Hardware Invariants**: Enforces dynamic `subset` contracts (e.g. valid pin bounds, duty cycles, thermal limits) directly on physical actuators.
-
-### Interactive 14-Lesson WebAssembly Tour & Micro-Deployment
-
-Raptor's core evaluation engine has zero reflection overhead, making it directly compatible with the TinyGo LLVM toolchain for ultra-compact deployments:
-
-| Target Profile | Toolchain & Profile | Raw Unstripped Size | Optimized Build Size | Over-The-Wire (Gzip / Brotli) | Target Platform |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Native CLI (Full)** | Standard Go `gc` (`-ldflags="-s -w"`) | **11.78 MB** | **7.95 MB** | **2.60 MB** | Windows / Linux / macOS (x86_64/ARM64) |
-| **WebAssembly 14-Lesson Tour** | TinyGo LLVM (`-target=wasm -no-debug`) | **1.38 MB** | **1.38 MB** | **468 KB** (Brotli: ~380 KB) | Modern Web Browsers (WebAssembly) |
-| **WebAssembly Standard (`gc`)** | Tree-Shaken Go `gc` (`-ldflags="-s -w"`) | **14.20 MB** | **6.05 MB** | **1.21 MB** (Brotli: ~980 KB) | Web Browsers & Node.js WASM |
-| **ESP32 Microcontroller** | TinyGo LLVM (`-target=esp32`) | **850 KB** | **380 KB** | N/A (Direct Flash) | ESP32, ESP32-S3, ESP32-C3, RP2040 |
-
-#### TinyGo WASM Build Command:
-```bash
-tinygo build -target=wasm -no-debug -o web/raptor.wasm ./cmd/wasm
-```
+---
 
 ## Notes
 
-The language was mostly written by Anti Gravity - Gemini 3.6. Library bindings, podlit are written by Gemini 3.7.
+The first prototype was written by **Gemini**. The language was mostly written by Anti Gravity — Gemini 3.6. Library bindings and PodLit were written by Gemini 3.7. Later work was modified by **Grok**.
 
-Built on windows. It should work on Linux. Expect bugs, memory leaks and probably some wrong semantics. Future versions will make it closer to Raku.
-
-
-
-
-
+Built on Windows. It should work on Linux. Expect bugs, memory leaks, and some wrong semantics. Future versions will sit closer to Raku.

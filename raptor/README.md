@@ -1,5 +1,6 @@
 <p align="center">
-  <img src="assets/logo_wt.png" alt="Raptor Language Logo" width="160" />
+  <img src="assets/logo_black.png#gh-light-mode-only" alt="Raptor Language Logo" width="160" />
+  <img src="assets/logo_wt.png#gh-dark-mode-only" alt="Raptor Language Logo" width="160" />
 </p>
 
 # Raptor

@@ -36,6 +36,13 @@ func (s *TAPState) indent() string {
 	return strings.Repeat("    ", s.IndentLevel)
 }
 
+func (in *Interp) unwrapTapArg(v *Value) (*Value, error) {
+	if v != nil && v.Type == ValClosure {
+		return in.InvokeCallable(v, nil)
+	}
+	return v, nil
+}
+
 func registerTAPBuiltins(in *Interp) {
 	st := newTAPState(in.Stdout)
 
@@ -61,7 +68,11 @@ func registerTAPBuiltins(in *Interp) {
 		st.TestCount++
 		cond := false
 		if len(args) > 0 {
-			cond = args[0].IsTrue()
+			av, err := in.unwrapTapArg(args[0])
+			if err != nil {
+				return nil, err
+			}
+			cond = av.IsTrue()
 		}
 		name := ""
 		if len(args) > 1 && args[1].Type != ValNil {
@@ -86,11 +97,18 @@ func registerTAPBuiltins(in *Interp) {
 		st.TestCount++
 
 		var got, expected *Value = NilValue(), NilValue()
+		var err error
 		if len(args) > 0 {
-			got = args[0]
+			got, err = in.unwrapTapArg(args[0])
+			if err != nil {
+				return nil, err
+			}
 		}
 		if len(args) > 1 {
-			expected = args[1]
+			expected, err = in.unwrapTapArg(args[1])
+			if err != nil {
+				return nil, err
+			}
 		}
 		name := ""
 		if len(args) > 2 && args[2].Type != ValNil {
@@ -119,11 +137,18 @@ func registerTAPBuiltins(in *Interp) {
 		st.TestCount++
 
 		var got, expected *Value = NilValue(), NilValue()
+		var err error
 		if len(args) > 0 {
-			got = args[0]
+			got, err = in.unwrapTapArg(args[0])
+			if err != nil {
+				return nil, err
+			}
 		}
 		if len(args) > 1 {
-			expected = args[1]
+			expected, err = in.unwrapTapArg(args[1])
+			if err != nil {
+				return nil, err
+			}
 		}
 		name := ""
 		if len(args) > 2 && args[2].Type != ValNil {
@@ -150,11 +175,18 @@ func registerTAPBuiltins(in *Interp) {
 		st.TestCount++
 
 		var got, expected *Value = NilValue(), NilValue()
+		var err error
 		if len(args) > 0 {
-			got = args[0]
+			got, err = in.unwrapTapArg(args[0])
+			if err != nil {
+				return nil, err
+			}
 		}
 		if len(args) > 1 {
-			expected = args[1]
+			expected, err = in.unwrapTapArg(args[1])
+			if err != nil {
+				return nil, err
+			}
 		}
 		name := ""
 		if len(args) > 2 && args[2].Type != ValNil {
@@ -185,10 +217,18 @@ func registerTAPBuiltins(in *Interp) {
 		gotStr := ""
 		pattern := ""
 		if len(args) > 0 {
-			gotStr = args[0].String()
+			got, err := in.unwrapTapArg(args[0])
+			if err != nil {
+				return nil, err
+			}
+			gotStr = got.String()
 		}
 		if len(args) > 1 {
-			pattern = args[1].String()
+			pat, err := in.unwrapTapArg(args[1])
+			if err != nil {
+				return nil, err
+			}
+			pattern = pat.String()
 		}
 		name := ""
 		if len(args) > 2 && args[2].Type != ValNil {
@@ -219,10 +259,18 @@ func registerTAPBuiltins(in *Interp) {
 		gotStr := ""
 		pattern := ""
 		if len(args) > 0 {
-			gotStr = args[0].String()
+			got, err := in.unwrapTapArg(args[0])
+			if err != nil {
+				return nil, err
+			}
+			gotStr = got.String()
 		}
 		if len(args) > 1 {
-			pattern = args[1].String()
+			pat, err := in.unwrapTapArg(args[1])
+			if err != nil {
+				return nil, err
+			}
+			pattern = pat.String()
 		}
 		name := ""
 		if len(args) > 2 && args[2].Type != ValNil {

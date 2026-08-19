@@ -115,7 +115,7 @@ Licensed under the **Artistic License 2.0**.
 14. **Backticks** — `` `cmd` ``, `qx{cmd}`; `$?` / `$!`.
 15. **Grammars** — `grammar` / `rule` / `token` / `regex` (gcre). Language parse is gcre + HOST Pratt.
 16. **Regex / `samre`** — `regex_engine("samre")`.
-17. **Verification** — `pre` / `post` / `invariant`; `TEST`, `PRE`, `POST`, `INVARIANT`, `PROPERTY`, `SUBTEST`, `CHECK`, `ASSERT`; TAP `plan` / `ok` / `is` / `is_deeply` / `like` / `done_testing`; `raptor test t/` (like `prove`).
+17. **Verification** — uppercase only: `PRE $cond;` / `PRE { … }` (also `POST`, `INVARIANT`, `CHECK`, `ASSERT`); `TEST` / `PROPERTY` / `SUBTEST` name+block. Prefix calls: `f($a,$b)` = `f $a, $b` = `(f $a, $b)`. TAP `plan 4;` / `ok 1+1==2, "msg"` / `ok { … }`. `raptor test t/` (like `prove`).
 18. **TUI (Charmbracelet)** — `tui_style`, `tui_box`, `tui_table`, `tui_progress`, `tui_markdown`, `tui_app_run`.
 19. **PortAudio** — `pa_init`, `pa_device_count`, `pa_sine_wave`, … (`lib/PortAudio.rp`).
 20. **SQLite & JSON** — `sqlite_open` / `exec` / `query` / `close`; `to_json` / `from_json`.
@@ -168,12 +168,12 @@ multi sub infix:<+>(Vector2 $a, Vector2 $b) {
 **Contracts & TAP**
 ```perl
 sub safe_divide($a, $b) {
-    pre({ $b != 0 });
-    post({ $_ >= 0 });
+    PRE { $b != 0 }
+    POST { $_ >= 0 }
     return $a div $b;
 }
-property "addition commutativity", sub ($x, $y) { return ($x + $y) == ($y + $x); };
-plan(1); ok(1 + 1 == 2, "math"); done_testing();
+PROPERTY "addition commutativity" ($x, $y) { return ($x + $y) == ($y + $x); }
+plan 1; ok 1 + 1 == 2, "math"; done_testing;
 ```
 
 **TUI**

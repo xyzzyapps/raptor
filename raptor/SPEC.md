@@ -133,8 +133,8 @@ The TUI subsystem (`runtime/tui.go`, `lib/Charm.raku`) provides:
 ## 4. Perl5 TAP Testing & Test Harness (`raptor test`)
 
 The TAP subsystem (`runtime/tap.go`, `lib/Test/More.raku`) implements the Test Anything Protocol (v13):
-- `plan($count)`: Sets planned test assertions (`1..N`).
-- `ok($cond, [$name])`: Asserts boolean condition.
+- `plan($count)` / `plan $count;`: Sets planned test assertions (`1..N`).
+- `ok($cond, [$name])` / `ok $cond, "name"` / `ok { … }, "name"`: Asserts boolean condition.
 - `is($got, $expected, [$name])`: Asserts equality with diagnostic diffs.
 - `isnt($got, $expected, [$name])`: Asserts inequality.
 - `is_deeply($got, $expected, [$name])`: Structural recursive equality on arrays, hashes, and structs.
@@ -151,9 +151,9 @@ The TAP subsystem (`runtime/tap.go`, `lib/Test/More.raku`) implements the Test A
 ## 5. Verification Framework: Inline Tests, Contracts & Fuzzing
 
 The verification engine (`runtime/verification.go`, `docs/14_raptor-testing.pod`) provides:
-1. **Zero-Overhead Inline Tests (`TEST "desc", sub () { ... }`)**: Skipped with zero overhead in production; executed automatically during `raptor test` or with `--test`.
-2. **Design-by-Contract (`pre`, `post`, `invariant`)**: Preconditions and postconditions checked at subroutine entry/return.
-3. **Property-Based QuickCheck Fuzzing (`property "name", sub ($a, $b) { ... }`)**: Invariant verification across 100 randomized input trials.
+1. **Zero-Overhead Inline Tests (`TEST "desc" { ... }`)**: Skipped with zero overhead in production; executed automatically during `raptor test` or with `--test`.
+2. **Design-by-Contract (`PRE`, `POST`, `INVARIANT`)**: Preconditions and postconditions checked at subroutine entry/return. Uppercase only.
+3. **Property-Based QuickCheck Fuzzing (`PROPERTY "name" ($a, $b) { ... }`)**: Invariant verification across 100 randomized input trials.
 
 ---
 
@@ -360,7 +360,7 @@ go test ./...                  # Go unit test suites (58 suites in runtime/)
 | **Null / Nil Value** | Canonical Raku `Nil` (with `//` and `//=` defined-or operators) | Canonical Raku `Nil` |
 | **Testing Engine** | Built-in TAP v13 producer (`plan`, `ok`, `is`, `subtest`, `done_testing`) without imports | Requires `use Test;` module import |
 | **TUI & Audio Subsystems** | Built-in zero-dependency Lip Gloss ANSI styling, boxed views, tables, and PortAudio synthesis | Requires external `zef` module ecosystem and C dynamic libraries |
-| **Verification & Fuzzing** | Built-in `pre`, `post`, `invariant` contracts and `property` quickcheck fuzzing | Requires external community modules |
+| **Verification & Fuzzing** | Built-in `PRE`, `POST`, `INVARIANT` contracts and `PROPERTY` quickcheck fuzzing | Requires external community modules |
 | **Startup Latency** | **< 15ms** instant cold start | **~ 200ms** startup due to 6Model metamodel initialization |
 
 ### 17.2 Script Execution & Compatibility Matrix
@@ -375,7 +375,7 @@ go test ./...                  # Go unit test suites (58 suites in runtime/)
 | **`t/02_subsets_predicate_dispatch.t`** | **8/8 PASS** | **8/8 PASS (100%)** | `subset`, `where` clauses, predicate multiple dispatch, and predicate recursion are **100% identical and native in Raku**. |
 | **`t/03_structs_closures.t`** | **7/7 PASS** | **7/7 PASS (100%)** (with class stub) | When `struct` is stubbed as a record/class, operator overloading (`multi sub infix:<+>`, `multi sub prefix:<->`) and closure method invocations pass identically. |
 | **`t/04_tui_charm.t`** | **5/5 PASS** | **5/5 PASS (100%)** (with TUI stubs) | Passes 100% when stubbing `tui_style`, `tui_box`, `tui_table`, `tui_progress`. |
-| **`t/05_verification_contracts.t`** | **4/4 PASS** | **4/4 PASS (100%)** (with contract stubs) | Passes 100% when stubbing `pre`, `post`, and `property` (including 100 randomized property-based quickcheck trials and inline subtests). |
+| **`t/05_verification_contracts.t`** | **4/4 PASS** | **4/4 PASS (100%)** (with contract stubs) | Passes 100% when stubbing `PRE`, `POST`, and `PROPERTY` (including 100 randomized property-based quickcheck trials and inline subtests). |
 | **`t/06_podlit_literate.t`** | **9/9 PASS** | **9/9 PASS (100%)** (with PodLit stubs) | Passes 100% when stubbing `pod_weave`, `pod_tangle`, `pod_stitch`. |
 
 ### 17.3 Running the Comparative Test Harness
@@ -743,35 +743,35 @@ Raptor provides an uppercase verification keywords suite for Hoare logic contrac
 ```raptor
 # 1. Preconditions & Postconditions
 sub divide(Int $a, Int $b) {
-    PRE({ $b != 0 }, "denominator must be non-zero");
+    PRE $b != 0, "denominator must be non-zero";
     my $res = $a div $b;
-    POST({ $res >= 0 }, "result invariant");
+    POST { $res >= 0 }, "result invariant";
     return $res;
 }
 
 # 2. Invariants & Dynamic Checks
 sub deposit(Int $balance, Int $amount) {
-    INVARIANT({ $balance >= 0 }, "balance cannot be negative");
-    PRE({ $amount > 0 }, "deposit amount must be positive");
+    INVARIANT { $balance >= 0 }, "balance cannot be negative";
+    PRE { $amount > 0 }, "deposit amount must be positive";
     my $new_bal = $balance + $amount;
-    INVARIANT({ $new_bal >= 0 }, "new balance invariant");
+    INVARIANT { $new_bal >= 0 }, "new balance invariant";
     return $new_bal;
 }
 
 # 3. Assertions & QuickCheck Fuzzing
-ASSERT(10 > 5, "10 is greater than 5");
-CHECK($status == "OK", "status is healthy");
+ASSERT 10 > 5, "10 is greater than 5";
+CHECK $status == "OK", "status is healthy";
 
-PROPERTY("addition commutativity", sub ($a, $b) {
+PROPERTY "addition commutativity" ($a, $b) {
     return ($a + $b) == ($b + $a);
-});
+}
 
 # 4. Subtest Suites
-SUBTEST("Math Verification", sub () {
-    plan(2);
-    ok(1 + 1 == 2, "sum assertion");
-    is(2 * 3, 6, "product assertion");
-});
+SUBTEST "Math Verification" {
+    plan 2;
+    ok 1 + 1 == 2, "sum assertion";
+    is 2 * 3, 6, "product assertion";
+}
 ```
 
 ---

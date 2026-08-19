@@ -4,7 +4,7 @@
 
 =head1 NAME
 
-raptor-testing - C<raptor test>, Test::More-shaped TAP, C<pre>/C<post>
+raptor-testing - C<raptor test>, Test::More-shaped TAP, C<PRE>/C<POST>
 
 =head1 TAP
 
@@ -12,13 +12,14 @@ Write C<t/*.t>:
 
 =begin code
 
-plan(6);
-ok(1 + 1 == 2, "Addition holds");
-is(2 * 3, 6, "Multiplication produces 6");
-isnt("alpha", "beta", "different");
-is_deeply([1, 2], [1, 2], "deep");
-like("raptor_1.0.0", "^raptor_", "prefix");
-done_testing();
+plan 6;
+ok 1 + 1 == 2, "Addition holds";
+is 2 * 3, 6, "Multiplication produces 6";
+isnt "alpha", "beta", "different";
+is_deeply [1, 2], [1, 2], "deep";
+like "raptor_1.0.0", "^raptor_", "prefix";
+ok { 2 + 2 == 4 }, "block condition";
+done_testing;
 
 =end code
 
@@ -36,22 +37,37 @@ C<TEST> blocks are skipped in normal runs; C<raptor test> executes them.
 
 sub calculate_tax($subtotal, $rate) { return $subtotal * $rate; }
 
-TEST "calculate_tax", sub () {
-    is(calculate_tax(100.0, 0.05), 5.0, "5% of 100");
-};
+TEST "calculate_tax" {
+    is calculate_tax(100.0, 0.05), 5.0, "5% of 100";
+}
 
 =end code
 
 =head1 CONTRACTS
 
-C<pre>, C<post>, C<invariant> (and C<PRE>, C<POST>, C<INVARIANT>,
-C<ASSERT>, C<CHECK>).
+Statement or block form — no required parens. Keywords are uppercase
+only (C<PRE>, not C<pre>). Lowercase C<post> is a normal identifier
+(C<sub post>, HTTP helpers).
+
+=begin code
+
+PRE $b != 0;
+PRE { $b != 0 }
+PRE $b != 0, "denominator must be non-zero";
+POST { $res >= 0 }, "result must be non-negative";
+INVARIANT $balance >= 0;
+CHECK 10 > 5, "ten is bigger";
+ASSERT { $ok }
+
+=end code
+
+C<TEST>, C<PROPERTY>, and C<SUBTEST> take a name and a block.
 
 =head1 QUICKCHECK
 
-    property "addition commutativity", sub ($a, $b) {
+    PROPERTY "addition commutativity" ($a, $b) {
         return ($a + $b) == ($b + $a);
-    };
+    }
 
 One hundred random trials by default.
 

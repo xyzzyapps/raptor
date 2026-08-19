@@ -19,6 +19,28 @@ C<.wasm>. Live tour: L<https://xyzzyapps.github.io/raptor/>.
 Tour B<HTTP> and B<WebGPU> lessons are disabled (they did not run
 well in WASM).
 
+Tour order (language, then tests/literate, then browser surfaces):
+
+=over 4
+
+=item 1–9
+
+Basics, control, C<$_>, scoping, modifiers, context, refs, UFCS, lists.
+
+=item 10–16
+
+Subsets, structs, junctions, destructuring, gather, packages, grammars.
+
+=item 17–19
+
+C<PRE>/C<POST>, TAP, PodLit.
+
+=item 20–24
+
+JSON/HTTP (off), Canvas 2D, WebGL, WebAudio, WebGPU (off).
+
+=back
+
 =head1 CANVAS
 
     canvas_init("wasmCanvas", 640, 380);

@@ -120,16 +120,22 @@ raptor -S localhost:8000 -t .
 
 ```perl
 sub safe_divide($a, $b) {
-    pre({ $b != 0 });
-    post({ $_ >= 0 });
+    PRE { $b != 0 }
+    POST { $_ >= 0 }
     return $a div $b;
 }
 
-# Randomized Property-Based QuickCheck Testing (100 trials)
-property "addition commutativity", sub ($a, $b) {
+PROPERTY "addition commutativity" ($a, $b) {
     return ($a + $b) == ($b + $a);
-};
+}
+
+plan 2;
+ok 1 + 1 == 2, "sum";
+ok { $b > 0 }, "block cond";
+done_testing;
 ```
+
+Lowercase `post` is a normal identifier (`sub post`, HTTP helpers). `PRE`/`POST`/`INVARIANT`/`CHECK`/`ASSERT` are statement or block forms; TAP (`plan`/`ok`/`is`/`isnt`/`like`/`done_testing`) uses the same no-paren / `{ }` style. Parenthesized calls still work.
 
 ## AI credit
 

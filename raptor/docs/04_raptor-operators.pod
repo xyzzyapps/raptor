@@ -15,6 +15,14 @@ Precedence follows Raku more than Perl 5.
 Unicode (real operators): C<× ÷ ± √>. C<√$x> is prefix sqrt.
 C<∑> and C<∏> are callables: C<∑(1,2,3)>.
 
+Prefix call syntax — three equivalent forms for any subroutine:
+
+    func($arg1, $arg2)
+    func $arg1, $arg2
+    (func $arg1, $arg2)
+
+C<(1 + 2)> and C<(10 min 20)> stay ordinary grouped infix.
+
 =head1 STRING AND LIST
 
     ~   x   xx   ..

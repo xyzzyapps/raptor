@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"moarvm-go/engine"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -608,32 +609,10 @@ func (c *Compiler) compileStmt(stmt Stmt) error {
 		return c.compileTake(s)
 	case *GrammarDeclStmt:
 		return c.compileGrammar(s)
+	case *VerifyStmt:
+		return c.compileVerify(s)
 	case *AssertStmt:
-		cond, err := c.compileVal(s.Condition)
-		if err != nil {
-			return err
-		}
-		okJ := c.emitIf(cond.reg)
-		msg := "assert failed"
-		if s.Message != nil {
-			mv, err := c.compileVal(s.Message)
-			if err != nil {
-				return err
-			}
-			if err := c.emitSayReg(mv.reg); err != nil {
-				return err
-			}
-		} else {
-			r, err := c.constS(msg)
-			if err != nil {
-				return err
-			}
-			if err := c.emitSayReg(r); err != nil {
-				return err
-			}
-		}
-		c.patchU32(okJ, uint32(c.frame.CurrentOffset()))
-		return nil
+		return c.compileVerify(&VerifyStmt{Kind: "ASSERT", Cond: s.Condition, Message: s.Message})
 
 	default:
 		return unsupported(stmt)
@@ -1331,6 +1310,27 @@ func binOp(op string) (uint16, bool, bool) {
 	return 0, false, false
 }
 
+func (c *Compiler) compileMinMaxCall(args []Expr, min bool) (mval, error) {
+	if len(args) == 0 {
+		return c.nilVal()
+	}
+	acc, err := c.compileVal(args[0])
+	if err != nil {
+		return mval{}, err
+	}
+	for _, a := range args[1:] {
+		rhs, err := c.compileVal(a)
+		if err != nil {
+			return mval{}, err
+		}
+		acc, err = c.compileMinMax(min, acc, rhs)
+		if err != nil {
+			return mval{}, err
+		}
+	}
+	return acc, nil
+}
+
 func (c *Compiler) compileMinMax(min bool, l, r mval) (mval, error) {
 	dst, err := c.tempKind(moargo.RegInt64)
 	if err != nil {
@@ -1552,12 +1552,56 @@ func (c *Compiler) compileCall(e *CallExpr) (mval, error) {
 		return c.compileIs(e.Args, true)
 	case "isnt":
 		return c.compileIs(e.Args, false)
+	case "PRE", "POST", "INVARIANT", "CHECK", "ASSERT":
+		vs := &VerifyStmt{Kind: strings.ToUpper(name)}
+		if len(e.Args) > 0 {
+			vs.Cond = e.Args[0]
+		}
+		if len(e.Args) > 1 {
+			vs.Message = e.Args[1]
+		}
+		if err := c.compileVerify(vs); err != nil {
+			return mval{}, err
+		}
+		one, err := c.constI(1)
+		if err != nil {
+			return mval{}, err
+		}
+		return c.definedVal(one, moargo.RegInt64)
+	case "TEST":
+		if os.Getenv("RAPTOR_TEST_MODE") != "1" {
+			return c.nilVal()
+		}
+		fallthrough
+	case "SUBTEST":
+		if len(e.Args) >= 2 {
+			if cl, ok := e.Args[1].(*ClosureExpr); ok && cl.Body != nil {
+				if err := c.compileStmts(cl.Body.Stmts); err != nil {
+					return mval{}, err
+				}
+			}
+		}
+		return c.nilVal()
+	case "PROPERTY":
+		if len(e.Args) >= 2 {
+			if cl, ok := e.Args[1].(*ClosureExpr); ok {
+				vs := &VerifyStmt{Kind: "PROPERTY", Name: e.Args[0], Params: cl.Params, Body: cl.Body}
+				if err := c.compileVerify(vs); err != nil {
+					return mval{}, err
+				}
+			}
+		}
+		return c.nilVal()
 	case "done_testing":
 		one, err := c.constI(1)
 		if err != nil {
 			return mval{}, err
 		}
 		return c.definedVal(one, moargo.RegInt64)
+	case "min":
+		return c.compileMinMaxCall(e.Args, true)
+	case "max":
+		return c.compileMinMaxCall(e.Args, false)
 	case "abs":
 		if len(e.Args) < 1 {
 			return c.nilVal()
@@ -1695,6 +1739,130 @@ func (c *Compiler) compileCall(e *CallExpr) (mval, error) {
 	}
 }
 
+func (c *Compiler) compileBlockValue(body *BlockStmt) (mval, error) {
+	if body == nil || len(body.Stmts) == 0 {
+		return c.nilVal()
+	}
+	last := len(body.Stmts) - 1
+	for i, st := range body.Stmts {
+		if i == last {
+			switch s := st.(type) {
+			case *ExprStmt:
+				return c.compileVal(s.Expr)
+			case *ReturnStmt:
+				if s.Value != nil {
+					return c.compileVal(s.Value)
+				}
+				return c.nilVal()
+			}
+		}
+		if err := c.compileStmt(st); err != nil {
+			return mval{}, err
+		}
+	}
+	return c.nilVal()
+}
+
+func (c *Compiler) compileTapArg(e Expr) (mval, error) {
+	if e == nil {
+		return c.nilVal()
+	}
+	if cl, ok := e.(*ClosureExpr); ok {
+		return c.compileBlockValue(cl.Body)
+	}
+	return c.compileVal(e)
+}
+
+func (c *Compiler) compileVerifyCond(s *VerifyStmt) (mval, error) {
+	if s.Body != nil {
+		return c.compileBlockValue(s.Body)
+	}
+	return c.compileTapArg(s.Cond)
+}
+
+func (c *Compiler) compileVerify(s *VerifyStmt) error {
+	kind := strings.ToUpper(s.Kind)
+	if kind == "" {
+		kind = "ASSERT"
+	}
+	switch kind {
+	case "TEST":
+		if os.Getenv("RAPTOR_TEST_MODE") != "1" {
+			return nil
+		}
+		if s.Body != nil {
+			return c.compileStmts(s.Body.Stmts)
+		}
+		return nil
+	case "SUBTEST":
+		if s.Body != nil {
+			return c.compileStmts(s.Body.Stmts)
+		}
+		return nil
+	case "PROPERTY":
+		for _, p := range s.Params {
+			z, err := c.constI(0)
+			if err != nil {
+				return err
+			}
+			if err := c.bindVar(p.Name, mval{reg: z, typ: moargo.RegInt64}); err != nil {
+				return err
+			}
+		}
+		cond, err := c.compileVerifyCond(s)
+		if err != nil {
+			return err
+		}
+		if err := c.incTAP(); err != nil {
+			return err
+		}
+		label, err := c.tapLabel([]Expr{nil, s.Name}, 1)
+		if err != nil {
+			return err
+		}
+		_, err = c.emitTAPLine(cond.reg, label)
+		return err
+	}
+
+	cond, err := c.compileVerifyCond(s)
+	if err != nil {
+		return err
+	}
+	okJ := c.emitIf(cond.reg)
+	msg := "assertion failed"
+	switch kind {
+	case "PRE":
+		msg = "precondition failed"
+	case "POST":
+		msg = "postcondition failed"
+	case "INVARIANT":
+		msg = "invariant violation"
+	}
+	if s.Message != nil {
+		mv, err := c.compileVal(s.Message)
+		if err != nil {
+			return err
+		}
+		if err := c.emitSayReg(mv.reg); err != nil {
+			return err
+		}
+	} else {
+		r, err := c.constS(msg)
+		if err != nil {
+			return err
+		}
+		if err := c.emitSayReg(r); err != nil {
+			return err
+		}
+	}
+	// Fail closed: leave the frame instead of continuing past a broken contract.
+	if err := c.emitDefaultReturn(moargo.RegInt64); err != nil {
+		return err
+	}
+	c.patchU32(okJ, uint32(c.frame.CurrentOffset()))
+	return nil
+}
+
 func (c *Compiler) compilePlan(args []Expr) (mval, error) {
 	n := int64(0)
 	if len(args) > 0 {
@@ -1744,7 +1912,7 @@ func (c *Compiler) compileOK(args []Expr) (mval, error) {
 	cond := mval{}
 	var err error
 	if len(args) > 0 {
-		cond, err = c.compileVal(args[0])
+		cond, err = c.compileTapArg(args[0])
 		if err != nil {
 			return mval{}, err
 		}
@@ -1772,7 +1940,7 @@ func (c *Compiler) compileIs(args []Expr, wantEq bool) (mval, error) {
 	var got, exp mval
 	var err error
 	if len(args) > 0 {
-		got, err = c.compileVal(args[0])
+		got, err = c.compileTapArg(args[0])
 		if err != nil {
 			return mval{}, err
 		}
@@ -1783,7 +1951,7 @@ func (c *Compiler) compileIs(args []Expr, wantEq bool) (mval, error) {
 		}
 	}
 	if len(args) > 1 {
-		exp, err = c.compileVal(args[1])
+		exp, err = c.compileTapArg(args[1])
 		if err != nil {
 			return mval{}, err
 		}

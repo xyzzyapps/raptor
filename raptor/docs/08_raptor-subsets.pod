@@ -52,15 +52,15 @@ multi sub grade($score) { return "C"; }
 =begin code
 
 sub deposit($account, $amount) {
-    pre({ $amount > 0 });
+    PRE { $amount > 0 }
     $account{"balance"} = $account{"balance"} + $amount;
-    post({ $_ >= $amount });
+    POST { $_ >= $amount }
     return $account{"balance"};
 }
 
 =end code
 
-Also C<invariant>, C<PRE>, C<POST>, C<INVARIANT>, C<ASSERT>, C<CHECK>.
+Also C<PRE>, C<POST>, C<INVARIANT>, C<ASSERT>, C<CHECK>.
 See L<14_raptor-testing>.
 
 =head1 SEE ALSO

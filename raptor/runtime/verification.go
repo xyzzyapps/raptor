@@ -25,7 +25,7 @@ func registerVerificationBuiltins(in *Interp) {
 		return arg.IsTrue(), nil
 	}
 
-	// PRE / pre($condition, [$message]) - Precondition contract
+	// PRE $condition [, $message]
 	preHandler := func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) == 0 {
 			return nil, fmt.Errorf("PreconditionError: precondition failed")
@@ -44,9 +44,8 @@ func registerVerificationBuiltins(in *Interp) {
 		return BoolValue(true), nil
 	}
 	in.Builtins["PRE"] = preHandler
-	in.Builtins["pre"] = preHandler
 
-	// POST / post($condition, [$message]) - Postcondition contract
+	// POST $condition [, $message] — lowercase "post" stays a user ident.
 	postHandler := func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) == 0 {
 			return nil, fmt.Errorf("PostconditionError: postcondition failed")
@@ -65,7 +64,6 @@ func registerVerificationBuiltins(in *Interp) {
 		return BoolValue(true), nil
 	}
 	in.Builtins["POST"] = postHandler
-	in.Builtins["post"] = postHandler
 
 	// INVARIANT / invariant($condition, [$message]) - Invariant contract
 	invariantHandler := func(in *Interp, args []*Value) (*Value, error) {
@@ -86,9 +84,8 @@ func registerVerificationBuiltins(in *Interp) {
 		return BoolValue(true), nil
 	}
 	in.Builtins["INVARIANT"] = invariantHandler
-	in.Builtins["invariant"] = invariantHandler
 
-	// CHECK / check / ASSERT / assert ($condition, [$message]) - Explicit assertion
+	// CHECK / ASSERT $condition [, $message]
 	checkHandler := func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) == 0 {
 			return nil, fmt.Errorf("AssertionError: assertion failed")
@@ -107,11 +104,9 @@ func registerVerificationBuiltins(in *Interp) {
 		return BoolValue(true), nil
 	}
 	in.Builtins["CHECK"] = checkHandler
-	in.Builtins["check"] = checkHandler
 	in.Builtins["ASSERT"] = checkHandler
-	in.Builtins["assert"] = checkHandler
 
-	// TEST / test ($name, $closure) - Zero-overhead inline tests
+	// TEST $name { ... }
 	inlineTestHandler := func(in *Interp, args []*Value) (*Value, error) {
 		if os.Getenv("RAPTOR_TEST_MODE") != "1" {
 			return NilValue(), nil
@@ -127,7 +122,6 @@ func registerVerificationBuiltins(in *Interp) {
 		return NilValue(), nil
 	}
 	in.Builtins["TEST"] = inlineTestHandler
-	in.Builtins["test"] = inlineTestHandler
 
 	// SUBTEST / subtest ($name, $closure) - Nested test suite
 	subtestAlias := func(in *Interp, args []*Value) (*Value, error) {
@@ -138,7 +132,7 @@ func registerVerificationBuiltins(in *Interp) {
 	}
 	in.Builtins["SUBTEST"] = subtestAlias
 
-	// PROPERTY / property ($name, $closure, [%opts]) - Property-Based QuickCheck Testing / Fuzzing
+	// PROPERTY $name ($a, $b) { ... }
 	propertyHandler := func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) < 2 || args[1].Type != ValClosure {
 			return nil, fmt.Errorf("PROPERTY requires name string and verification closure")
@@ -200,5 +194,4 @@ func registerVerificationBuiltins(in *Interp) {
 		return BoolValue(true), nil
 	}
 	in.Builtins["PROPERTY"] = propertyHandler
-	in.Builtins["property"] = propertyHandler
 }

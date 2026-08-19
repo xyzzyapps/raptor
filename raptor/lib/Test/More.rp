@@ -2,12 +2,12 @@
 # Test::More - Perl5/Raku Standard TAP Test Framework for Raptor (.rp)
 # ==============================================================================
 
-# Plan total tests upfront: plan(10);
+# Plan total tests upfront: plan 10;
 sub plan($count) {
     return plan($count);
 }
 
-# Test boolean truth: ok($res == 42, "computed correct answer");
+# Test boolean truth: ok $res == 42, "computed correct answer";
 sub ok($condition, $name = "") {
     return ok($condition, $name);
 }

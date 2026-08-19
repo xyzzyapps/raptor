@@ -262,7 +262,21 @@ func (p *Parser) parseStatement() (Stmt, error) {
 		return p.parseStructDecl()
 
 	case TokAssert:
-		return p.parseAssert()
+		return p.parseVerify("ASSERT")
+	case TokPRE:
+		return p.parseVerify("PRE")
+	case TokPOST:
+		return p.parseVerify("POST")
+	case TokINVARIANT:
+		return p.parseVerify("INVARIANT")
+	case TokCHECK:
+		return p.parseVerify("CHECK")
+	case TokTEST:
+		return p.parseVerify("TEST")
+	case TokPROPERTY:
+		return p.parseVerify("PROPERTY")
+	case TokSUBTEST:
+		return p.parseVerify("SUBTEST")
 
 	case TokBefore, TokAfter, TokAround:
 		return p.parseAdviceHook()
@@ -306,6 +320,13 @@ func (p *Parser) parseStatement() (Stmt, error) {
 				return &LabelStmt{Name: name, Stmt: innerStmt}, nil
 			}
 			return &LabelStmt{Name: name, Stmt: nil}, nil
+		}
+
+		if p.peek().Type == TokIdent && isVerifyWord(p.peek().Literal) && p.peekNext().Type != TokLParen {
+			return p.parseVerify(p.peek().Literal)
+		}
+		if p.peek().Type == TokIdent && isTapWord(p.peek().Literal) && p.peekNext().Type != TokLParen {
+			return p.parseTapStmt()
 		}
 
 		if p.peek().Type == TokIdent && p.peek().Literal == "take" {
@@ -969,21 +990,23 @@ func (p *Parser) parseExpression(minPrec int) (Expr, error) {
 			continue
 		}
 
-		// Function call
+		// Function call: foo($a, $b)  or  foo (bar $a, $b) as foo(bar($a, $b))
 		if tok.Type == TokLParen {
 			p.advance()
-			var args []Expr
-			for p.peek().Type != TokRParen && !p.isAtEnd() {
-				arg, err := p.parseExpression(0)
+			if inner, ok, err := p.tryPrefixCallInParens(); ok {
 				if err != nil {
 					return nil, err
 				}
-				args = append(args, arg)
-				if p.peek().Type == TokComma {
-					p.advance()
-				}
+				left = &CallExpr{Callee: left, Args: []Expr{inner}}
+				continue
 			}
-			p.consume(TokRParen)
+			args, err := p.parseCallArgs(true)
+			if err != nil {
+				return nil, err
+			}
+			if err := p.consume(TokRParen); err != nil {
+				return nil, err
+			}
 			left = &CallExpr{Callee: left, Args: args}
 			continue
 		}
@@ -1352,6 +1375,14 @@ func (p *Parser) parsePrimary() (Expr, error) {
 		}
 		return &VarExpr{Name: "&"}, nil
 
+	case TokPRE, TokPOST, TokINVARIANT, TokCHECK, TokTEST, TokPROPERTY, TokSUBTEST, TokAssert:
+		p.advance()
+		return &VarExpr{Name: tok.Literal}, nil
+
+	case TokMin, TokMax, TokDiv, TokMod, TokCmp:
+		p.advance()
+		return p.parseNamedCallOrVar(tok.Literal)
+
 	case TokIdent:
 		p.advance()
 		name := tok.Literal
@@ -1370,30 +1401,7 @@ func (p *Parser) parsePrimary() (Expr, error) {
 			}
 			return &GatherExpr{Body: body}, nil
 		}
-
-		// Function call without parens in statement or argument context (e.g. say 1, 2)
-		// Unary context prefixes (+, -, ~, ?, !, so, not, file tests, ...) may begin an
-		// argument expression: say +@a  =>  say(+@a)  (Raku numeric/string/boolean context)
-		canStartCallArg := !p.isBinaryOp(p.peek()) || isUnaryPrefixTok(p.peek())
-		if p.peek().Type != TokDot && p.peek().Type != TokAssign && p.peek().Type != TokLParen && p.peek().Type != TokLBracket && p.peek().Type != TokLBrace && p.peek().Type != TokAngleL && p.peek().Type != TokSemicolon && p.peek().Type != TokRParen && p.peek().Type != TokRBrace && p.peek().Type != TokRBracket && p.peek().Type != TokComma && canStartCallArg {
-
-
-			var args []Expr
-			for p.peek().Type != TokSemicolon && p.peek().Type != TokRParen && p.peek().Type != TokRBrace && !p.isAtEnd() {
-				arg, err := p.parseExpression(2)
-				if err != nil {
-					return nil, err
-				}
-				args = append(args, arg)
-				if p.peek().Type == TokComma {
-					p.advance()
-				} else {
-					break
-				}
-			}
-			return &CallExpr{Callee: &VarExpr{Name: name}, Args: args}, nil
-		}
-		return &VarExpr{Name: name}, nil
+		return p.parseNamedCallOrVar(name)
 
 	case TokColon:
 		p.advance()
@@ -1407,13 +1415,20 @@ func (p *Parser) parsePrimary() (Expr, error) {
 		return &LiteralExpr{Type: TokString, Value: keyName}, nil
 
 	case TokLParen:
-
 		p.advance()
+		if call, ok, err := p.tryPrefixCallInParens(); ok {
+			if err != nil {
+				return nil, err
+			}
+			return call, nil
+		}
 		expr, err := p.parseExpression(0)
 		if err != nil {
 			return nil, err
 		}
-		p.consume(TokRParen)
+		if err := p.consume(TokRParen); err != nil {
+			return nil, err
+		}
 		return expr, nil
 
 	case TokLBracket:
@@ -1579,6 +1594,84 @@ func (p *Parser) parsePrimary() (Expr, error) {
 		return nil, fmt.Errorf("line %d: unexpected expression token %v (%q)", tok.Line, tok.Type, tok.Literal)
 	}
 
+}
+
+func isCallNameTok(t Token) bool {
+	switch t.Type {
+	case TokIdent, TokMin, TokMax, TokDiv, TokMod, TokCmp, TokScalar:
+		return true
+	}
+	return false
+}
+
+func canStartCallArg(t Token) bool {
+	// Values only. '+' / '-' after a name is infix grouping: ($a + $b), fib($n - 1).
+	switch t.Type {
+	case TokInt, TokFloat, TokString, TokInterpString, TokIdent,
+		TokScalar, TokArray, TokHash, TokSubRef,
+		TokLParen, TokLBracket, TokLBrace, TokSub,
+		TokBacktick, TokInterpBacktick:
+		return true
+	}
+	return false
+}
+
+// parseCallArgs reads `$a, $b` (same list for func($a, $b), func $a, $b, (func $a, $b)).
+func (p *Parser) parseCallArgs(inParens bool) ([]Expr, error) {
+	var args []Expr
+	for {
+		if p.isAtEnd() {
+			break
+		}
+		if inParens && p.peek().Type == TokRParen {
+			break
+		}
+		if !inParens && (p.peek().Type == TokSemicolon || p.peek().Type == TokRParen || p.peek().Type == TokRBrace || p.peek().Type == TokRBracket || p.peek().Type == TokIf || p.peek().Type == TokUnless || p.peek().Type == TokWhile || p.peek().Type == TokUntil || p.peek().Type == TokFor || p.peek().Type == TokGiven) {
+			break
+		}
+		arg, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, arg)
+		if p.peek().Type == TokComma {
+			p.advance()
+			continue
+		}
+		break
+	}
+	return args, nil
+}
+
+// tryPrefixCallInParens parses (func $a, $b) after '(' is consumed.
+// Grouping is unchanged for (1 + 2), (10 min 20), ($x), (func).
+func (p *Parser) tryPrefixCallInParens() (Expr, bool, error) {
+	if !isCallNameTok(p.peek()) || !canStartCallArg(p.peekNext()) {
+		return nil, false, nil
+	}
+	calTok := p.advance()
+	args, err := p.parseCallArgs(true)
+	if err != nil {
+		return nil, true, err
+	}
+	if err := p.consume(TokRParen); err != nil {
+		return nil, true, err
+	}
+	return &CallExpr{Callee: &VarExpr{Name: calTok.Literal}, Args: args}, true, nil
+}
+
+// parseNamedCallOrVar is `foo` or `foo $a, $b` after the name is consumed.
+func (p *Parser) parseNamedCallOrVar(name string) (Expr, error) {
+	t := p.peek()
+	looksLikeArgs := t.Type != TokDot && t.Type != TokAssign && t.Type != TokLParen && t.Type != TokLBracket && t.Type != TokLBrace && t.Type != TokAngleL && t.Type != TokSemicolon && t.Type != TokRParen && t.Type != TokRBrace && t.Type != TokRBracket && t.Type != TokComma && (!p.isBinaryOp(t) || isUnaryPrefixTok(t))
+	if looksLikeArgs {
+		args, err := p.parseCallArgs(false)
+		if err != nil {
+			return nil, err
+		}
+		return &CallExpr{Callee: &VarExpr{Name: name}, Args: args}, nil
+	}
+	return &VarExpr{Name: name}, nil
 }
 
 // parseGiven parses: given $expr { when $match { } ... default { } }
@@ -2006,11 +2099,80 @@ func getCFieldSizeAndAlign(typeName string) (int, int) {
 
 // parseAssert parses: assert <condition> [, <message>];
 func (p *Parser) parseAssert() (Stmt, error) {
-	p.advance() // skip 'assert'
-	cond, err := p.parseExpression(0)
-	if err != nil {
-		return nil, err
+	return p.parseVerify("ASSERT")
+}
+
+func verifyKind(lit string) string {
+	switch lit {
+	case "PRE", "POST", "INVARIANT", "CHECK", "ASSERT", "TEST", "PROPERTY", "SUBTEST":
+		return lit
 	}
+	return lit
+}
+
+// parseVerify parses statement-form contracts:
+//
+//	PRE $b != 0;
+//	PRE { $b != 0 }
+//	PRE $b != 0, "message";
+//	TEST "name" { ... }
+//	PROPERTY "name" ($a, $b) { ... }
+func (p *Parser) parseVerify(kind string) (Stmt, error) {
+	p.advance()
+	kind = verifyKind(kind)
+	needsName := kind == "TEST" || kind == "PROPERTY" || kind == "SUBTEST"
+
+	var name Expr
+	if needsName {
+		// Primary only: parseExpression would treat "name" ($a) as a call.
+		n, err := p.parsePrimary()
+		if err != nil {
+			return nil, err
+		}
+		name = n
+		if p.peek().Type == TokComma {
+			p.advance()
+		}
+	}
+
+	var params []Param
+	if p.peek().Type == TokLParen && (kind == "PROPERTY" || kind == "TEST" || kind == "SUBTEST") {
+		ps, err := p.parseSimpleParams()
+		if err != nil {
+			return nil, err
+		}
+		params = ps
+	}
+
+	var cond Expr
+	var body *BlockStmt
+	if p.peek().Type == TokSub {
+		cl, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		if clex, ok := cl.(*ClosureExpr); ok {
+			body = clex.Body
+			if len(params) == 0 {
+				params = clex.Params
+			}
+		} else {
+			cond = cl
+		}
+	} else if p.peek().Type == TokLBrace {
+		b, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		body = b
+	} else {
+		c, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		cond = c
+	}
+
 	var msg Expr
 	if p.peek().Type == TokComma {
 		p.advance()
@@ -2021,7 +2183,94 @@ func (p *Parser) parseAssert() (Stmt, error) {
 		msg = m
 	}
 	p.match(TokSemicolon)
-	return &AssertStmt{Condition: cond, Message: msg}, nil
+	return &VerifyStmt{Kind: kind, Name: name, Params: params, Cond: cond, Body: body, Message: msg}, nil
+}
+
+func isVerifyWord(lit string) bool {
+	switch lit {
+	case "PRE", "POST", "INVARIANT", "CHECK", "ASSERT", "TEST", "PROPERTY", "SUBTEST":
+		return true
+	}
+	return false
+}
+
+func isTapWord(lit string) bool {
+	switch lit {
+	case "plan", "ok", "is", "isnt", "like", "unlike", "is_deeply", "cmp_ok",
+		"pass", "fail", "diag", "done_testing", "done-testing", "use_ok":
+		return true
+	}
+	return false
+}
+
+func (p *Parser) parseTapStmt() (Stmt, error) {
+	name := p.advance().Literal
+	var args []Expr
+	if p.peek().Type == TokLBrace {
+		b, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, &ClosureExpr{Body: b})
+		if p.peek().Type == TokComma {
+			p.advance()
+			for p.peek().Type != TokSemicolon && p.peek().Type != TokIf && p.peek().Type != TokUnless && !p.isAtEnd() {
+				a, err := p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, a)
+				if p.peek().Type != TokComma {
+					break
+				}
+				p.advance()
+			}
+		}
+	} else if p.peek().Type != TokSemicolon && p.peek().Type != TokIf && p.peek().Type != TokUnless && p.peek().Type != TokEOF && p.peek().Type != TokRBrace {
+		for {
+			a, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, a)
+			if p.peek().Type != TokComma {
+				break
+			}
+			p.advance()
+		}
+	}
+	var stmt Stmt = &ExprStmt{Expr: &CallExpr{Callee: &VarExpr{Name: name}, Args: args}}
+	stmt, err := p.checkModifier(stmt)
+	if err != nil {
+		return nil, err
+	}
+	p.match(TokSemicolon)
+	return stmt, nil
+}
+
+func (p *Parser) parseSimpleParams() ([]Param, error) {
+	if err := p.consume(TokLParen); err != nil {
+		return nil, err
+	}
+	var params []Param
+	for p.peek().Type != TokRParen && !p.isAtEnd() {
+		typ := ""
+		if p.isTypeToken(p.peek().Type) || (p.peek().Type == TokIdent && (p.peekNext().Type == TokScalar || p.peekNext().Type == TokArray || p.peekNext().Type == TokHash)) {
+			typ = p.advance().Literal
+		}
+		if p.peek().Type != TokScalar && p.peek().Type != TokArray && p.peek().Type != TokHash && p.peek().Type != TokSubRef {
+			return nil, fmt.Errorf("line %d: expected parameter in verification signature", p.peek().Line)
+		}
+		name := p.advance().Literal
+		params = append(params, Param{Name: name, Type: typ})
+		if p.peek().Type == TokComma {
+			p.advance()
+		}
+	}
+	if err := p.consume(TokRParen); err != nil {
+		return nil, err
+	}
+	return params, nil
 }
 
 // parseAdviceHook parses: before|after|around subName(params) { ... }

@@ -418,6 +418,22 @@ type AssertStmt struct {
 func (a *AssertStmt) node() {}
 func (a *AssertStmt) stmt() {}
 
+// VerifyStmt is PRE / POST / INVARIANT / CHECK / ASSERT / TEST / PROPERTY / SUBTEST.
+// Expression form:  PRE $b != 0;
+// Block form:       PRE { $b != 0 }
+// Named+block:      TEST "name" { ... }   PROPERTY "name" ($a, $b) { ... }
+type VerifyStmt struct {
+	Kind    string     // PRE, POST, INVARIANT, CHECK, ASSERT, TEST, PROPERTY, SUBTEST
+	Name    Expr       // TEST / PROPERTY / SUBTEST title
+	Params  []Param    // PROPERTY signature
+	Cond    Expr       // expression form
+	Body    *BlockStmt // block form
+	Message Expr       // optional trailing message
+}
+
+func (v *VerifyStmt) node() {}
+func (v *VerifyStmt) stmt() {}
+
 // AdviceHookStmt represents: before|after|around subName(params) { ... }
 type AdviceHookStmt struct {
 	Kind       string // "before", "after", "around"

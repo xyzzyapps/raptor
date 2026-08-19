@@ -119,6 +119,13 @@ const (
 	TokUnion
 	TokWhere
 	TokAssert
+	TokPRE
+	TokPOST
+	TokINVARIANT
+	TokCHECK
+	TokTEST
+	TokPROPERTY
+	TokSUBTEST
 	TokBefore
 	TokAfter
 	TokAround

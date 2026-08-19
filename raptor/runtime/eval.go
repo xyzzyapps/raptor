@@ -628,21 +628,10 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		return NilValue(), nil
 
 	case *AssertStmt:
-		condVal, err := in.evalExpr(s.Condition, env)
-		if err != nil {
-			return nil, err
-		}
-		if !condVal.IsTrue() {
-			msg := "assertion failed"
-			if s.Message != nil {
-				mVal, err := in.evalExpr(s.Message, env)
-				if err == nil && mVal != nil {
-					msg = mVal.String()
-				}
-			}
-			return nil, fmt.Errorf("AssertionError: %s", msg)
-		}
-		return BoolValue(true), nil
+		return in.evalVerify(&VerifyStmt{Kind: "ASSERT", Cond: s.Condition, Message: s.Message}, env)
+
+	case *VerifyStmt:
+		return in.evalVerify(s, env)
 
 	case *AdviceHookStmt:
 		normTarget := normalizeOpName(s.TargetName)
@@ -1115,6 +1104,104 @@ func (in *Interp) evalBlock(b *BlockStmt, env *Env) (*Value, error) {
 		i++
 	}
 	return lastVal, nil
+}
+
+func (in *Interp) evalVerify(s *VerifyStmt, env *Env) (*Value, error) {
+	kind := s.Kind
+	if kind == "" {
+		kind = "ASSERT"
+	}
+	nameVal := StringValue("")
+	if s.Name != nil {
+		nv, err := in.evalExpr(s.Name, env)
+		if err != nil {
+			return nil, err
+		}
+		nameVal = nv
+	}
+
+	switch kind {
+	case "TEST":
+		if os.Getenv("RAPTOR_TEST_MODE") != "1" {
+			return NilValue(), nil
+		}
+		if s.Body == nil {
+			return nil, fmt.Errorf("TEST requires a block")
+		}
+		cl := ClosureValue(&Closure{Name: nameVal.String(), Body: s.Body, Env: env})
+		if fn, ok := in.Builtins["subtest"]; ok {
+			return fn(in, []*Value{nameVal, cl})
+		}
+		return in.evalBlock(s.Body, env.NewChild())
+
+	case "SUBTEST":
+		if s.Body == nil {
+			return nil, fmt.Errorf("SUBTEST requires a block")
+		}
+		cl := ClosureValue(&Closure{Name: nameVal.String(), Body: s.Body, Env: env})
+		if fn, ok := in.Builtins["subtest"]; ok {
+			return fn(in, []*Value{nameVal, cl})
+		}
+		return in.evalBlock(s.Body, env.NewChild())
+
+	case "PROPERTY":
+		if s.Body == nil {
+			return nil, fmt.Errorf("PROPERTY requires a block")
+		}
+		cl := ClosureValue(&Closure{Name: nameVal.String(), Params: s.Params, Body: s.Body, Env: env})
+		if fn, ok := in.Builtins["PROPERTY"]; ok {
+			return fn(in, []*Value{nameVal, cl})
+		}
+		return nil, fmt.Errorf("PROPERTY builtin not registered")
+	}
+
+	var condVal *Value
+	var err error
+	if s.Body != nil {
+		condVal, err = in.evalBlock(s.Body, env.NewChild())
+	} else if s.Cond != nil {
+		condVal, err = in.evalExpr(s.Cond, env)
+	} else {
+		condVal = BoolValue(false)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if condVal != nil && condVal.Type == ValClosure {
+		condVal, err = in.InvokeCallable(condVal, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if condVal == nil || !condVal.IsTrue() {
+		msg := "failed"
+		switch kind {
+		case "PRE":
+			msg = "precondition failed"
+		case "POST":
+			msg = "postcondition failed"
+		case "INVARIANT":
+			msg = "invariant violation"
+		case "CHECK", "ASSERT":
+			msg = "assertion failed"
+		}
+		if s.Message != nil {
+			if mVal, merr := in.evalExpr(s.Message, env); merr == nil && mVal != nil {
+				msg = mVal.String()
+			}
+		}
+		tag := "AssertionError"
+		switch kind {
+		case "PRE":
+			tag = "PreconditionError"
+		case "POST":
+			tag = "PostconditionError"
+		case "INVARIANT":
+			tag = "InvariantError"
+		}
+		return nil, fmt.Errorf("%s: %s", tag, msg)
+	}
+	return BoolValue(true), nil
 }
 
 func (in *Interp) validateTypeAndWhere(name string, val *Value, env *Env) error {

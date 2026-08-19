@@ -81,7 +81,7 @@ C<start>/C<await>, Channel, atomics, PortAudio.
 
 =item L<14_raptor-testing>
 
-TAP, C<raptor test>, C<pre>/C<post>, QuickCheck.
+TAP, C<raptor test>, C<PRE>/C<POST>, QuickCheck.
 
 =item L<15_raptor-modules>
 

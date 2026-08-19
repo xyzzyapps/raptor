@@ -76,6 +76,7 @@ grammar Raptor {
         | <redo_stmt>
         | <goto_stmt>
         | <take_stmt>
+        | <verify_stmt>
         | <assert_stmt>
         | <advice_stmt>
         | <label_stmt>
@@ -92,6 +93,12 @@ grammar Raptor {
     rule goto_stmt { 'goto' <goto_target> ';'? }
     token goto_target { '&'? <name> }
     rule assert_stmt { 'assert' <expression> [ ',' <expression> ]? ';'? }
+    rule verify_stmt {
+        | [ 'TEST' | 'PROPERTY' | 'SUBTEST' ]
+          <expression> <sig>? <block> ';'?
+        | [ 'PRE' | 'POST' | 'INVARIANT' | 'CHECK' | 'ASSERT' ]
+          [ <block> | <expression> ] [ ',' <expression> ]? ';'?
+    }
 
     rule modifier {
         | 'if' <expression>
@@ -258,16 +265,25 @@ grammar Raptor {
         | ':' <name> [ '=>' <expression> ]?
         | <expression> [ '=>' | ':' ] <expression>
     }
-    rule paren { '(' <expression> ')' }
+    rule paren { '(' [ <prefix_call> | <expression> ] ')' }
+    rule prefix_call {
+        <call_name> <expression> [ ',' <expression> ]*
+    }
+    token call_name {
+        | 'min' | 'max' | 'div' | 'mod' | 'cmp'
+        | <var>
+        | <name>
+    }
 
     rule listop { <listop_name> <expression> [ ',' <expression> ]* }
     token listop_name {
         | 'say' | 'print' | 'die' | 'warn' | 'note' | 'push' | 'pop'
         | 'shift' | 'unshift' | 'elems' | 'join' | 'split' | 'abs'
         | 'int' | 'str' | 'chr' | 'ord' | 'sqrt' | 'sin' | 'cos'
-        | 'ok' | 'is' | 'isnt' | 'like' | 'pass' | 'fail' | 'plan'
+        | 'ok' | 'is' | 'isnt' | 'like' | 'unlike' | 'is_deeply' | 'cmp_ok'
+        | 'pass' | 'fail' | 'plan'
         | 'diag' | 'done-testing' | 'done_testing' | 'use_ok'
-        | 'pre' | 'post' | 'invariant'
+        | 'PRE' | 'POST' | 'INVARIANT' | 'CHECK' | 'ASSERT'
     }
 
     token var {

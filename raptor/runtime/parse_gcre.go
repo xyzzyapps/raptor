@@ -253,6 +253,38 @@ func walkStatement(m *gcre.Match) Stmt {
 	if s := m.Get("take_stmt"); s != nil && s.Ok {
 		return &TakeStmt{Value: walkExpr(s.Get("expression"))}
 	}
+	if s := m.Get("verify_stmt"); s != nil && s.Ok {
+		kind := "ASSERT"
+		st := strings.TrimSpace(s.Str)
+		for _, k := range []string{"PROPERTY", "SUBTEST", "INVARIANT", "ASSERT", "CHECK", "TEST", "PRE", "POST"} {
+			if strings.HasPrefix(st, k+" ") || strings.HasPrefix(st, k+"{") || strings.HasPrefix(st, k+"\t") || st == k {
+				kind = verifyKind(k)
+				break
+			}
+		}
+		exprs := s.GetAll("expression")
+		var name, cond, msg Expr
+		if kind == "TEST" || kind == "PROPERTY" || kind == "SUBTEST" {
+			if len(exprs) > 0 {
+				name = walkExpr(exprs[0])
+			}
+		} else {
+			if len(exprs) > 0 {
+				cond = walkExpr(exprs[0])
+			}
+			if len(exprs) > 1 {
+				msg = walkExpr(exprs[1])
+			}
+		}
+		return &VerifyStmt{
+			Kind:    kind,
+			Name:    name,
+			Params:  walkParams(s.Get("sig")),
+			Cond:    cond,
+			Body:    walkBlock(s.Get("block")),
+			Message: msg,
+		}
+	}
 	if s := m.Get("assert_stmt"); s != nil && s.Ok {
 		exprs := s.GetAll("expression")
 		var cond, msg Expr
@@ -994,6 +1026,25 @@ func walkArglist(m *gcre.Match) []Expr {
 	return out
 }
 
+func walkPrefixCall(m *gcre.Match) Expr {
+	name := ""
+	if n := m.Get("call_name"); n != nil && n.Ok {
+		name = strings.TrimSpace(n.Str)
+		if v := n.Get("var"); v != nil && v.Ok {
+			name = v.Str
+		} else if nm := n.Get("name"); nm != nil && nm.Ok {
+			name = nm.Str
+		}
+	}
+	var args []Expr
+	for _, e := range m.GetAll("expression") {
+		if x := walkExpr(e); x != nil {
+			args = append(args, x)
+		}
+	}
+	return &CallExpr{Callee: &VarExpr{Name: name}, Args: args}
+}
+
 func walkListop(m *gcre.Match) Expr {
 	name := ""
 	if n := m.Get("listop_name"); n != nil && n.Ok {
@@ -1049,6 +1100,9 @@ func walkPrimary(m *gcre.Match) Expr {
 		}
 	}
 	if p := m.Get("paren"); p != nil && p.Ok {
+		if lc := p.Get("prefix_call"); lc != nil && lc.Ok {
+			return walkPrefixCall(lc)
+		}
 		return walkExpr(p.Get("expression"))
 	}
 	if n := m.Get("number"); n != nil && n.Ok {

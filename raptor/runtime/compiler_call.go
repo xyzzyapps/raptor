@@ -776,7 +776,7 @@ func (c *Compiler) builtinLike(args []Expr) (mval, error) {
 	var got, pat mval
 	var err error
 	if len(args) > 0 {
-		got, err = c.compileVal(args[0])
+		got, err = c.compileTapArg(args[0])
 	} else {
 		got, err = c.nilVal()
 	}

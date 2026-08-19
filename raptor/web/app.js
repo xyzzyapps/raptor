@@ -932,7 +932,165 @@ say "Config: ", $fallback, " | State: ", $label;
   },
 
   {
-    title: "3. Dynamic Subsets & Continuous Invariants",
+    title: "3. Topic variable \$_ and Unicode math",
+    desc: `
+      <p>C<$_> is the default topic: C<for>, C<given>, and bare C<say> use it. Unicode operators C<× ÷ √> and names C<∑ ∏> are real identifiers.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `$_ = "hello topic";
+say;   # prints $_
+
+for 1..4 {
+    say "n=", $_, "  n×n=", $_ × $_;
+}
+
+given 9 {
+    when 9 { say "√", $_, " = ", √$_; }
+}
+
+say "sum ", ∑(1, 2, 3, 4, 5);
+say "prod ", ∏(2, 3, 7);
+`
+  },
+
+  {
+    title: "4. Scoping: my, our, state",
+    desc: `
+      <p>Same three Perl 5 declarators:</p>
+      <ul>
+        <li><code>my</code> — lexical to the block</li>
+        <li><code>our</code> — package-visible alias</li>
+        <li><code>state</code> — persistent across calls</li>
+      </ul>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `sub counter() {
+    state $n = 0;
+    $n = $n + 1;
+    return $n;
+}
+say counter();
+say counter();
+say counter();
+
+my $lex = "only here";
+our $shared = "package";
+say $lex, " / ", $shared;
+`
+  },
+
+  {
+    title: "5. Statement modifiers, labels, goto",
+    desc: `
+      <p>Postfix <code>if</code> / <code>unless</code> / <code>for</code>, plus labels and <code>goto</code> (including <code>goto &amp;sub</code>).</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `my $ok = True;
+say "ok" if $ok;
+say "hidden" unless $ok;
+
+my $sum = 0;
+$sum = $sum + $_ for 1..5;
+say "sum ", $sum;
+
+my $n = 0;
+LOOP:
+$n = $n + 1;
+if $n < 3 { goto LOOP; }
+say "n=", $n;
+`
+  },
+
+  {
+    title: "6. Contextual variables",
+    desc: `
+      <p>Raku-style dynamics: <code>@*ARGS</code>, <code>%*ENV</code>, <code>$*PID</code>, <code>$*RAPTOR</code>, <code>$*KERNEL</code>, <code>$?</code>, <code>$!</code>.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `say "name    ", $*RAPTOR{"name"};
+say "version ", $*RAPTOR{"version"};
+say "os      ", $*KERNEL{"name"};
+say "arch    ", $*KERNEL{"arch"};
+say "pid     ", $*PID;
+say "status  ", $?;
+say "env keys exist: ", %*ENV.elems() > 0;
+`
+  },
+
+  {
+    title: "7. References",
+    desc: `
+      <p>Take references with <code>\\</code> and dereference with <code>$$</code>, <code>@$</code>, arrows.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `my $val = 41;
+my $sref = \\$val;
+say "ref type ", ref($sref);
+$$sref = 42;
+say "via ref ", $val;
+
+my @nums = [10, 20, 30];
+my $aref = \\@nums;
+say "first ", $aref->[0];
+`
+  },
+
+  {
+    title: "8. Uniform Function Call Syntax (UFCS)",
+    desc: `
+      <p>Raptor embraces <strong>Uniform Function Call Syntax (UFCS)</strong> across the entire language.</p>
+      <p>Any subroutine <code>foo($target, @args)</code> can be invoked seamlessly as <code>$target.foo(@args)</code>, enabling fluid functional pipelines without class hierarchies.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `# 1. Built-in Functional Pipelines via UFCS
+my @numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+my @evens = @numbers.grep(sub ($x) { return $x % 2 == 0; });
+my @squared = @evens.map(sub ($x) { return $x * $x; });
+my @sortedDesc = @squared.sort().reverse();
+
+say "Original:  ", @numbers;
+say "Evens:     ", @evens;
+say "Squared:   ", @squared;
+say "Reversed:  ", @sortedDesc;
+
+# 2. Custom Subroutines callable via UFCS
+sub add_prefix($str, $prefix) {
+    return $prefix ~ " :: " ~ $str;
+}
+
+my $msg = "System Ready".add_prefix("[RAPTOR]");
+say $msg;
+`
+  },
+
+  {
+    title: "9. Lists, hashes, and backends",
+    desc: `
+      <p>Everyday list/hash ops. Backends (not switchable inside the browser): <code>--go</code> interpreter, <code>--moar</code> CompUnit v7, <code>raptor serve</code> for this WASM tour.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `my @xs = [3, 1, 2];
+push(@xs, 4);
+say "elems ", @xs.elems(), " sorted ", @xs.sort();
+
+my %h = { "a" => 1, "b" => 2 };
+say "keys ", keys(%h);
+say "json ", to_json(%h);
+
+say "this tour is the WASM backend (cmd/wasm)";
+`
+  },
+
+  {
+    title: "10. Dynamic Subsets & Continuous Invariants",
     desc: `
       <p>Raptor replaces heavyweight OOP with <strong>Dynamic Subsets</strong> and <strong>Refinement Predicates</strong>.</p>
       <p>A subset defines a runtime type refinement constrained by a boolean block (<code>where { ... }</code>). Invariants can be attached directly to variables (<code>my $score where { $_ &gt;= 0 } = 100;</code>) or multiple-dispatch subroutines.</p>
@@ -965,7 +1123,7 @@ handle_request(8080);
   },
 
   {
-    title: "4. C-ABI Struct Records & Overloading",
+    title: "11. C-ABI Struct Records & Overloading",
     desc: `
       <p>Raptor features C-compatible contiguous memory <code>struct</code> records with O(1) field offsets.</p>
       <p>Structs can store first-class function pointer fields (closures) and support custom operator overloading via <code>multi sub infix:&lt;+&gt;</code>.</p>
@@ -1011,37 +1169,7 @@ $btn.onClick(1337);
   },
 
   {
-    title: "5. Uniform Function Call Syntax (UFCS)",
-    desc: `
-      <p>Raptor embraces <strong>Uniform Function Call Syntax (UFCS)</strong> across the entire language.</p>
-      <p>Any subroutine <code>foo($target, @args)</code> can be invoked seamlessly as <code>$target.foo(@args)</code>, enabling fluid functional pipelines without class hierarchies.</p>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `# 1. Built-in Functional Pipelines via UFCS
-my @numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
-my @evens = @numbers.grep(sub ($x) { return $x % 2 == 0; });
-my @squared = @evens.map(sub ($x) { return $x * $x; });
-my @sortedDesc = @squared.sort().reverse();
-
-say "Original:  ", @numbers;
-say "Evens:     ", @evens;
-say "Squared:   ", @squared;
-say "Reversed:  ", @sortedDesc;
-
-# 2. Custom Subroutines callable via UFCS
-sub add_prefix($str, $prefix) {
-    return $prefix ~ " :: " ~ $str;
-}
-
-my $msg = "System Ready".add_prefix("[RAPTOR]");
-say $msg;
-`
-  },
-
-  {
-    title: "6. Autothreading Quantum Junctions",
+    title: "12. Autothreading Quantum Junctions",
     desc: `
       <p>Junctions combine multiple values into a single superposition state: <code>any</code>, <code>all</code>, <code>one</code>, or <code>none</code>.</p>
       <p>When evaluated in boolean conditionals or <code>given / when</code> pattern matching, the condition checks across all quantum states concurrently.</p>
@@ -1070,7 +1198,7 @@ given $target {
   },
 
   {
-    title: "7. Signature Destructuring & Fast JSON",
+    title: "13. Signature Destructuring & Fast JSON",
     desc: `
       <p>Raptor allows deep parameter destructuring of lists (head & tail) and associative hashes directly in subroutine signatures.</p>
       <p>JSON serialization and parsing are built into the core language via <code>to_json</code> and <code>from_json</code>.</p>
@@ -1102,7 +1230,7 @@ say "Decoded engine: ", %decoded{"engine"};
   },
 
   {
-    title: "8. Gather / Take Generators & Lazy Lists",
+    title: "14. Gather / Take Generators & Lazy Lists",
     desc: `
       <p>Raptor features first-class coroutine generators using <code>gather { ... take ... }</code>.</p>
       <p>Generators yield values dynamically, allowing elegant creation of mathematical sequences and filtered data streams.</p>
@@ -1132,7 +1260,41 @@ say "Multiples of 3 or 5: ", @filtered;
   },
 
   {
-    title: "9. Design-by-Contract & Verification",
+    title: "15. Packages and AUTOLOAD",
+    desc: `
+      <p>Namespaces, qualified calls, and fallback <code>AUTOLOAD</code> when a name is missing.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `package MathUtil;
+sub add($a, $b) { return $a + $b; }
+sub AUTOLOAD($x) {
+    return "missing " ~ $AUTOLOAD ~ " arg=" ~ $x;
+}
+
+say MathUtil::add(2, 40);
+say MathUtil::nope(7);
+`
+  },
+
+  {
+    title: "16. Grammars (gcre)",
+    desc: `
+      <p>Declarative <code>grammar</code> / <code>rule</code> / <code>token</code> objects. The language itself is parsed by <strong>gcre</strong> (a PEG-compatible Raku subset) with <code>&lt;HOST_stmt&gt;</code> calling the Pratt parser.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `grammar PointGrammar {
+    token TOP { <num> ',' <num> }
+    token num { \\d+ }
+}
+say "grammar name: ", PointGrammar{"name"};
+say "TOP pattern stored: ", PointGrammar{"TOP"};
+`
+  },
+
+  {
+    title: "17. Design-by-Contract & Verification",
     desc: `
       <p>Raptor incorporates formal <strong>Design-by-Contract</strong> specifications and automated <strong>Property-Based Verification</strong> (QuickCheck-style randomized test generation).</p>
       <p>Click <strong>Run</strong> to verify contracts and execute 100 randomized property trials.</p>
@@ -1149,14 +1311,30 @@ sub safe_divide($a, NonZero $b) {
 say "safe_divide(42, 6) = ", safe_divide(42, 6);
 
 # 2. QuickCheck-Style Randomized Property Verification
-property "Addition Commutativity", sub ($a, $b) {
+PROPERTY "Addition Commutativity" ($a, $b) {
     return ($a + $b) == ($b + $a);
-};
+}
 `
   },
 
   {
-    title: "10. PodLit Literate Programming",
+    title: "18. TAP tests",
+    desc: `
+      <p>Test Anything Protocol builtins — the same ones <code>raptor test t/</code> runs. No <code>use Test::More</code> needed.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `plan 4;
+ok 1 + 1 == 2, "one plus one";
+is 2 ** 10, 1024, "pow";
+is "ab" x 2, "abab", "repeat";
+ok { True }, "done";
+done_testing;
+`
+  },
+
+  {
+    title: "19. PodLit Literate Programming",
     desc: `
       <p>Raptor includes the <strong>PodLit</strong> literate programming engine supporting Donald Knuth-style chunk tangling (<code>pod_tangle</code>), documentation weaving (<code>pod_weave</code>), and bidirectional code stitching (<code>pod_stitch</code>).</p>
       <p>Click <strong>Run</strong> to weave the specification to Markdown and tangle the executable source files into stdout.</p>
@@ -1194,7 +1372,29 @@ say "=== Literate Programming Pipeline Verified ===";
   },
 
   {
-    title: "11. HTML5 Canvas 2D Graphics Engine",
+    title: "20. JSON, HTTP surface, and \$_ pipelines",
+    disabled: true,
+    desc: `
+      <p>JSON is built in. Format HTTP responses. Pipe values through C<$_>.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `my %payload = { "lang" => "Raptor", "ok" => True };
+my $js = to_json(%payload);
+say $js;
+my %back = from_json($js);
+say %back{"lang"};
+
+my $http = http_format_response(200, {:Server => "Raptor/1.0"}, $js);
+say $http;
+
+$_ = %back{"lang"};
+say "topic still ", $_;
+`
+  },
+
+  {
+    title: "21. HTML5 Canvas 2D Graphics Engine",
     desc: `
       <p>Raptor communicates directly with HTML5 2D Canvas contexts via procedural drawing primitives.</p>
       <p>The entire radar HUD, coordinate grid, and geometric math are evaluated in <strong>pure Raptor code</strong>.</p>
@@ -1282,7 +1482,7 @@ say "Canvas 2D HUD generated with pure Raptor vector primitives and trigonometry
   },
 
   {
-    title: "12. WebGL 3D Hardware Graphics",
+    title: "22. WebGL 3D Hardware Graphics",
     desc: `
       <p>Raptor compiles GLSL shaders, defines 3D geometry buffers, and computes 4x4 trigonometric transformation matrices directly in Raptor source code.</p>
       <p>Click <strong>Run</strong> to compile shaders, upload the 3D cube to GPU memory, and start continuous hardware-accelerated 3D rotation!</p>
@@ -1436,7 +1636,7 @@ say " - Continuous 60fps hardware rotation loop active!";
   },
 
   {
-    title: "13. WebAudio Node Graph & Timeline",
+    title: "23. WebAudio Node Graph & Timeline",
     desc: `
       <p>This lesson builds a real <strong>Web Audio</strong> graph in Raptor: oscillators, ADSR gains, a low-pass filter, an LFO into <code>frequency</code>, a compressor, and a delay send.</p>
       <p>Notes are scheduled on <code>AudioContext.currentTime</code> — no <code>setTimeout</code>. The melody is the same C4–E4–G4–B4–C5 major-7th arpeggio.</p>
@@ -1519,276 +1719,7 @@ say "scheduled C4 E4 G4 B4 C5 on the AudioContext timeline";
   },
 
   {
-    title: "14. Full-Stack In-Browser App",
-    desc: `
-      <p>Combine Canvas 2D, WebGL 3D, DOM mutation, and WebAudio sound effects in a single reactive in-browser application.</p>
-    `,
-    defaultTab: "tabCanvas",
-    defaultView: "canvasView",
-    code: `# 1. Live DOM Card Construction (raw single-quoted literal)
-my $html = '
-  <div style="background:#ffffff; padding:1.5rem; border-radius:8px; border:1px solid #cbd5e1; box-shadow:0 4px 12px rgba(0,0,0,0.05); color:#111827;">
-    <h2 style="color:#007d9c; margin:0 0 0.5rem 0;">Raptor Full-Stack Reactive App</h2>
-    <p style="color:#64748b; margin:0 0 1rem 0;">DOM + Canvas + WebGL + Audio Synchronized in WebAssembly</p>
-    <div style="display:flex; gap:0.5rem;">
-      <span style="background:#007d9c; color:#ffffff; padding:4px 12px; border-radius:4px; font-weight:bold; font-size:0.8rem;">Invariants: OK</span>
-      <span style="background:#059669; color:#ffffff; padding:4px 12px; border-radius:4px; font-weight:bold; font-size:0.8rem;">GPU: Accelerated</span>
-    </div>
-  </div>
-';
-dom_set_html("#wasmDomContainer", $html);
-
-# 2. Render Canvas 2D Radar in pure Raptor (640x320)
-my $pi = 3.141592653589793;
-my $c2d = canvas_get_context("wasmCanvas", 640, 320);
-canvas_set_fill_style($c2d, "#ffffff");
-canvas_fill_rect($c2d, 0, 0, 640, 320);
-
-canvas_set_stroke_style($c2d, "#059669");
-canvas_set_line_width($c2d, 2.0);
-canvas_begin_path($c2d);
-canvas_arc($c2d, 320.0, 160.0, 60.0, 0.0, 2.0 * $pi);
-canvas_stroke($c2d);
-
-canvas_set_font($c2d, "bold 14px 'Fira Code', monospace");
-canvas_set_fill_style($c2d, "#007d9c");
-canvas_fill_text($c2d, "SYSTEM READY", 270, 165);
-
-# 3. Same C4–C5 melody, scheduled on the AudioContext timeline
-my $actx = audio_context_create();
-my $now = audio_get_current_time($actx) + 0.03;
-my $flt = audio_create_biquad_filter($actx, "lowpass");
-audio_set_filter_freq($flt, 2000.0, $now);
-my $bus = audio_create_gain($actx);
-audio_set_gain($bus, 0.2, $now);
-audio_connect($flt, $bus);
-audio_connect_destination($bus, $actx);
-my @melody = [261.63, 329.63, 392.00, 493.88, 523.25];
-my @durations = [0.15, 0.15, 0.15, 0.15, 0.35];
-my $t = $now;
-my $ni = 0;
-while $ni < 5 {
-    my $osc = audio_create_oscillator($actx);
-    my $env = audio_create_gain($actx);
-    audio_set_osc_type($osc, "triangle");
-    audio_set_frequency($osc, @melody[$ni], $t);
-    audio_set_gain($env, 0.0001, $t);
-    audio_gain_ramp_exp($env, 0.8, $t + 0.012);
-    audio_gain_ramp_exp($env, 0.0001, $t + @durations[$ni]);
-    audio_connect($osc, $env);
-    audio_connect($env, $flt);
-    audio_osc_start($osc, $t);
-    audio_osc_stop($osc, $t + @durations[$ni] + 0.02);
-    $t = $t + @durations[$ni];
-    $ni = $ni + 1;
-}
-
-say "Full-stack application initialized: DOM, Canvas, and WebAudio graph active!";
-`
-  },
-
-  {
-    title: "15. Topic variable \$_ and Unicode math",
-    desc: `
-      <p>C<$_> is the default topic: C<for>, C<given>, and bare C<say> use it. Unicode operators C<× ÷ √> and names C<∑ ∏> are real identifiers.</p>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `$_ = "hello topic";
-say;   # prints $_
-
-for 1..4 {
-    say "n=", $_, "  n×n=", $_ × $_;
-}
-
-given 9 {
-    when 9 { say "√", $_, " = ", √$_; }
-}
-
-say "sum ", ∑(1, 2, 3, 4, 5);
-say "prod ", ∏(2, 3, 7);
-`
-  },
-
-  {
-    title: "16. JSON, HTTP surface, and \$_ pipelines",
-    disabled: true,
-    desc: `
-      <p>JSON is built in. Format HTTP responses. Pipe values through C<$_>.</p>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `my %payload = { "lang" => "Raptor", "ok" => True };
-my $js = to_json(%payload);
-say $js;
-my %back = from_json($js);
-say %back{"lang"};
-
-my $http = http_format_response(200, {:Server => "Raptor/1.0"}, $js);
-say $http;
-
-$_ = %back{"lang"};
-say "topic still ", $_;
-`
-  },
-
-  {
-    title: "17. Scoping: my, our, state",
-    desc: `
-      <p>Same three Perl 5 declarators:</p>
-      <ul>
-        <li><code>my</code> — lexical to the block</li>
-        <li><code>our</code> — package-visible alias</li>
-        <li><code>state</code> — persistent across calls</li>
-      </ul>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `sub counter() {
-    state $n = 0;
-    $n = $n + 1;
-    return $n;
-}
-say counter();
-say counter();
-say counter();
-
-my $lex = "only here";
-our $shared = "package";
-say $lex, " / ", $shared;
-`
-  },
-
-  {
-    title: "18. Statement modifiers, labels, goto",
-    desc: `
-      <p>Postfix <code>if</code> / <code>unless</code> / <code>for</code>, plus labels and <code>goto</code> (including <code>goto &amp;sub</code>).</p>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `my $ok = True;
-say "ok" if $ok;
-say "hidden" unless $ok;
-
-my $sum = 0;
-$sum = $sum + $_ for 1..5;
-say "sum ", $sum;
-
-my $n = 0;
-LOOP:
-$n = $n + 1;
-if $n < 3 { goto LOOP; }
-say "n=", $n;
-`
-  },
-
-  {
-    title: "19. Contextual variables",
-    desc: `
-      <p>Raku-style dynamics: <code>@*ARGS</code>, <code>%*ENV</code>, <code>$*PID</code>, <code>$*RAPTOR</code>, <code>$*KERNEL</code>, <code>$?</code>, <code>$!</code>.</p>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `say "name    ", $*RAPTOR{"name"};
-say "version ", $*RAPTOR{"version"};
-say "os      ", $*KERNEL{"name"};
-say "arch    ", $*KERNEL{"arch"};
-say "pid     ", $*PID;
-say "status  ", $?;
-say "env keys exist: ", %*ENV.elems() > 0;
-`
-  },
-
-  {
-    title: "20. References",
-    desc: `
-      <p>Take references with <code>\\</code> and dereference with <code>$$</code>, <code>@$</code>, arrows.</p>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `my $val = 41;
-my $sref = \\$val;
-say "ref type ", ref($sref);
-$$sref = 42;
-say "via ref ", $val;
-
-my @nums = [10, 20, 30];
-my $aref = \\@nums;
-say "first ", $aref->[0];
-`
-  },
-
-  {
-    title: "21. Packages and AUTOLOAD",
-    desc: `
-      <p>Namespaces, qualified calls, and fallback <code>AUTOLOAD</code> when a name is missing.</p>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `package MathUtil;
-sub add($a, $b) { return $a + $b; }
-sub AUTOLOAD($x) {
-    return "missing " ~ $AUTOLOAD ~ " arg=" ~ $x;
-}
-
-say MathUtil::add(2, 40);
-say MathUtil::nope(7);
-`
-  },
-
-  {
-    title: "22. Grammars (gcre)",
-    desc: `
-      <p>Declarative <code>grammar</code> / <code>rule</code> / <code>token</code> objects. The language itself is parsed by <strong>gcre</strong> (a PEG-compatible Raku subset) with <code>&lt;HOST_stmt&gt;</code> calling the Pratt parser.</p>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `grammar PointGrammar {
-    token TOP { <num> ',' <num> }
-    token num { \\d+ }
-}
-say "grammar name: ", PointGrammar{"name"};
-say "TOP pattern stored: ", PointGrammar{"TOP"};
-`
-  },
-
-  {
-    title: "23. TAP tests",
-    desc: `
-      <p>Test Anything Protocol builtins — the same ones <code>raptor test t/</code> runs. No <code>use Test::More</code> needed.</p>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `plan(4);
-ok(1 + 1 == 2, "one plus one");
-is(2 ** 10, 1024, "pow");
-is("ab" x 2, "abab", "repeat");
-ok(True, "done");
-done_testing();
-`
-  },
-
-  {
-    title: "24. Lists, hashes, and backends",
-    desc: `
-      <p>Everyday list/hash ops. Backends (not switchable inside the browser): <code>--go</code> interpreter, <code>--moar</code> CompUnit v7, <code>raptor serve</code> for this WASM tour.</p>
-    `,
-    defaultTab: "tabConsole",
-    defaultView: "consoleView",
-    code: `my @xs = [3, 1, 2];
-push(@xs, 4);
-say "elems ", @xs.elems(), " sorted ", @xs.sort();
-
-my %h = { "a" => 1, "b" => 2 };
-say "keys ", keys(%h);
-say "json ", to_json(%h);
-
-say "this tour is the WASM backend (cmd/wasm)";
-`
-  },
-
-  {
-    title: "25. WebGPU tiny LLM",
+    title: "24. WebGPU tiny LLM",
     disabled: true,
     desc: `
       <p>Raptor loads a <strong>tiny character-level language model</strong> (n-gram mix + a linear layer) and runs next-token prediction from the script.</p>

@@ -697,8 +697,23 @@ func (l *Lexer) scanIdentOrKeyword() Token {
 		return Token{Type: TokUnion, Literal: lit, Line: curLine, Col: curCol}
 	case "where":
 		return Token{Type: TokWhere, Literal: lit, Line: curLine, Col: curCol}
-	case "assert":
+	case "ASSERT":
 		return Token{Type: TokAssert, Literal: lit, Line: curLine, Col: curCol}
+	case "PRE":
+		return Token{Type: TokPRE, Literal: lit, Line: curLine, Col: curCol}
+	case "POST":
+		// lowercase "post" stays an identifier (http post, sub post).
+		return Token{Type: TokPOST, Literal: lit, Line: curLine, Col: curCol}
+	case "INVARIANT":
+		return Token{Type: TokINVARIANT, Literal: lit, Line: curLine, Col: curCol}
+	case "CHECK":
+		return Token{Type: TokCHECK, Literal: lit, Line: curLine, Col: curCol}
+	case "TEST":
+		return Token{Type: TokTEST, Literal: lit, Line: curLine, Col: curCol}
+	case "PROPERTY":
+		return Token{Type: TokPROPERTY, Literal: lit, Line: curLine, Col: curCol}
+	case "SUBTEST":
+		return Token{Type: TokSUBTEST, Literal: lit, Line: curLine, Col: curCol}
 	case "before":
 		return Token{Type: TokBefore, Literal: lit, Line: curLine, Col: curCol}
 	case "after":

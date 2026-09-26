@@ -3,6 +3,8 @@
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](raptor/t/)
 [![License: Artistic-2.0](https://img.shields.io/badge/License-Artistic_2.0-0298c3.svg)](https://opensource.org/licenses/Artistic-2.0)
 
+<img width="740" height="220" alt="image" src="https://github.com/user-attachments/assets/1f42aca0-e357-43ed-9daa-6e41a05be004" />
+
 A **Perl 5–shaped** language (the dynamic, non-OO subset of Raku): sigils, `$_`, `//`, UFCS, `struct`, `subset`, no `class` / `has`. Go host, optional **MoarVM** backend.
 
 If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Raptor uses the **Raku spelling**.

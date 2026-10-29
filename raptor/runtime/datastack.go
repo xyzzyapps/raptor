@@ -66,14 +66,10 @@ func (f *stackFrame) setSlot(slot int, val *Value) {
 		f.ptrs[slot] = b
 	case ValString:
 		b := &f.boxes[slot]
-		s := val.StrVal
-		if val.extKind == extStrBuf && val != b {
-			s = strings.Clone(s)
-		}
 		b.Type = ValString
-		b.StrVal = s
-		b.ext = nil
-		b.extKind = extNone
+		b.StrVal = val.StrVal
+		b.ext = val.ext
+		b.extKind = val.extKind
 		b.flags = flagStackLocal
 		f.ptrs[slot] = b
 		f.dirtyPtrs = true
@@ -246,14 +242,10 @@ func (g *globalSlotTable) setSlot(slot int, val *Value, globalEnv *Env) *Value {
 		}
 		return b
 	case ValString:
-		s := val.StrVal
-		if val.extKind == extStrBuf && val != b {
-			s = strings.Clone(s)
-		}
 		b.Type = ValString
-		b.StrVal = s
-		b.ext = nil
-		b.extKind = extNone
+		b.StrVal = val.StrVal
+		b.ext = val.ext
+		b.extKind = val.extKind
 		b.flags = flagSlotBox
 		g.ptrSlabs[slabIdx][off] = b
 		if syncEnv && !g.boxSynced[slot] {
@@ -360,21 +352,29 @@ func (ds *dataStack) pushFrame(numSlots int, initFromSlot int) *stackFrame {
 }
 
 func (ds *dataStack) popFrame(f *stackFrame) {
-	if f.dirtyPtrs {
-		for i := range f.boxes {
-			b := &f.boxes[i]
+	if ds.frameDepth == 0 {
+		return
+	}
+	ds.frameDepth--
+	top := &ds.frameRecords[ds.frameDepth]
+	if top.dirtyPtrs {
+		for i := range top.boxes {
+			b := &top.boxes[i]
 			b.StrVal = ""
 			b.ArrayVal = nil
 			b.HashVal = nil
 			b.ext = nil
 			b.extKind = extNone
-			f.ptrs[i] = nil
+			top.ptrs[i] = nil
 		}
 	}
-	ds.frameSlabIdx = f.savedSlabIdx
-	ds.frameSlabPos = f.savedSlabPos
-	ds.curFrame = f.prev
-	ds.frameDepth--
+	ds.frameSlabIdx = top.savedSlabIdx
+	ds.frameSlabPos = top.savedSlabPos
+	if ds.frameDepth == 0 {
+		ds.curFrame = nil
+	} else {
+		ds.curFrame = &ds.frameRecords[ds.frameDepth-1]
+	}
 }
 
 func (ds *dataStack) markTemp() int {

@@ -200,13 +200,16 @@ const (
 )
 
 var (
-	intIntern    [intInternMax - intInternMin + 1]*Value
-	smallIntStrs [1024]string
+	intInternTable [intInternMax - intInternMin + 1]Value
+	intIntern      [intInternMax - intInternMin + 1]*Value
+	smallIntStrs   [1024]string
 )
 
 func init() {
 	for i := intInternMin; i <= intInternMax; i++ {
-		intIntern[i-intInternMin] = &Value{Type: ValInt, IntVal: i}
+		idx := i - intInternMin
+		intInternTable[idx] = Value{Type: ValInt, IntVal: i}
+		intIntern[idx] = &intInternTable[idx]
 	}
 	for i := 0; i < len(smallIntStrs); i++ {
 		smallIntStrs[i] = strconv.Itoa(i)
@@ -221,14 +224,13 @@ func formatIntFast(n int64) string {
 }
 
 func isInternedInt(v *Value) bool {
-	if v == nil || v.Type != ValInt {
+	if v == nil {
 		return false
 	}
-	i := v.IntVal
-	if i < intInternMin || i > intInternMax {
-		return false
-	}
-	return intIntern[i-intInternMin] == v
+	p := uintptr(unsafe.Pointer(v))
+	start := uintptr(unsafe.Pointer(&intInternTable[0]))
+	end := uintptr(unsafe.Pointer(&intInternTable[len(intInternTable)-1])) + unsafe.Sizeof(intInternTable[0])
+	return p >= start && p < end
 }
 
 func isFlyweight(v *Value) bool {

@@ -420,8 +420,9 @@ func (in *Interp) registerTinyLLMBuiltins() {
 		if len(args) < 1 || args[0].Type != ValArray {
 			return StringValue(""), fmt.Errorf("llm_tiny_sample(logits, temperature?)")
 		}
-		logits := make([]float32, len(args[0].ArrayVal))
-		for i, v := range args[0].ArrayVal {
+		mElems := args[0].materializeArray()
+		logits := make([]float32, len(mElems))
+		for i, v := range mElems {
 			logits[i] = float32(ggmlAsFloat(v))
 		}
 		temp := 0.8

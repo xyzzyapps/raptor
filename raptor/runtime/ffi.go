@@ -217,6 +217,17 @@ func (in *Interp) registerFFI() {
 
 	// Memory buffers map to keep pinned pointers alive
 	pinnedBuffers := make(map[uintptr][]byte)
+	resolvePtr := func(v *Value, offset uintptr) unsafe.Pointer {
+		if v.Type == ValCStruct && v.CStruct() != nil && len(v.CStruct().Buffer) > 0 {
+			if int(offset) < len(v.CStruct().Buffer) {
+				return unsafe.Pointer(&v.CStruct().Buffer[offset])
+			}
+		}
+		if buf, ok := pinnedBuffers[v.PtrVal]; ok && int(offset) < len(buf) {
+			return unsafe.Pointer(&buf[offset])
+		}
+		return unsafe.Pointer(v.PtrVal + offset)
+	}
 
 	// ffi_alloc(sizeBytes) -> ptr
 	in.Builtins["ffi_alloc"] = func(in *Interp, args []*Value) (*Value, error) {
@@ -244,84 +255,108 @@ func (in *Interp) registerFFI() {
 
 	// ffi_read_uint8(ptr, offset) -> int
 	in.Builtins["ffi_read_uint8"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValNativePtr {
+		if len(args) < 1 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return IntValue(0), nil
 		}
 		offset := uintptr(0)
 		if len(args) >= 2 {
 			offset = uintptr(in.toInt(args[1]))
 		}
-		ptr := unsafe.Pointer(args[0].PtrVal + offset)
+		ptr := resolvePtr(args[0], offset)
 		val := *(*uint8)(ptr)
 		return IntValue(int64(val)), nil
 	}
 
 	// ffi_read_uint16(ptr, offset) -> int
 	in.Builtins["ffi_read_uint16"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValNativePtr {
+		if len(args) < 1 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return IntValue(0), nil
 		}
 		offset := uintptr(0)
 		if len(args) >= 2 {
 			offset = uintptr(in.toInt(args[1]))
 		}
-		ptr := unsafe.Pointer(args[0].PtrVal + offset)
+		ptr := resolvePtr(args[0], offset)
 		val := *(*uint16)(ptr)
 		return IntValue(int64(val)), nil
 	}
 
 	// ffi_read_int32(ptr, offset) -> int
 	in.Builtins["ffi_read_int32"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValNativePtr {
+		if len(args) < 1 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return IntValue(0), nil
 		}
 		offset := uintptr(0)
 		if len(args) >= 2 {
 			offset = uintptr(in.toInt(args[1]))
 		}
-		ptr := unsafe.Pointer(args[0].PtrVal + offset)
+		ptr := resolvePtr(args[0], offset)
 		val := *(*int32)(ptr)
 		return IntValue(int64(val)), nil
 	}
 
 	// ffi_read_int64(ptr, offset) -> int
 	in.Builtins["ffi_read_int64"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValNativePtr {
+		if len(args) < 1 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return IntValue(0), nil
 		}
 		offset := uintptr(0)
 		if len(args) >= 2 {
 			offset = uintptr(in.toInt(args[1]))
 		}
-		ptr := unsafe.Pointer(args[0].PtrVal + offset)
+		ptr := resolvePtr(args[0], offset)
 		val := *(*int64)(ptr)
 		return IntValue(val), nil
 	}
 
 	// ffi_read_float64(ptr, offset) -> num
 	in.Builtins["ffi_read_float64"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValNativePtr {
+		if len(args) < 1 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return FloatValue(0), nil
 		}
 		offset := uintptr(0)
 		if len(args) >= 2 {
 			offset = uintptr(in.toInt(args[1]))
 		}
-		ptr := unsafe.Pointer(args[0].PtrVal + offset)
+		ptr := resolvePtr(args[0], offset)
 		val := *(*float64)(ptr)
 		return FloatValue(val), nil
 	}
 
 	// ffi_read_str(ptr, offset) -> str (null-terminated C string)
 	in.Builtins["ffi_read_str"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValNativePtr {
+		if len(args) < 1 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return StringValue(""), nil
 		}
 		offset := uintptr(0)
 		if len(args) >= 2 {
 			offset = uintptr(in.toInt(args[1]))
 		}
+		if args[0].Type == ValCStruct && args[0].CStruct() != nil && len(args[0].CStruct().Buffer) > 0 {
+			buf := args[0].CStruct().Buffer
+			if int(offset) < len(buf) {
+				bSlice := buf[offset:]
+				for i, b := range bSlice {
+					if b == 0 {
+						return StringValue(string(bSlice[:i])), nil
+					}
+				}
+				return StringValue(string(bSlice)), nil
+			}
+		}
+		if buf, ok := pinnedBuffers[args[0].PtrVal]; ok && int(offset) < len(buf) {
+			bSlice := buf[offset:]
+			for i, b := range bSlice {
+				if b == 0 {
+					return StringValue(string(bSlice[:i])), nil
+				}
+			}
+			return StringValue(string(bSlice)), nil
+		}
 		base := args[0].PtrVal + offset
+		if base == 0 {
+			return StringValue(""), nil
+		}
 		var bytes []byte
 		for {
 			b := *(*byte)(unsafe.Pointer(base))
@@ -336,60 +371,60 @@ func (in *Interp) registerFFI() {
 
 	// ffi_write_uint8(ptr, offset, val)
 	in.Builtins["ffi_write_uint8"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 3 || args[0].Type != ValNativePtr {
+		if len(args) < 3 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return BoolValue(false), nil
 		}
 		offset := uintptr(in.toInt(args[1]))
 		val := uint8(in.toInt(args[2]))
-		ptr := unsafe.Pointer(args[0].PtrVal + offset)
+		ptr := resolvePtr(args[0], offset)
 		*(*uint8)(ptr) = val
 		return BoolValue(true), nil
 	}
 
 	// ffi_write_uint16(ptr, offset, val)
 	in.Builtins["ffi_write_uint16"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 3 || args[0].Type != ValNativePtr {
+		if len(args) < 3 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return BoolValue(false), nil
 		}
 		offset := uintptr(in.toInt(args[1]))
 		val := uint16(in.toInt(args[2]))
-		ptr := unsafe.Pointer(args[0].PtrVal + offset)
+		ptr := resolvePtr(args[0], offset)
 		*(*uint16)(ptr) = val
 		return BoolValue(true), nil
 	}
 
 	// ffi_write_int32(ptr, offset, val)
 	in.Builtins["ffi_write_int32"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 3 || args[0].Type != ValNativePtr {
+		if len(args) < 3 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return BoolValue(false), nil
 		}
 		offset := uintptr(in.toInt(args[1]))
 		val := int32(in.toInt(args[2]))
-		ptr := unsafe.Pointer(args[0].PtrVal + offset)
+		ptr := resolvePtr(args[0], offset)
 		*(*int32)(ptr) = val
 		return BoolValue(true), nil
 	}
 
 	// ffi_write_int64(ptr, offset, val)
 	in.Builtins["ffi_write_int64"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 3 || args[0].Type != ValNativePtr {
+		if len(args) < 3 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return BoolValue(false), nil
 		}
 		offset := uintptr(in.toInt(args[1]))
 		val := in.toInt(args[2])
-		ptr := unsafe.Pointer(args[0].PtrVal + offset)
+		ptr := resolvePtr(args[0], offset)
 		*(*int64)(ptr) = val
 		return BoolValue(true), nil
 	}
 
 	// ffi_write_float64(ptr, offset, val)
 	in.Builtins["ffi_write_float64"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 3 || args[0].Type != ValNativePtr {
+		if len(args) < 3 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return BoolValue(false), nil
 		}
 		offset := uintptr(in.toInt(args[1]))
 		val := in.toFloat(args[2])
-		ptr := unsafe.Pointer(args[0].PtrVal + offset)
+		ptr := resolvePtr(args[0], offset)
 		*(*float64)(ptr) = val
 		return BoolValue(true), nil
 	}
@@ -399,12 +434,11 @@ func (in *Interp) registerFFI() {
 		if len(args) < 1 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return NativePtrValue(0), nil
 		}
-		base := args[0].PtrVal
 		offset := uintptr(0)
 		if len(args) >= 2 {
 			offset = uintptr(in.toInt(args[1]))
 		}
-		ptr := unsafe.Pointer(base + offset)
+		ptr := resolvePtr(args[0], offset)
 		val := *(*uintptr)(ptr)
 		return NativePtrValue(val), nil
 	}
@@ -414,7 +448,6 @@ func (in *Interp) registerFFI() {
 		if len(args) < 3 || (args[0].Type != ValNativePtr && args[0].Type != ValCStruct) {
 			return BoolValue(false), nil
 		}
-		base := args[0].PtrVal
 		offset := uintptr(in.toInt(args[1]))
 		valPtr := uintptr(0)
 		if args[2].Type == ValNativePtr || args[2].Type == ValCStruct {
@@ -422,7 +455,7 @@ func (in *Interp) registerFFI() {
 		} else {
 			valPtr = uintptr(in.toInt(args[2]))
 		}
-		ptr := unsafe.Pointer(base + offset)
+		ptr := resolvePtr(args[0], offset)
 		*(*uintptr)(ptr) = valPtr
 		return BoolValue(true), nil
 	}

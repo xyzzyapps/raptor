@@ -50,23 +50,27 @@ func (g *GotoSignal) Error() string {
 
 // Interp is the AST tree-walking evaluation interpreter for Raku5.
 type Interp struct {
-	GlobalEnv       *Env
-	Stdout          io.Writer
-	Stderr          io.Writer
-	Builtins        map[string]BuiltinFunc
-	Structs         map[string]*CStructDeclStmt
-	BeforeHooks     map[string][]*AdviceHookStmt
-	AfterHooks      map[string][]*AdviceHookStmt
-	AroundHooks     map[string][]*AdviceHookStmt
-	GatherStack     [][]*Value
-	CustomInfixOps  map[string]*Value
-	CustomPrefixOps map[string]*Value
-	Packages        map[string]map[string]*Value
-	CurrentPackage  string
+	GlobalEnv        *Env
+	Stdout           io.Writer
+	Stderr           io.Writer
+	Builtins         map[string]BuiltinFunc
+	Structs          map[string]*CStructDeclStmt
+	BeforeHooks      map[string][]*AdviceHookStmt
+	AfterHooks       map[string][]*AdviceHookStmt
+	AroundHooks      map[string][]*AdviceHookStmt
+	GatherStack      [][]*Value
+	CustomInfixOps   map[string]*Value
+	CustomPrefixOps  map[string]*Value
+	Packages         map[string]map[string]*Value
+	CurrentPackage   string
 	StateVars        map[Stmt]*StateCell
 	Grammars         map[string]*GrammarDeclStmt
 	CompiledGrammars map[string]*gcre.Grammar
 	CurrentEnv       *Env
+	ds               dataStack
+	globals          *globalSlotTable
+	hasAdviceHooks   bool
+	builtinEpoch     uint32
 }
 
 // BuiltinFunc is a standard library function signature in Raku5.
@@ -90,6 +94,7 @@ func NewInterp() *Interp {
 		StateVars:        make(map[Stmt]*StateCell),
 		Grammars:         make(map[string]*GrammarDeclStmt),
 		CompiledGrammars: make(map[string]*gcre.Grammar),
+		globals:          newGlobalSlotTable(),
 	}
 	in.Packages["main"] = make(map[string]*Value)
 	in.registerBuiltins()
@@ -128,9 +133,13 @@ func NewInterp() *Interp {
 		var sum float64
 		for _, a := range args {
 			if a.Type == ValArray {
-				if a.Ints != nil && a.ArrayVal == nil {
-					for _, n := range a.Ints {
+				if ints := a.intLane(); ints != nil {
+					for _, n := range ints {
 						sum += float64(n)
+					}
+				} else if floats := a.floatLane(); floats != nil {
+					for _, f := range floats {
+						sum += f
 					}
 				} else {
 					for _, e := range a.ArrayVal {
@@ -150,9 +159,13 @@ func NewInterp() *Interp {
 		prod := 1.0
 		for _, a := range args {
 			if a.Type == ValArray {
-				if a.Ints != nil && a.ArrayVal == nil {
-					for _, n := range a.Ints {
+				if ints := a.intLane(); ints != nil {
+					for _, n := range ints {
 						prod *= float64(n)
+					}
+				} else if floats := a.floatLane(); floats != nil {
+					for _, f := range floats {
+						prod *= f
 					}
 				} else {
 					for _, e := range a.ArrayVal {
@@ -176,6 +189,324 @@ func NewInterp() *Interp {
 	}
 
 	return in
+}
+
+func (in *Interp) getVar(ve *VarExpr, env *Env) (*Value, bool) {
+	switch ve.SlotKind {
+	case SlotLocal:
+		if in.ds.curFrame != nil && ve.Slot < len(in.ds.curFrame.ptrs) {
+			v := in.ds.curFrame.ptrs[ve.Slot]
+			if v != nil {
+				return v, true
+			}
+		}
+	case SlotGlobal:
+		if in.globals != nil && ve.Slot < in.globals.count {
+			v := in.globals.get(ve.Slot)
+			if v != nil {
+				return v, true
+			}
+		}
+	}
+	if v, ok := env.Lookup(ve.Name); ok {
+		return v, true
+	}
+	if env != in.GlobalEnv {
+		if v, ok := in.GlobalEnv.Lookup(ve.Name); ok {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+func (in *Interp) setVarSlot(kind SlotKind, slot int, val *Value) *Value {
+	if kind == SlotLocal {
+		f := in.ds.curFrame
+		f.setSlot(slot, val)
+		return f.ptrs[slot]
+	}
+	return in.globals.setSlot(slot, val, in.GlobalEnv)
+}
+
+func (in *Interp) setVarSlotInt(kind SlotKind, slot int, n int64) *Value {
+	if kind == SlotLocal {
+		f := in.ds.curFrame
+		f.setInt(slot, n)
+		return &f.boxes[slot]
+	}
+	return in.globals.setInt(slot, n, in.GlobalEnv)
+}
+
+func (in *Interp) evalIntExprFast(expr Expr, env *Env) (int64, bool) {
+	if expr == nil {
+		return 0, false
+	}
+	switch e := expr.(type) {
+	case *LiteralExpr:
+		if e.Type == TokInt {
+			return e.Value.(int64), true
+		}
+	case *VarExpr:
+		if v, ok := in.getVar(e, env); ok && v != nil && v.Type == ValInt {
+			return v.IntVal, true
+		}
+	case *BinaryExpr:
+		if len(in.CustomInfixOps) > 0 {
+			return 0, false
+		}
+		li, okL := in.evalIntExprFast(e.Left, env)
+		if !okL {
+			return 0, false
+		}
+		ri, okR := in.evalIntExprFast(e.Right, env)
+		if !okR {
+			return 0, false
+		}
+		switch e.Op {
+		case "+":
+			return li + ri, true
+		case "-":
+			return li - ri, true
+		case "*", "×":
+			return li * ri, true
+		case "div":
+			if ri == 0 {
+				return 0, false
+			}
+			return li / ri, true
+		case "%", "mod":
+			if ri == 0 {
+				return 0, false
+			}
+			return li % ri, true
+		case "+&":
+			return li & ri, true
+		case "+|":
+			return li | ri, true
+		case "+^":
+			return li ^ ri, true
+		case "+<":
+			return li << ri, true
+		case "+>":
+			return li >> ri, true
+		}
+	}
+	return 0, false
+}
+
+func (in *Interp) evalCondFast(expr Expr, env *Env) (bool, error) {
+	if expr == nil {
+		return false, nil
+	}
+	switch e := expr.(type) {
+	case *LiteralExpr:
+		switch e.Type {
+		case TokInt:
+			return e.Value.(int64) != 0, nil
+		case TokFloat:
+			return e.Value.(float64) != 0.0, nil
+		case TokString:
+			s := e.Value.(string)
+			return s != "" && s != "0", nil
+		case TokIdent:
+			id := e.Value.(string)
+			if id == "True" || id == "true" {
+				return true, nil
+			}
+			if id == "False" || id == "false" || id == "Nil" {
+				return false, nil
+			}
+		}
+	case *VarExpr:
+		if e.Name == "True" || e.Name == "true" {
+			return true, nil
+		}
+		if e.Name == "False" || e.Name == "false" || e.Name == "Nil" {
+			return false, nil
+		}
+		if v, ok := in.getVar(e, env); ok && v != nil {
+			return v.IsTrue(), nil
+		}
+		return false, nil
+	case *UnaryExpr:
+		if e.Op == "!" || e.Op == "not" {
+			c, err := in.evalCondFast(e.Right, env)
+			return !c, err
+		}
+		if e.Op == "?" || e.Op == "so" {
+			return in.evalCondFast(e.Right, env)
+		}
+	case *BinaryExpr:
+		if len(in.CustomInfixOps) == 0 {
+			switch e.Op {
+			case "&&", "and":
+				lc, err := in.evalCondFast(e.Left, env)
+				if err != nil || !lc {
+					return false, err
+				}
+				return in.evalCondFast(e.Right, env)
+			case "||", "or":
+				lc, err := in.evalCondFast(e.Left, env)
+				if err != nil || lc {
+					return lc, err
+				}
+				return in.evalCondFast(e.Right, env)
+			case "<=", ">=", "<", ">", "==":
+				if li, okL := in.evalIntExprFast(e.Left, env); okL {
+					if ri, okR := in.evalIntExprFast(e.Right, env); okR {
+						switch e.Op {
+						case "<=":
+							return li <= ri, nil
+						case ">=":
+							return li >= ri, nil
+						case "<":
+							return li < ri, nil
+						case ">":
+							return li > ri, nil
+						case "==":
+							return li == ri, nil
+						}
+					}
+				}
+			case "!=":
+				if li, okL := in.evalIntExprFast(e.Left, env); okL {
+					if ri, okR := in.evalIntExprFast(e.Right, env); okR {
+						return li != ri, nil
+					}
+				}
+			case "%%":
+				if li, okL := in.evalIntExprFast(e.Left, env); okL {
+					if ri, okR := in.evalIntExprFast(e.Right, env); okR && ri != 0 {
+						return li%ri == 0, nil
+					}
+				}
+			case "eq", "ne":
+				var ls, rs string
+				var hasL, hasR bool
+				if lit, ok := e.Left.(*LiteralExpr); ok && lit.Type == TokString {
+					ls, hasL = lit.Value.(string), true
+				} else if ve, ok := e.Left.(*VarExpr); ok {
+					if v, ok := in.getVar(ve, env); ok && v != nil && v.Type == ValString {
+						ls, hasL = v.StrVal, true
+					}
+				}
+				if lit, ok := e.Right.(*LiteralExpr); ok && lit.Type == TokString {
+					rs, hasR = lit.Value.(string), true
+				} else if ve, ok := e.Right.(*VarExpr); ok {
+					if v, ok := in.getVar(ve, env); ok && v != nil && v.Type == ValString {
+						rs, hasR = v.StrVal, true
+					}
+				}
+				if hasL && hasR {
+					if e.Op == "eq" {
+						return ls == rs, nil
+					}
+					return ls != rs, nil
+				}
+			}
+		}
+	}
+	v, err := in.evalExpr(expr, env)
+	if err != nil {
+		return false, err
+	}
+	return v.IsTrue(), nil
+}
+
+func (in *Interp) execGotoSub(gSig *GotoSignal, env *Env) (*Value, error) {
+	subName := strings.TrimPrefix(gSig.Target, "&")
+	if callee, ok := env.Lookup(subName); ok {
+		return in.InvokeCallable(callee, nil)
+	}
+	if callee, ok := in.GlobalEnv.Lookup(subName); ok {
+		return in.InvokeCallable(callee, nil)
+	}
+	return nil, fmt.Errorf("goto: subroutine %q not found", subName)
+}
+
+func materializeHostReturn(v *Value, depth int) {
+	if v == nil || depth > 2 {
+		return
+	}
+	switch v.Type {
+	case ValArray:
+		if v.ArrayVal == nil && v.arrayLen() <= 1024 {
+			v.materializeArray()
+		}
+		if len(v.ArrayVal) <= 1024 {
+			for _, el := range v.ArrayVal {
+				materializeHostReturn(el, depth+1)
+			}
+		}
+	case ValHash:
+		if len(v.HashVal) <= 1024 {
+			for _, el := range v.HashVal {
+				materializeHostReturn(el, depth+1)
+			}
+		}
+	}
+}
+
+func copyTempSlot(dst, src *Value) *Value {
+	if src == nil {
+		return valNil
+	}
+	if (src.flags & flagTempArena) == 0 {
+		return src
+	}
+	switch src.Type {
+	case ValNil:
+		return valNil
+	case ValBool:
+		return BoolValue(src.BoolVal)
+	case ValInt:
+		dst.Type = ValInt
+		dst.IntVal = src.IntVal
+		dst.flags = flagTempArena
+		return dst
+	case ValFloat:
+		dst.Type = ValFloat
+		dst.FloatVal = src.FloatVal
+		dst.flags = flagTempArena
+		return dst
+	case ValString:
+		s := src.StrVal
+		if src.extKind == extStrBuf {
+			s = strings.Clone(s)
+		}
+		dst.Type = ValString
+		dst.StrVal = s
+		dst.ext = nil
+		dst.extKind = extNone
+		dst.flags = flagTempArena
+		return dst
+	default:
+		return escapeValue(src)
+	}
+}
+
+func isBreak(err error) bool {
+	if err == sigBreak {
+		return true
+	}
+	_, ok := err.(*BreakSignal)
+	return ok
+}
+
+func isContinue(err error) bool {
+	if err == sigContinue {
+		return true
+	}
+	_, ok := err.(*ContinueSignal)
+	return ok
+}
+
+func isRedo(err error) bool {
+	if err == sigRedo {
+		return true
+	}
+	_, ok := err.(*RedoSignal)
+	return ok
 }
 
 func (in *Interp) SetStdout(w io.Writer) {
@@ -203,6 +534,7 @@ func (in *Interp) GetPackage(pkg string) map[string]*Value {
 }
 
 func (in *Interp) SetPackageSymbol(pkg string, name string, val *Value) {
+	val = escapeValue(val)
 	stash := in.GetPackage(pkg)
 	stash[name] = val
 	noSigil := strings.TrimLeft(name, "$@%&")
@@ -322,14 +654,22 @@ func (in *Interp) Eval(source string) (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	return in.EvalProgram(prog, in.GlobalEnv)
+	res, err := in.EvalProgram(prog, in.GlobalEnv)
+	if err != nil {
+		return nil, err
+	}
+	res = escapeValue(res)
+	materializeHostReturn(res, 0)
+	return res, nil
 }
 
 // EvalProgram evaluates all top-level statements.
 func (in *Interp) EvalProgram(prog *Program, env *Env) (*Value, error) {
 	if prog == nil || len(prog.Stmts) == 0 {
-		return NilValue(), nil
+		return valNil, nil
 	}
+	in.ResolveProgram(prog, env == in.GlobalEnv)
+
 	var labelMap map[string]int
 	for idx, s := range prog.Stmts {
 		if lStmt, ok := s.(*LabelStmt); ok {
@@ -340,25 +680,48 @@ func (in *Interp) EvalProgram(prog *Program, env *Env) (*Value, error) {
 		}
 	}
 
-	var lastVal *Value = NilValue()
+	var lastVal *Value = valNil
 	i := 0
+	lastIdx := len(prog.Stmts) - 1
 	for i < len(prog.Stmts) {
 		stmt := prog.Stmts[i]
-		val, err := in.evalStmt(stmt, env)
-		if err != nil {
+		if labelMap == nil && i < lastIdx {
+			mark := in.ds.markTemp()
+			_, err := in.evalStmt(stmt, env)
+			if err == nil {
+				in.ds.rewindTemp(mark)
+				i++
+				continue
+			}
+			if err == sigReturn {
+				rv := in.ds.returnVal
+				in.ds.returnVal = nil
+				return escapeValue(rv), nil
+			}
 			if ret, ok := err.(*ReturnSignal); ok {
-				return ret.Value, nil
+				return escapeValue(ret.Value), nil
 			}
 			if gSig, ok := err.(*GotoSignal); ok {
 				if gSig.IsSub {
-					subName := strings.TrimPrefix(gSig.Target, "&")
-					if callee, ok := env.Lookup(subName); ok {
-						return in.InvokeCallable(callee, nil)
-					}
-					if callee, ok := in.GlobalEnv.Lookup(subName); ok {
-						return in.InvokeCallable(callee, nil)
-					}
-					return nil, fmt.Errorf("goto: subroutine %q not found", subName)
+					return in.execGotoSub(gSig, env)
+				}
+				return nil, fmt.Errorf("goto: label %q not found", gSig.Target)
+			}
+			return nil, err
+		}
+		val, err := in.evalStmt(stmt, env)
+		if err != nil {
+			if err == sigReturn {
+				rv := in.ds.returnVal
+				in.ds.returnVal = nil
+				return escapeValue(rv), nil
+			}
+			if ret, ok := err.(*ReturnSignal); ok {
+				return escapeValue(ret.Value), nil
+			}
+			if gSig, ok := err.(*GotoSignal); ok {
+				if gSig.IsSub {
+					return in.execGotoSub(gSig, env)
 				}
 				if targetIdx, ok := labelMap[gSig.Target]; ok {
 					i = targetIdx
@@ -378,14 +741,19 @@ func (in *Interp) EvalProgram(prog *Program, env *Env) (*Value, error) {
 	if mainVal, ok := in.GlobalEnv.Lookup("MAIN"); ok && (mainVal.Type == ValClosure || mainVal.Type == ValMultiSub) {
 		var mainArgs []*Value
 		if argsVal, ok := in.GlobalEnv.Lookup("@*ARGS"); ok && argsVal.Type == ValArray {
-			mainArgs = argsVal.ArrayVal
+			mainArgs = argsVal.materializeArray()
 		} else if argsVal, ok := in.GlobalEnv.Lookup("@ARGV"); ok && argsVal.Type == ValArray {
-			mainArgs = argsVal.ArrayVal
+			mainArgs = argsVal.materializeArray()
 		}
 		res, err := in.InvokeCallable(mainVal, mainArgs)
 		if err != nil {
+			if err == sigReturn {
+				rv := in.ds.returnVal
+				in.ds.returnVal = nil
+				return escapeValue(rv), nil
+			}
 			if ret, ok := err.(*ReturnSignal); ok {
-				return ret.Value, nil
+				return escapeValue(ret.Value), nil
 			}
 			return nil, err
 		}
@@ -482,6 +850,25 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		return gVal, nil
 
 	case *VarDeclStmt:
+		if s.SlotKind != SlotNone {
+			var initVal *Value = valNil
+			if s.Value != nil {
+				if n, ok := in.evalIntExprFast(s.Value, env); ok {
+					return in.setVarSlotInt(s.SlotKind, s.Slot, n), nil
+				}
+				v, err := in.evalExpr(s.Value, env)
+				if err != nil {
+					return nil, err
+				}
+				initVal = v
+			} else if strings.HasPrefix(s.Name, "@") {
+				initVal = &Value{Type: ValArray}
+			} else if strings.HasPrefix(s.Name, "%") {
+				initVal = HashValue(make(map[string]*Value))
+			}
+			return in.setVarSlot(s.SlotKind, s.Slot, initVal), nil
+		}
+
 		if s.Scope == "state" {
 			cell, ok := in.StateVars[s]
 			if !ok {
@@ -554,7 +941,7 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 					return nil, fmt.Errorf("type check failed: dynamic constraint violated for subset %s", s.Type)
 				}
 			} else if structDecl, ok := in.Structs[s.Type]; ok {
-				if initVal.Type != ValCStruct || initVal.CStructVal == nil || initVal.CStructVal.Class != structDecl {
+				if initVal.Type != ValCStruct || initVal.CStruct() == nil || initVal.CStruct().Class != structDecl {
 					return nil, fmt.Errorf("type check failed in declaration of %s: expected struct %s, got %s", s.Name, s.Type, initVal.TypeName())
 				}
 			}
@@ -591,12 +978,25 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 
 	case *SubDeclStmt:
 		normName := normalizeOpName(s.Name)
+		frameSlots := s.FrameSlots
+		paramSlots := s.ParamSlots
+		needsEnv := s.NeedsEnv
+		fastSimple := s.FastSimple
+		noParamChecks := s.NoParamChecks
+		if s.Body != nil && !s.Body.Resolved {
+			frameSlots, paramSlots, needsEnv, fastSimple, noParamChecks = in.resolveFunction(s.Params, s.Body, nil)
+		}
 		closure := &Closure{
-			Name:    normName,
-			Params:  s.Params,
-			Body:    s.Body,
-			Env:     env,
-			IsMulti: s.IsMulti,
+			Name:          normName,
+			Params:        s.Params,
+			Body:          s.Body,
+			Env:           env,
+			IsMulti:       s.IsMulti,
+			FrameSlots:    frameSlots,
+			ParamSlots:    paramSlots,
+			NeedsEnv:      needsEnv,
+			FastSimple:    fastSimple,
+			NoParamChecks: noParamChecks,
 		}
 		if s.IsMulti {
 			env.RegisterMulti(normName, closure)
@@ -606,6 +1006,11 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			if in.CurrentPackage != "" && in.CurrentPackage != "main" {
 				in.GlobalEnv.RegisterMulti(in.CurrentPackage+"::"+normName, closure)
 				in.GlobalEnv.RegisterMulti("&"+in.CurrentPackage+"::"+normName, closure)
+			}
+			if s.GlobalSlot >= 0 {
+				if mVal, ok := in.GlobalEnv.Lookup(normName); ok {
+					in.globals.setSlot(s.GlobalSlot, mVal, in.GlobalEnv)
+				}
 			}
 
 			rawOp := extractRawOperatorName(s.Name)
@@ -626,6 +1031,9 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			in.GlobalEnv.Define(normName, val)
 			in.GlobalEnv.Define("&"+normName, val)
 			in.GlobalEnv.Define(s.Name, val)
+			if s.GlobalSlot >= 0 {
+				in.globals.setSlot(s.GlobalSlot, val, in.GlobalEnv)
+			}
 			if in.CurrentPackage != "" && in.CurrentPackage != "main" {
 				in.SetPackageSymbol(in.CurrentPackage, normName, val)
 				in.SetPackageSymbol(in.CurrentPackage, "&"+normName, val)
@@ -643,6 +1051,7 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 
 	case *NativeSubDeclStmt:
 		normName := normalizeOpName(s.Name)
+		in.builtinEpoch++
 		libKey := s.Library
 		if libKey != "" && libKey != "native" {
 			if _, ok := in.Builtins["ffi_load"]; ok {
@@ -654,11 +1063,13 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		}
 
 		in.Builtins[normName] = func(in *Interp, callArgs []*Value) (*Value, error) {
+			copiedArgs := make([]*Value, len(callArgs))
+			copy(copiedArgs, callArgs)
 			fArgs := []*Value{
 				StringValue(libKey),
 				StringValue(s.Symbol),
 				StringValue(s.ReturnType),
-				ArrayValue(callArgs),
+				ArrayValue(copiedArgs),
 			}
 			return in.Builtins["ffi_call"](in, fArgs)
 		}
@@ -681,6 +1092,7 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		return in.evalVerify(s, env)
 
 	case *AdviceHookStmt:
+		in.hasAdviceHooks = true
 		normTarget := normalizeOpName(s.TargetName)
 		switch s.Kind {
 		case "before":
@@ -693,151 +1105,322 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		return NilValue(), nil
 
 	case *IfStmt:
-		condVal, err := in.evalExpr(s.Condition, env)
+		condTrue, err := in.evalCondFast(s.Condition, env)
 		if err != nil {
 			return nil, err
 		}
-		if condVal.IsTrue() {
-			return in.evalBlock(s.ThenBranch, env.NewChild())
+		if condTrue {
+			branchEnv := env
+			if s.ThenBranch != nil && s.ThenBranch.NeedsBlockEnv {
+				branchEnv = env.NewChild()
+			}
+			return in.evalBlock(s.ThenBranch, branchEnv)
 		}
 		for i, eCond := range s.ElsifConds {
-			ecVal, err := in.evalExpr(eCond, env)
+			ecTrue, err := in.evalCondFast(eCond, env)
 			if err != nil {
 				return nil, err
 			}
-			if ecVal.IsTrue() {
-				return in.evalBlock(s.ElsifThen[i], env.NewChild())
+			if ecTrue {
+				branchEnv := env
+				if i < len(s.ElsifThen) && s.ElsifThen[i] != nil && s.ElsifThen[i].NeedsBlockEnv {
+					branchEnv = env.NewChild()
+				}
+				if i < len(s.ElsifThen) {
+					return in.evalBlock(s.ElsifThen[i], branchEnv)
+				}
+				return valNil, nil
 			}
 		}
 		if s.ElseBranch != nil {
-			return in.evalBlock(s.ElseBranch, env.NewChild())
+			branchEnv := env
+			if s.ElseBranch.NeedsBlockEnv {
+				branchEnv = env.NewChild()
+			}
+			return in.evalBlock(s.ElseBranch, branchEnv)
 		}
-		return NilValue(), nil
+		return valNil, nil
 
 	case *UnlessStmt:
-		condVal, err := in.evalExpr(s.Condition, env)
+		condTrue, err := in.evalCondFast(s.Condition, env)
 		if err != nil {
 			return nil, err
 		}
-		if !condVal.IsTrue() {
-			return in.evalBlock(s.Body, env.NewChild())
+		if !condTrue {
+			branchEnv := env
+			if s.Body != nil && s.Body.NeedsBlockEnv {
+				branchEnv = env.NewChild()
+			}
+			return in.evalBlock(s.Body, branchEnv)
 		}
-		return NilValue(), nil
+		return valNil, nil
 
 	case *WhileStmt:
-		var lastVal *Value = NilValue()
-		childEnv := env.NewChild()
+		var lastVal *Value = valNil
+		lastBox := in.ds.allocTemp()
+		iterMark := in.ds.markTemp()
+		childEnv := env
+		if s.NeedsLoopEnv {
+			childEnv = env.NewChild()
+		}
 		redo := false
 		for {
 			if !redo {
-				cVal, err := in.evalExpr(s.Condition, env)
+				condTrue, err := in.evalCondFast(s.Condition, env)
 				if err != nil {
 					return nil, err
 				}
-				condIsTrue := cVal.IsTrue()
 				if s.IsUntil {
-					condIsTrue = !condIsTrue
+					condTrue = !condTrue
 				}
-				if !condIsTrue {
+				if !condTrue {
 					break
 				}
 			}
 			redo = false
 			bVal, err := in.evalBlock(s.Body, childEnv)
 			if err != nil {
-				if _, ok := err.(*BreakSignal); ok {
+				if err == sigBreak || isBreak(err) {
 					break
 				}
-				if _, ok := err.(*ContinueSignal); ok {
+				if err == sigContinue || isContinue(err) {
+					in.ds.rewindTemp(iterMark)
 					continue
 				}
-				if _, ok := err.(*RedoSignal); ok {
+				if err == sigRedo || isRedo(err) {
 					redo = true
+					in.ds.rewindTemp(iterMark)
 					continue
 				}
 				return nil, err
 			}
-			lastVal = bVal
+			if bVal != nil {
+				lastVal = copyTempSlot(lastBox, bVal)
+			}
+			in.ds.rewindTemp(iterMark)
 		}
 		return lastVal, nil
 
 	case *ForStmt:
+		// Fast-path A: integer range 1..N
+		if be, ok := s.Iterable.(*BinaryExpr); ok && be.Op == ".." && len(in.CustomInfixOps) == 0 {
+			startI, okStart := in.evalIntExprFast(be.Left, env)
+			endI, okEnd := in.evalIntExprFast(be.Right, env)
+			if okStart && okEnd {
+				if startI > endI {
+					return valNil, nil
+				}
+				var lastVal *Value = valNil
+				lastBox := in.ds.allocTemp()
+				iterMark := in.ds.markTemp()
+
+				if !s.NeedsLoopEnv && s.VarSlotKind != SlotNone && !s.UsesTopic {
+					for n := startI; n <= endI; n++ {
+						in.setVarSlotInt(s.VarSlotKind, s.VarSlot, n)
+						bVal, err := in.evalBlock(s.Body, env)
+						if err != nil {
+							if err == sigBreak || isBreak(err) {
+								break
+							}
+							if err == sigContinue || isContinue(err) {
+								in.ds.rewindTemp(iterMark)
+								continue
+							}
+							if err == sigRedo || isRedo(err) {
+								n--
+								in.ds.rewindTemp(iterMark)
+								continue
+							}
+							return nil, err
+						}
+						if bVal != nil {
+							lastVal = copyTempSlot(lastBox, bVal)
+						}
+						in.ds.rewindTemp(iterMark)
+					}
+					return lastVal, nil
+				}
+
+				loopEnv := env
+				if s.NeedsLoopEnv {
+					loopEnv = env.NewChild()
+				}
+				for n := startI; n <= endI; n++ {
+					redo := false
+					for {
+						if !redo {
+							if s.VarSlotKind != SlotNone {
+								in.setVarSlotInt(s.VarSlotKind, s.VarSlot, n)
+							} else if s.VarName != "" {
+								loopEnv.Define(s.VarName, IntValue(n))
+							}
+							if s.UsesTopic {
+								loopEnv.Define("$_", IntValue(n))
+							}
+						}
+						redo = false
+						bVal, err := in.evalBlock(s.Body, loopEnv)
+						if err != nil {
+							if err == sigBreak || isBreak(err) {
+								return lastVal, nil
+							}
+							if err == sigContinue || isContinue(err) {
+								break
+							}
+							if err == sigRedo || isRedo(err) {
+								redo = true
+								in.ds.rewindTemp(iterMark)
+								continue
+							}
+							return nil, err
+						}
+						if bVal != nil {
+							lastVal = copyTempSlot(lastBox, bVal)
+						}
+						break
+					}
+					in.ds.rewindTemp(iterMark)
+				}
+				return lastVal, nil
+			}
+		}
+
 		iterVal, err := in.evalExpr(s.Iterable, env)
 		if err != nil {
 			return nil, err
 		}
-		var lastVal *Value = NilValue()
-		childEnv := env.NewChild()
-		runItem := func(item *Value) (stop bool, err error) {
-			for {
-				if s.VarName != "" {
-					childEnv.Define(s.VarName, item)
+
+		var lastVal *Value = valNil
+		lastBox := in.ds.allocTemp()
+		iterMark := in.ds.markTemp()
+		loopEnv := env
+		if s.NeedsLoopEnv {
+			loopEnv = env.NewChild()
+		}
+
+		if ints := iterVal.intLane(); ints != nil {
+			if !s.NeedsLoopEnv && s.VarSlotKind != SlotNone && !s.UsesTopic {
+				for _, n := range ints {
+					in.setVarSlotInt(s.VarSlotKind, s.VarSlot, n)
+					bVal, err := in.evalBlock(s.Body, env)
+					if err != nil {
+						if err == sigBreak || isBreak(err) {
+							break
+						}
+						if err == sigContinue || isContinue(err) {
+							in.ds.rewindTemp(iterMark)
+							continue
+						}
+						return nil, err
+					}
+					if bVal != nil {
+						lastVal = copyTempSlot(lastBox, bVal)
+					}
+					in.ds.rewindTemp(iterMark)
 				}
-				childEnv.Define("$_", item)
-				bVal, err := in.evalBlock(s.Body, childEnv)
+				return lastVal, nil
+			}
+			for _, n := range ints {
+				item := IntValue(n)
+				if s.VarSlotKind != SlotNone {
+					in.setVarSlotInt(s.VarSlotKind, s.VarSlot, n)
+				} else if s.VarName != "" {
+					loopEnv.Define(s.VarName, item)
+				}
+				if s.UsesTopic {
+					loopEnv.Define("$_", item)
+				}
+				bVal, err := in.evalBlock(s.Body, loopEnv)
 				if err != nil {
-					if _, ok := err.(*BreakSignal); ok {
-						return true, nil
+					if err == sigBreak || isBreak(err) {
+						break
 					}
-					if _, ok := err.(*ContinueSignal); ok {
-						return false, nil
-					}
-					if _, ok := err.(*RedoSignal); ok {
+					if err == sigContinue || isContinue(err) {
+						in.ds.rewindTemp(iterMark)
 						continue
 					}
-					return true, err
+					return nil, err
 				}
-				lastVal = bVal
-				return false, nil
+				if bVal != nil {
+					lastVal = copyTempSlot(lastBox, bVal)
+				}
+				in.ds.rewindTemp(iterMark)
 			}
+			return lastVal, nil
 		}
-		if iterVal.Type == ValArray && iterVal.Ints != nil && iterVal.ArrayVal == nil {
-			for _, n := range iterVal.Ints {
-				stop, err := runItem(IntValue(n))
-				if err != nil {
-					return nil, err
-				}
-				if stop {
-					break
-				}
-			}
+
+		var list []*Value
+		if iterVal.Type == ValArray {
+			list = iterVal.materializeArray()
+		} else if iterVal.Type == ValLazySeq && iterVal.LazySeq() != nil {
+			list = iterVal.LazySeq().Items
 		} else {
-			list := []*Value{iterVal}
-			if iterVal.Type == ValArray {
-				list = iterVal.materializeArray()
-			} else if iterVal.Type == ValLazySeq && iterVal.LazySeqVal != nil {
-				list = iterVal.LazySeqVal.Items
-			}
-			for _, item := range list {
-				stop, err := runItem(item)
+			list = []*Value{iterVal}
+		}
+		for _, item := range list {
+			redo := false
+			for {
+				if !redo {
+					if s.VarSlotKind != SlotNone {
+						in.setVarSlot(s.VarSlotKind, s.VarSlot, item)
+					} else if s.VarName != "" {
+						loopEnv.Define(s.VarName, item)
+					}
+					if s.UsesTopic {
+						loopEnv.Define("$_", item)
+					}
+				}
+				redo = false
+				bVal, err := in.evalBlock(s.Body, loopEnv)
 				if err != nil {
+					if err == sigBreak || isBreak(err) {
+						return lastVal, nil
+					}
+					if err == sigContinue || isContinue(err) {
+						break
+					}
+					if err == sigRedo || isRedo(err) {
+						redo = true
+						in.ds.rewindTemp(iterMark)
+						continue
+					}
 					return nil, err
 				}
-				if stop {
-					break
+				if bVal != nil {
+					lastVal = copyTempSlot(lastBox, bVal)
 				}
+				break
 			}
+			in.ds.rewindTemp(iterMark)
 		}
 		return lastVal, nil
 
 	case *LoopStmt:
-		loopEnv := env.NewChild()
+		loopEnv := env
+		if s.NeedsLoopEnv {
+			loopEnv = env.NewChild()
+		}
 		if s.Init != nil {
 			if _, err := in.evalExpr(s.Init, loopEnv); err != nil {
 				return nil, err
 			}
 		}
-		var lastVal *Value = NilValue()
-		bodyEnv := loopEnv.NewChild()
+		var lastVal *Value = valNil
+		lastBox := in.ds.allocTemp()
+		iterMark := in.ds.markTemp()
+		bodyEnv := loopEnv
+		if s.NeedsBodyEnv {
+			bodyEnv = loopEnv.NewChild()
+		}
 		redo := false
 		for {
 			if !redo {
 				if s.Cond != nil {
-					cVal, err := in.evalExpr(s.Cond, loopEnv)
+					condTrue, err := in.evalCondFast(s.Cond, loopEnv)
 					if err != nil {
 						return nil, err
 					}
-					if !cVal.IsTrue() {
+					if !condTrue {
 						break
 					}
 				}
@@ -845,20 +1428,22 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			redo = false
 			bVal, err := in.evalBlock(s.Body, bodyEnv)
 			if err != nil {
-				if _, ok := err.(*BreakSignal); ok {
+				if err == sigBreak || isBreak(err) {
 					break
 				}
-				if _, ok := err.(*ContinueSignal); ok {
+				if err == sigContinue || isContinue(err) {
 					// step still runs
-				} else if _, ok := err.(*RedoSignal); ok {
+				} else if err == sigRedo || isRedo(err) {
 					redo = true
+					in.ds.rewindTemp(iterMark)
 					continue
 				} else {
 					return nil, err
 				}
-			} else {
-				lastVal = bVal
+			} else if bVal != nil {
+				lastVal = copyTempSlot(lastBox, bVal)
 			}
+			in.ds.rewindTemp(iterMark)
 			if s.Step != nil {
 				if _, err := in.evalExpr(s.Step, loopEnv); err != nil {
 					return nil, err
@@ -868,7 +1453,7 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		return lastVal, nil
 
 	case *ReturnStmt:
-		var retVal *Value = NilValue()
+		var retVal *Value = valNil
 		if s.Value != nil {
 			v, err := in.evalExpr(s.Value, env)
 			if err != nil {
@@ -876,19 +1461,24 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			}
 			retVal = v
 		}
-		return nil, &ReturnSignal{Value: retVal}
+		in.ds.returnVal = retVal
+		return nil, sigReturn
 
 	case *BreakStmt:
-		return nil, &BreakSignal{}
+		return nil, sigBreak
 
 	case *RedoStmt:
-		return nil, &RedoSignal{}
+		return nil, sigRedo
 
 	case *ContinueStmt:
-		return nil, &ContinueSignal{}
+		return nil, sigContinue
 
 	case *BlockStmt:
-		return in.evalBlock(s, env.NewChild())
+		blockEnv := env
+		if s.NeedsBlockEnv {
+			blockEnv = env.NewChild()
+		}
+		return in.evalBlock(s, blockEnv)
 
 	case *UseStmt:
 		return in.evalUse(s, env)
@@ -1033,10 +1623,10 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			var items []*Value
 			if iterVal.Type == ValArray {
 				items = iterVal.materializeArray()
-			} else if iterVal.Type == ValLazySeq && iterVal.LazySeqVal != nil {
-				items = iterVal.LazySeqVal.Items
-			} else if iterVal.Type == ValRef && iterVal.RefVal != nil && iterVal.RefVal.Type == ValArray {
-				items = iterVal.RefVal.materializeArray()
+			} else if iterVal.Type == ValLazySeq && iterVal.LazySeq() != nil {
+				items = iterVal.LazySeq().Items
+			} else if iterVal.Type == ValRef && iterVal.Ref() != nil && iterVal.Ref().Type == ValArray {
+				items = iterVal.Ref().materializeArray()
 			} else {
 				items = []*Value{iterVal}
 			}
@@ -1092,7 +1682,7 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			val = v
+			val = escapeValue(v)
 		}
 		if len(in.GatherStack) > 0 {
 			topIdx := len(in.GatherStack) - 1
@@ -1106,12 +1696,44 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 }
 
 func (in *Interp) evalBlock(b *BlockStmt, env *Env) (*Value, error) {
+	if b == nil || len(b.Stmts) == 0 {
+		return valNil, nil
+	}
 	prev := in.CurrentEnv
 	in.CurrentEnv = env
-	defer func() { in.CurrentEnv = prev }()
-	if b == nil || len(b.Stmts) == 0 {
-		return NilValue(), nil
+	if b.Resolved && !b.HasLabels {
+		var lastVal *Value = valNil
+		lastIdx := len(b.Stmts) - 1
+		for i, stmt := range b.Stmts {
+			if i < lastIdx {
+				mark := in.ds.markTemp()
+				_, err := in.evalStmt(stmt, env)
+				if err == nil {
+					in.ds.rewindTemp(mark)
+					continue
+				}
+				in.CurrentEnv = prev
+				if gSig, ok := err.(*GotoSignal); ok && gSig.IsSub {
+					return in.execGotoSub(gSig, env)
+				}
+				return nil, err
+			}
+			val, err := in.evalStmt(stmt, env)
+			if err != nil {
+				in.CurrentEnv = prev
+				if gSig, ok := err.(*GotoSignal); ok && gSig.IsSub {
+					return in.execGotoSub(gSig, env)
+				}
+				return nil, err
+			}
+			if val != nil {
+				lastVal = val
+			}
+		}
+		in.CurrentEnv = prev
+		return lastVal, nil
 	}
+
 	var labelMap map[string]int
 	for idx, s := range b.Stmts {
 		if lStmt, ok := s.(*LabelStmt); ok {
@@ -1122,24 +1744,19 @@ func (in *Interp) evalBlock(b *BlockStmt, env *Env) (*Value, error) {
 		}
 	}
 
-	var lastVal *Value = NilValue()
+	var lastVal *Value = valNil
 	i := 0
 	for i < len(b.Stmts) {
 		stmt := b.Stmts[i]
 		val, err := in.evalStmt(stmt, env)
 		if err != nil {
+			in.CurrentEnv = prev
 			if gSig, ok := err.(*GotoSignal); ok {
 				if gSig.IsSub {
-					subName := strings.TrimPrefix(gSig.Target, "&")
-					if callee, ok := env.Lookup(subName); ok {
-						return in.InvokeCallable(callee, nil)
-					}
-					if callee, ok := in.GlobalEnv.Lookup(subName); ok {
-						return in.InvokeCallable(callee, nil)
-					}
-					return nil, fmt.Errorf("goto: subroutine %q not found", subName)
+					return in.execGotoSub(gSig, env)
 				}
 				if targetIdx, ok := labelMap[gSig.Target]; ok {
+					in.CurrentEnv = env
 					i = targetIdx
 					continue
 				}
@@ -1152,6 +1769,7 @@ func (in *Interp) evalBlock(b *BlockStmt, env *Env) (*Value, error) {
 		}
 		i++
 	}
+	in.CurrentEnv = prev
 	return lastVal, nil
 }
 
@@ -1268,7 +1886,7 @@ func (in *Interp) validateTypeAndWhere(name string, val *Value, env *Env) error 
 				return fmt.Errorf("type check failed: dynamic constraint violated for subset %s on variable %s", typeName, name)
 			}
 		} else if structDecl, ok := in.Structs[typeName]; ok {
-			if val.Type != ValCStruct || val.CStructVal == nil || val.CStructVal.Class != structDecl {
+			if val.Type != ValCStruct || val.CStruct() == nil || val.CStruct().Class != structDecl {
 				return fmt.Errorf("type check failed on %s: expected struct %s, got %s", name, typeName, val.TypeName())
 			}
 		} else if !val.MatchesType(typeName) {
@@ -1300,6 +1918,112 @@ func (in *Interp) tryInPlaceAssign(s *AssignStmt, env *Env) (*Value, bool, error
 	if !ok {
 		return nil, false, nil
 	}
+
+	// Slot-based fast path (SlotLocal or SlotGlobal)
+	if ve.SlotKind != SlotNone {
+		if s.Op == "+=" || s.Op == "-=" {
+			delta, okR := in.evalIntExprFast(s.Value, env)
+			if !okR {
+				rhs, err := in.evalExpr(s.Value, env)
+				if err != nil {
+					return nil, true, err
+				}
+				if rhs.Type == ValInt {
+					delta = rhs.IntVal
+					okR = true
+				}
+			}
+			if okR {
+				if s.Op == "-=" {
+					delta = -delta
+				}
+				if ve.SlotKind == SlotLocal {
+					f := in.ds.curFrame
+					cur := f.ptrs[ve.Slot]
+					if cur.Type == ValInt {
+						f.setInt(ve.Slot, cur.IntVal+delta)
+						return &f.boxes[ve.Slot], true, nil
+					}
+				} else {
+					cur := in.globals.get(ve.Slot)
+					if cur.Type == ValInt {
+						return in.globals.setInt(ve.Slot, cur.IntVal+delta, in.GlobalEnv), true, nil
+					}
+				}
+			}
+			return nil, false, nil
+		}
+
+		if s.Op == "=" {
+			if be, ok := s.Value.(*BinaryExpr); ok && (be.Op == "+" || be.Op == "-") {
+				if lv, ok := be.Left.(*VarExpr); ok && lv.Name == ve.Name {
+					delta, okR := in.evalIntExprFast(be.Right, env)
+					if okR {
+						if be.Op == "-" {
+							delta = -delta
+						}
+						if ve.SlotKind == SlotLocal {
+							f := in.ds.curFrame
+							cur := f.ptrs[ve.Slot]
+							if cur.Type == ValInt {
+								f.setInt(ve.Slot, cur.IntVal+delta)
+								return &f.boxes[ve.Slot], true, nil
+							}
+						} else {
+							cur := in.globals.get(ve.Slot)
+							if cur.Type == ValInt {
+								return in.globals.setInt(ve.Slot, cur.IntVal+delta, in.GlobalEnv), true, nil
+							}
+						}
+					}
+				}
+			}
+			if valI, ok := in.evalIntExprFast(s.Value, env); ok {
+				return in.setVarSlotInt(ve.SlotKind, ve.Slot, valI), true, nil
+			}
+		}
+
+		if s.Op == "~=" || s.Op == "=" {
+			var suffix string
+			hasSuffix := false
+			if s.Op == "~=" {
+				rhs, err := in.evalExpr(s.Value, env)
+				if err != nil {
+					return nil, true, err
+				}
+				suffix = rhs.String()
+				hasSuffix = true
+			} else if be, ok := s.Value.(*BinaryExpr); ok && be.Op == "~" {
+				if lv, ok := be.Left.(*VarExpr); ok && lv.Name == ve.Name {
+					rhs, err := in.evalExpr(be.Right, env)
+					if err != nil {
+						return nil, true, err
+					}
+					suffix = rhs.String()
+					hasSuffix = true
+				}
+			}
+			if hasSuffix {
+				var cur *Value
+				if ve.SlotKind == SlotLocal {
+					cur = in.ds.curFrame.ptrs[ve.Slot]
+				} else {
+					cur = in.globals.get(ve.Slot)
+				}
+				if cur != nil && cur.Type == ValString && !isFlyweight(cur) {
+					cur.appendString(suffix)
+					return in.setVarSlot(ve.SlotKind, ve.Slot, cur), true, nil
+				}
+				base := ""
+				if cur != nil {
+					base = cur.String()
+				}
+				nv := StringValue(base + suffix)
+				return in.setVarSlot(ve.SlotKind, ve.Slot, nv), true, nil
+			}
+		}
+	}
+
 	if tName, wExpr, ok := env.LookupType(ve.Name); ok && (tName != "" || wExpr != nil) {
 		return nil, false, nil
 	}
@@ -1395,6 +2119,28 @@ func (in *Interp) tryInPlaceAssign(s *AssignStmt, env *Env) (*Value, bool, error
 func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Value, error) {
 	switch t := target.(type) {
 	case *VarExpr:
+		if t.SlotKind != SlotNone {
+			if op == "=" {
+				return in.setVarSlot(t.SlotKind, t.Slot, val), nil
+			}
+			if op == "//=" {
+				cur, ok := in.getVar(t, env)
+				if ok && cur != nil && cur.Type != ValNil {
+					return cur, nil
+				}
+				return in.setVarSlot(t.SlotKind, t.Slot, val), nil
+			}
+			cur, ok := in.getVar(t, env)
+			if !ok || cur == nil {
+				cur = valNil
+			}
+			newVal, err := in.evalBinaryOp(cur, op[:len(op)-1], val)
+			if err != nil {
+				return nil, err
+			}
+			return in.setVarSlot(t.SlotKind, t.Slot, newVal), nil
+		}
+
 		if strings.HasPrefix(t.Name, "%") && strings.HasSuffix(t.Name, "::") {
 			pkg := strings.TrimPrefix(t.Name, "%")
 			pkg = strings.TrimPrefix(pkg, "::")
@@ -1507,18 +2253,27 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 				val = newVal
 			}
 		}
-		if arrVal.Ints != nil && arrVal.ArrayVal == nil && val.Type == ValInt {
-			for len(arrVal.Ints) <= idx {
-				arrVal.Ints = append(arrVal.Ints, 0)
+		if ints := arrVal.intLane(); ints != nil && val.Type == ValInt {
+			for len(ints) <= idx {
+				ints = append(ints, 0)
 			}
-			arrVal.Ints[idx] = val.IntVal
+			ints[idx] = val.IntVal
+			arrVal.lane().Ints = ints
+			return val, nil
+		}
+		if floats := arrVal.floatLane(); floats != nil && val.Type == ValFloat {
+			for len(floats) <= idx {
+				floats = append(floats, 0)
+			}
+			floats[idx] = val.FloatVal
+			arrVal.lane().Floats = floats
 			return val, nil
 		}
 		arrVal.materializeArray()
 		for len(arrVal.ArrayVal) <= idx {
 			arrVal.ArrayVal = append(arrVal.ArrayVal, NilValue())
 		}
-		arrVal.ArrayVal[idx] = val
+		arrVal.ArrayVal[idx] = escapeValue(val)
 		return val, nil
 
 	case *HashAccessExpr:
@@ -1563,7 +2318,7 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 				val = newVal
 			}
 		}
-		hashVal.HashVal[k] = val
+		hashVal.HashVal[k] = escapeValue(val)
 		return val, nil
 
 	case *DerefExpr:
@@ -1573,24 +2328,24 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 		}
 		switch t.Kind {
 		case DerefScalar:
-			if refVal.Type == ValRef && refVal.RefVal != nil {
+			if refVal.Type == ValRef && refVal.Ref() != nil {
 				if op == "=" {
-					*refVal.RefVal = *val
+					*refVal.Ref() = *escapeValue(val)
 					return val, nil
 				}
-				newVal, err := in.evalBinaryOp(refVal.RefVal, op[:len(op)-1], val)
+				newVal, err := in.evalBinaryOp(refVal.Ref(), op[:len(op)-1], val)
 				if err != nil {
 					return nil, err
 				}
-				*refVal.RefVal = *newVal
+				*refVal.Ref() = *escapeValue(newVal)
 				return newVal, nil
 			}
 			return nil, fmt.Errorf("cannot assign to non-scalar reference")
 
 		case DerefArrowArray:
 			arrVal := refVal
-			if arrVal.Type == ValRef && arrVal.RefVal != nil {
-				arrVal = arrVal.RefVal
+			if arrVal.Type == ValRef && arrVal.Ref() != nil {
+				arrVal = arrVal.Ref()
 			}
 			if arrVal.Type != ValArray {
 				return nil, fmt.Errorf("cannot array-index non-array reference of type %s", arrVal.TypeName())
@@ -1611,7 +2366,7 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 				arrVal.ArrayVal = append(arrVal.ArrayVal, NilValue())
 			}
 			if op == "=" {
-				arrVal.ArrayVal[idx] = val
+				arrVal.ArrayVal[idx] = escapeValue(val)
 				return val, nil
 			}
 			cur := arrVal.ArrayVal[idx]
@@ -1619,13 +2374,13 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 			if err != nil {
 				return nil, err
 			}
-			arrVal.ArrayVal[idx] = newVal
+			arrVal.ArrayVal[idx] = escapeValue(newVal)
 			return newVal, nil
 
 		case DerefArrowHash:
 			hashVal := refVal
-			if hashVal.Type == ValRef && hashVal.RefVal != nil {
-				hashVal = hashVal.RefVal
+			if hashVal.Type == ValRef && hashVal.Ref() != nil {
+				hashVal = hashVal.Ref()
 			}
 			if hashVal.Type != ValHash {
 				return nil, fmt.Errorf("cannot hash-index non-hash reference of type %s", hashVal.TypeName())
@@ -1662,9 +2417,9 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 		if err != nil {
 			return nil, err
 		}
-		if invocantVal.Type == ValCStruct && invocantVal.CStructVal != nil && invocantVal.CStructVal.Class != nil {
-			if idx, ok := invocantVal.CStructVal.Class.FieldIndex[t.Method]; ok {
-				return in.writeCStructField(invocantVal.CStructVal, invocantVal.CStructVal.Class.Fields[idx], val)
+		if invocantVal.Type == ValCStruct && invocantVal.CStruct() != nil && invocantVal.CStruct().Class != nil {
+			if idx, ok := invocantVal.CStruct().Class.FieldIndex[t.Method]; ok {
+				return in.writeCStructField(invocantVal.CStruct(), invocantVal.CStruct().Class.Fields[idx], val)
 			}
 		}
 		return nil, fmt.Errorf("cannot assign to method %q on type %s", t.Method, invocantVal.TypeName())
@@ -1709,6 +2464,11 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		}
 
 	case *VarExpr:
+		if e.SlotKind != SlotNone {
+			if val, ok := in.getVar(e, env); ok && val != nil {
+				return val, nil
+			}
+		}
 		if e.Name == "Nil" {
 			return NilValue(), nil
 		}
@@ -1783,7 +2543,7 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 
 	case *RefExpr:
 		if vExpr, ok := e.Expr.(*VarExpr); ok {
-			if val, ok := env.Lookup(vExpr.Name); ok {
+			if val, ok := in.getVar(vExpr, env); ok {
 				return RefValue(val), nil
 			}
 			newVal := NilValue()
@@ -1804,8 +2564,8 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		switch e.Kind {
 		case DerefScalar:
 			if refVal.Type == ValRef {
-				if refVal.RefVal != nil {
-					return refVal.RefVal, nil
+				if refVal.Ref() != nil {
+					return refVal.Ref(), nil
 				}
 				return NilValue(), nil
 			}
@@ -1813,21 +2573,21 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 
 		case DerefArray:
 			arrVal := refVal
-			if arrVal.Type == ValRef && arrVal.RefVal != nil {
-				arrVal = arrVal.RefVal
+			if arrVal.Type == ValRef && arrVal.Ref() != nil {
+				arrVal = arrVal.Ref()
 			}
 			if arrVal.Type == ValArray {
 				return arrVal, nil
 			}
-			if arrVal.Type == ValLazySeq && arrVal.LazySeqVal != nil {
-				return ArrayValue(arrVal.LazySeqVal.Items), nil
+			if arrVal.Type == ValLazySeq && arrVal.LazySeq() != nil {
+				return ArrayValue(arrVal.LazySeq().Items), nil
 			}
 			return ArrayValue([]*Value{arrVal}), nil
 
 		case DerefHash:
 			hashVal := refVal
-			if hashVal.Type == ValRef && hashVal.RefVal != nil {
-				hashVal = hashVal.RefVal
+			if hashVal.Type == ValRef && hashVal.Ref() != nil {
+				hashVal = hashVal.Ref()
 			}
 			if hashVal.Type == ValHash {
 				return hashVal, nil
@@ -1836,15 +2596,15 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 
 		case DerefCode:
 			codeVal := refVal
-			if codeVal.Type == ValRef && codeVal.RefVal != nil {
-				codeVal = codeVal.RefVal
+			if codeVal.Type == ValRef && codeVal.Ref() != nil {
+				codeVal = codeVal.Ref()
 			}
 			return codeVal, nil
 
 		case DerefArrowArray:
 			arrVal := refVal
-			if arrVal.Type == ValRef && arrVal.RefVal != nil {
-				arrVal = arrVal.RefVal
+			if arrVal.Type == ValRef && arrVal.Ref() != nil {
+				arrVal = arrVal.Ref()
 			}
 			if arrVal.Type != ValArray {
 				return nil, fmt.Errorf("cannot index non-array reference of type %s", arrVal.TypeName())
@@ -1865,8 +2625,8 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 
 		case DerefArrowHash:
 			hashVal := refVal
-			if hashVal.Type == ValRef && hashVal.RefVal != nil {
-				hashVal = hashVal.RefVal
+			if hashVal.Type == ValRef && hashVal.Ref() != nil {
+				hashVal = hashVal.Ref()
 			}
 			if hashVal.Type != ValHash {
 				return nil, fmt.Errorf("cannot access non-hash reference of type %s", hashVal.TypeName())
@@ -1886,18 +2646,21 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 
 		case DerefArrowCode:
 			codeVal := refVal
-			if codeVal.Type == ValRef && codeVal.RefVal != nil {
-				codeVal = codeVal.RefVal
+			if codeVal.Type == ValRef && codeVal.Ref() != nil {
+				codeVal = codeVal.Ref()
 			}
-			var callArgs []*Value
-			for _, a := range e.Args {
+			base, callArgs := in.ds.pushArgs(len(e.Args))
+			for i, a := range e.Args {
 				aVal, err := in.evalExpr(a, env)
 				if err != nil {
+					in.ds.popArgs(base)
 					return nil, err
 				}
-				callArgs = append(callArgs, aVal)
+				callArgs[i] = aVal
 			}
-			return in.InvokeCallable(codeVal, callArgs)
+			res, err := in.InvokeCallable(codeVal, callArgs)
+			in.ds.popArgs(base)
+			return res, err
 
 		default:
 			return refVal, nil
@@ -1953,7 +2716,7 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		if rVal.Type == ValJunction && rVal.JunctionVal != nil {
+		if rVal.Type == ValJunction && rVal.Junction() != nil {
 			// Boolean context coercions collapse a Junction to a single Bool.
 			if e.Op == "?" || e.Op == "so" {
 				return BoolValue(rVal.IsTrue()), nil
@@ -1962,27 +2725,76 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 				return BoolValue(!rVal.IsTrue()), nil
 			}
 			var results []*Value
-			for _, elem := range rVal.JunctionVal.Values {
+			for _, elem := range rVal.Junction().Values {
 				res, err := in.evalUnaryOp(e.Op, elem, env)
 				if err != nil {
 					return nil, err
 				}
 				results = append(results, res)
 			}
-			return JunctionValue(rVal.JunctionVal.Kind, results), nil
+			return JunctionValue(rVal.Junction().Kind, results), nil
 		}
 		return in.evalUnaryOp(e.Op, rVal, env)
 
 	case *ArrayLiteralExpr:
-		var elems []*Value
-		for _, elExpr := range e.Elements {
+		n := len(e.Elements)
+		if n == 0 {
+			return &Value{Type: ValArray}, nil
+		}
+		base, tmp := in.ds.pushArgs(n)
+		allInts := true
+		allFloats := true
+		allStrs := true
+		totalStrBytes := 0
+		for i, elExpr := range e.Elements {
 			v, err := in.evalExpr(elExpr, env)
 			if err != nil {
+				in.ds.popArgs(base)
 				return nil, err
 			}
-			elems = append(elems, v)
+			tmp[i] = v
+			if v.Type != ValInt {
+				allInts = false
+			}
+			if v.Type != ValFloat {
+				allFloats = false
+			}
+			if v.Type != ValString {
+				allStrs = false
+			} else {
+				totalStrBytes += len(v.StrVal)
+			}
 		}
-		return ArrayValue(elems), nil
+		if allInts {
+			ints := make([]int64, n)
+			for i, v := range tmp {
+				ints[i] = v.IntVal
+			}
+			in.ds.popArgs(base)
+			return IntArrayValue(ints), nil
+		}
+		if allFloats {
+			floats := make([]float64, n)
+			for i, v := range tmp {
+				floats[i] = v.FloatVal
+			}
+			in.ds.popArgs(base)
+			return FloatArrayValue(floats), nil
+		}
+		if allStrs {
+			tape := NewStrTape(n, totalStrBytes)
+			for _, v := range tmp {
+				tape.Append(v.StrVal)
+			}
+			in.ds.popArgs(base)
+			return StrTapeArrayValue(tape), nil
+		}
+		elems := make([]*Value, n)
+		for i, v := range tmp {
+			elems[i] = escapeValue(v)
+		}
+		in.ds.popArgs(base)
+		return &Value{Type: ValArray, ArrayVal: elems}, nil
 
 	case *HashLiteralExpr:
 		m := make(map[string]*Value)
@@ -1995,7 +2807,7 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			m[kVal.String()] = vVal
+			m[kVal.String()] = escapeValue(vVal)
 		}
 		return HashValue(m), nil
 
@@ -2071,63 +2883,110 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		return NilValue(), nil
 
 	case *ClosureExpr:
+		frameSlots := e.FrameSlots
+		paramSlots := e.ParamSlots
+		needsEnv := e.NeedsEnv
+		fastSimple := e.FastSimple
+		noParamChecks := e.NoParamChecks
+		if e.Body != nil && !e.Body.Resolved {
+			frameSlots, paramSlots, needsEnv, fastSimple, noParamChecks = in.resolveFunction(e.Params, e.Body, nil)
+		}
 		return ClosureValue(&Closure{
-			Params: e.Params,
-			Body:   e.Body,
-			Env:    env,
+			Params:        e.Params,
+			Body:          e.Body,
+			Env:           env,
+			FrameSlots:    frameSlots,
+			ParamSlots:    paramSlots,
+			NeedsEnv:      needsEnv,
+			FastSimple:    fastSimple,
+			NoParamChecks: noParamChecks,
 		}), nil
 
 	case *CallExpr:
+		var calleeVal *Value
 		var funcName string
+		if e.BuiltinChecked && e.BuiltinEpoch == in.builtinEpoch && e.CachedBuiltin != nil {
+			base, args := in.ds.pushArgs(len(e.Args))
+			for i, argExpr := range e.Args {
+				aVal, err := in.evalExpr(argExpr, env)
+				if err != nil {
+					in.ds.popArgs(base)
+					return nil, err
+				}
+				args[i] = aVal
+			}
+			res, err := e.CachedBuiltin(in, args)
+			in.ds.popArgs(base)
+			return res, err
+		}
 		if v, ok := e.Callee.(*VarExpr); ok {
 			funcName = v.Name
-		}
-		if funcName != "" {
-			if builtin, hasBuiltin := in.Builtins[funcName]; hasBuiltin {
-				var args []*Value
-				for _, argExpr := range e.Args {
-					aVal, err := in.evalExpr(argExpr, env)
-					if err != nil {
-						return nil, err
+			if !e.BuiltinChecked || e.BuiltinEpoch != in.builtinEpoch {
+				if builtin, hasBuiltin := in.Builtins[funcName]; hasBuiltin {
+					e.CachedBuiltin = builtin
+					e.BuiltinChecked = true
+					e.BuiltinEpoch = in.builtinEpoch
+					base, args := in.ds.pushArgs(len(e.Args))
+					for i, argExpr := range e.Args {
+						aVal, err := in.evalExpr(argExpr, env)
+						if err != nil {
+							in.ds.popArgs(base)
+							return nil, err
+						}
+						args[i] = aVal
 					}
-					args = append(args, aVal)
+					res, err := builtin(in, args)
+					in.ds.popArgs(base)
+					return res, err
 				}
-				return builtin(in, args)
+				e.BuiltinChecked = true
+				e.BuiltinEpoch = in.builtinEpoch
 			}
 		}
 
-		calleeVal, err := in.evalExpr(e.Callee, env)
-		if (err != nil || calleeVal == nil || calleeVal.Type == ValNil) && funcName != "" {
-			if autoVal, qualifiedName, hasAuto := in.lookupAutoload(funcName, env); hasAuto {
-				var args []*Value
-				for _, argExpr := range e.Args {
-					aVal, aErr := in.evalExpr(argExpr, env)
-					if aErr != nil {
-						return nil, aErr
+		if e.GlobalSubSlot >= 0 {
+			calleeVal = in.globals.get(e.GlobalSubSlot)
+		} else {
+			cv, err := in.evalExpr(e.Callee, env)
+			if (err != nil || cv == nil || cv.Type == ValNil) && funcName != "" {
+				if autoVal, qualifiedName, hasAuto := in.lookupAutoload(funcName, env); hasAuto {
+					base, args := in.ds.pushArgs(len(e.Args))
+					for i, argExpr := range e.Args {
+						aVal, aErr := in.evalExpr(argExpr, env)
+						if aErr != nil {
+							in.ds.popArgs(base)
+							return nil, aErr
+						}
+						args[i] = aVal
 					}
-					args = append(args, aVal)
+					in.GlobalEnv.Define("$AUTOLOAD", StringValue(qualifiedName))
+					in.GlobalEnv.Define("AUTOLOAD", StringValue(qualifiedName))
+					env.Define("$AUTOLOAD", StringValue(qualifiedName))
+					res, err := in.InvokeCallable(autoVal, args)
+					in.ds.popArgs(base)
+					return res, err
 				}
-				in.GlobalEnv.Define("$AUTOLOAD", StringValue(qualifiedName))
-				in.GlobalEnv.Define("AUTOLOAD", StringValue(qualifiedName))
-				env.Define("$AUTOLOAD", StringValue(qualifiedName))
-				return in.InvokeCallable(autoVal, args)
 			}
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		var args []*Value
-		for _, argExpr := range e.Args {
-			aVal, err := in.evalExpr(argExpr, env)
 			if err != nil {
 				return nil, err
 			}
-			args = append(args, aVal)
+			calleeVal = cv
+		}
+
+		base, args := in.ds.pushArgs(len(e.Args))
+		for i, argExpr := range e.Args {
+			aVal, err := in.evalExpr(argExpr, env)
+			if err != nil {
+				in.ds.popArgs(base)
+				return nil, err
+			}
+			args[i] = aVal
 		}
 
 		if calleeVal != nil && (calleeVal.Type == ValClosure || calleeVal.Type == ValMultiSub || calleeVal.Type == ValCStruct || calleeVal.Type == ValRef) {
-			return in.InvokeCallable(calleeVal, args)
+			res, err := in.InvokeCallable(calleeVal, args)
+			in.ds.popArgs(base)
+			return res, err
 		}
 
 		if funcName != "" {
@@ -2135,11 +2994,15 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 				in.GlobalEnv.Define("$AUTOLOAD", StringValue(qualifiedName))
 				in.GlobalEnv.Define("AUTOLOAD", StringValue(qualifiedName))
 				env.Define("$AUTOLOAD", StringValue(qualifiedName))
-				return in.InvokeCallable(autoVal, args)
+				res, err := in.InvokeCallable(autoVal, args)
+				in.ds.popArgs(base)
+				return res, err
 			}
 		}
 
-		return in.InvokeCallable(calleeVal, args)
+		res, err := in.InvokeCallable(calleeVal, args)
+		in.ds.popArgs(base)
+		return res, err
 
 	case *MethodCallExpr:
 		invocantVal, err := in.evalExpr(e.Target, env)
@@ -2147,30 +3010,35 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			return nil, err
 		}
 
-		if invocantVal.Type == ValCStruct && invocantVal.CStructVal != nil && invocantVal.CStructVal.Class != nil {
+		if invocantVal.Type == ValCStruct && invocantVal.CStruct() != nil && invocantVal.CStruct().Class != nil {
 			if e.Method == "new" {
-				buf := make([]byte, invocantVal.CStructVal.Class.TotalSize)
-				ptr := uintptr(unsafe.Pointer(&buf[0]))
+				buf := make([]byte, invocantVal.CStruct().Class.TotalSize)
+				var ptr uintptr
+				if len(buf) > 0 {
+					ptr = uintptr(unsafe.Pointer(&buf[0]))
+				}
 				return CStructValue(&CStructInstance{
-					Class:    invocantVal.CStructVal.Class,
-					Ptr:      ptr,
-					Buffer:   buf,
-					Closures: make(map[string]*Value),
+					Class:  invocantVal.CStruct().Class,
+					Ptr:    ptr,
+					Buffer: buf,
 				}), nil
 			}
-			if idx, ok := invocantVal.CStructVal.Class.FieldIndex[e.Method]; ok {
-				f := invocantVal.CStructVal.Class.Fields[idx]
-				fieldVal, _ := in.readCStructField(invocantVal.CStructVal, f)
+			if idx, ok := invocantVal.CStruct().Class.FieldIndex[e.Method]; ok {
+				f := invocantVal.CStruct().Class.Fields[idx]
+				fieldVal, _ := in.readCStructField(invocantVal.CStruct(), f)
 				if fieldVal != nil && fieldVal.Type == ValClosure && len(e.Args) > 0 {
-					var args []*Value
-					for _, argExpr := range e.Args {
+					base, args := in.ds.pushArgs(len(e.Args))
+					for i, argExpr := range e.Args {
 						aVal, err := in.evalExpr(argExpr, env)
 						if err != nil {
+							in.ds.popArgs(base)
 							return nil, err
 						}
-						args = append(args, aVal)
+						args[i] = aVal
 					}
-					return in.InvokeCallable(fieldVal, args)
+					res, err := in.InvokeCallable(fieldVal, args)
+					in.ds.popArgs(base)
+					return res, err
 				}
 				if len(e.Args) == 0 {
 					return fieldVal, nil
@@ -2179,17 +3047,17 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 					if err != nil {
 						return nil, err
 					}
-					return in.writeCStructField(invocantVal.CStructVal, f, aVal)
+					return in.writeCStructField(invocantVal.CStruct(), f, aVal)
 				}
 			}
 		}
 
-		if invocantVal.Type == ValPromise && invocantVal.PromiseVal != nil {
+		if invocantVal.Type == ValPromise && invocantVal.Promise() != nil {
 			switch e.Method {
 			case "result", "await":
-				return invocantVal.PromiseVal.Await()
+				return invocantVal.Promise().Await()
 			case "status":
-				return StringValue(invocantVal.PromiseVal.Status), nil
+				return StringValue(invocantVal.Promise().Status), nil
 			case "then":
 				if len(e.Args) > 0 {
 					cbVal, err := in.evalExpr(e.Args[0], env)
@@ -2197,12 +3065,13 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 						return nil, err
 					}
 					nextP := NewPromise()
+					worker := in.forkWorker()
 					go func() {
-						res, err := invocantVal.PromiseVal.Await()
+						res, err := invocantVal.Promise().Await()
 						if err != nil {
 							nextP.Break(err)
 						} else {
-							nextRes, nextErr := in.InvokeCallable(cbVal, []*Value{res})
+							nextRes, nextErr := worker.InvokeCallable(cbVal, []*Value{res})
 							if nextErr != nil {
 								nextP.Break(nextErr)
 							} else {
@@ -2215,7 +3084,7 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			}
 		}
 
-		if invocantVal.Type == ValChannel && invocantVal.ChannelVal != nil {
+		if invocantVal.Type == ValChannel && invocantVal.Channel() != nil {
 			switch e.Method {
 			case "send":
 				if len(e.Args) > 0 {
@@ -2223,18 +3092,18 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 					if err != nil {
 						return nil, err
 					}
-					err = invocantVal.ChannelVal.Send(sVal)
+					err = invocantVal.Channel().Send(sVal)
 					if err != nil {
 						return nil, err
 					}
 					return sVal, nil
 				}
 			case "receive", "recv", "get":
-				return invocantVal.ChannelVal.Receive()
+				return invocantVal.Channel().Receive()
 			case "poll":
-				return invocantVal.ChannelVal.Poll(), nil
+				return invocantVal.Channel().Poll(), nil
 			case "close":
-				invocantVal.ChannelVal.Close()
+				invocantVal.Channel().Close()
 				return NilValue(), nil
 			}
 		}
@@ -2286,34 +3155,44 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			}
 		}
 
-		var args []*Value
-		// UFCS places invocant as first argument: func(invocant, args...)
-		args = append(args, invocantVal)
-		for _, argExpr := range e.Args {
+		base, args := in.ds.pushArgs(len(e.Args) + 1)
+		args[0] = invocantVal
+		for i, argExpr := range e.Args {
 			aVal, err := in.evalExpr(argExpr, env)
 			if err != nil {
+				in.ds.popArgs(base)
 				return nil, err
 			}
-			args = append(args, aVal)
+			args[i+1] = aVal
 		}
 
 		// 1. Check built-ins (e.g. .uc, .lc, .elems, .substr, .split, .join, .push, .pop)
 		if builtin, ok := in.Builtins[e.Method]; ok {
-			return builtin(in, args)
+			res, err := builtin(in, args)
+			in.ds.popArgs(base)
+			return res, err
 		}
 
 		// 2. Check lexical environment for sub or multi sub
 		if calleeVal, ok := env.Lookup(e.Method); ok && (calleeVal.Type == ValClosure || calleeVal.Type == ValMultiSub) {
-			return in.InvokeCallable(calleeVal, args)
+			res, err := in.InvokeCallable(calleeVal, args)
+			in.ds.popArgs(base)
+			return res, err
 		}
 		if calleeVal, ok := in.GlobalEnv.Lookup(e.Method); ok && (calleeVal.Type == ValClosure || calleeVal.Type == ValMultiSub) {
-			return in.InvokeCallable(calleeVal, args)
+			res, err := in.InvokeCallable(calleeVal, args)
+			in.ds.popArgs(base)
+			return res, err
 		}
 		if calleeVal, ok := env.Lookup("&" + e.Method); ok && (calleeVal.Type == ValClosure || calleeVal.Type == ValMultiSub) {
-			return in.InvokeCallable(calleeVal, args)
+			res, err := in.InvokeCallable(calleeVal, args)
+			in.ds.popArgs(base)
+			return res, err
 		}
 		if calleeVal, ok := in.GlobalEnv.Lookup("&" + e.Method); ok && (calleeVal.Type == ValClosure || calleeVal.Type == ValMultiSub) {
-			return in.InvokeCallable(calleeVal, args)
+			res, err := in.InvokeCallable(calleeVal, args)
+			in.ds.popArgs(base)
+			return res, err
 		}
 
 		// 3. Fallback to AUTOLOAD for method call
@@ -2321,9 +3200,12 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			in.GlobalEnv.Define("$AUTOLOAD", StringValue(qualifiedName))
 			in.GlobalEnv.Define("AUTOLOAD", StringValue(qualifiedName))
 			env.Define("$AUTOLOAD", StringValue(qualifiedName))
-			return in.InvokeCallable(autoVal, args)
+			res, err := in.InvokeCallable(autoVal, args)
+			in.ds.popArgs(base)
+			return res, err
 		}
 
+		in.ds.popArgs(base)
 		return nil, fmt.Errorf("method or sub %q not found for invocant type %s", e.Method, invocantVal.TypeName())
 
 	case *SmartMatchExpr:
@@ -2451,9 +3333,9 @@ func (in *Interp) smartMatch(topic *Value, matcher *Value) bool {
 			return topic.Type == ValString && topic.StrVal == matcher.StrVal
 		}
 	case ValArray:
-		if matcher.Ints != nil && matcher.ArrayVal == nil {
+		if ints := matcher.intLane(); ints != nil {
 			if topic.Type == ValInt {
-				for _, n := range matcher.Ints {
+				for _, n := range ints {
 					if topic.IntVal == n {
 						return true
 					}
@@ -2461,7 +3343,18 @@ func (in *Interp) smartMatch(topic *Value, matcher *Value) bool {
 			}
 			return false
 		}
-		for _, elem := range matcher.ArrayVal {
+		if tape := matcher.strLane(); tape != nil {
+			if topic.Type == ValString {
+				s := topic.StrVal
+				for i := 0; i < tape.Len(); i++ {
+					if tape.At(i) == s {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		for _, elem := range matcher.materializeArray() {
 			if in.smartMatch(topic, elem) {
 				return true
 			}
@@ -2477,19 +3370,20 @@ func (in *Interp) smartMatch(topic *Value, matcher *Value) bool {
 	case ValBool:
 		return matcher.BoolVal
 	case ValJunction:
-		if matcher.JunctionVal == nil {
+		j := matcher.Junction()
+		if j == nil {
 			return false
 		}
-		switch matcher.JunctionVal.Kind {
+		switch j.Kind {
 		case JunctionAll:
-			for _, elem := range matcher.JunctionVal.Values {
+			for _, elem := range j.Values {
 				if !in.smartMatch(topic, elem) {
 					return false
 				}
 			}
-			return len(matcher.JunctionVal.Values) > 0
+			return len(j.Values) > 0
 		case JunctionAny:
-			for _, elem := range matcher.JunctionVal.Values {
+			for _, elem := range j.Values {
 				if in.smartMatch(topic, elem) {
 					return true
 				}
@@ -2497,14 +3391,14 @@ func (in *Interp) smartMatch(topic *Value, matcher *Value) bool {
 			return false
 		case JunctionOne:
 			count := 0
-			for _, elem := range matcher.JunctionVal.Values {
+			for _, elem := range j.Values {
 				if in.smartMatch(topic, elem) {
 					count++
 				}
 			}
 			return count == 1
 		case JunctionNone:
-			for _, elem := range matcher.JunctionVal.Values {
+			for _, elem := range j.Values {
 				if in.smartMatch(topic, elem) {
 					return false
 				}
@@ -2517,6 +3411,41 @@ func (in *Interp) smartMatch(topic *Value, matcher *Value) bool {
 	}
 }
 
+func (in *Interp) invokeClosureFast(closure *Closure, args []*Value) (*Value, error) {
+	callerTempMark := in.ds.markTemp()
+	frame := in.ds.pushFrame(closure.FrameSlots, len(args))
+	for i := 0; i < len(args) && i < len(closure.ParamSlots); i++ {
+		slot := closure.ParamSlots[i]
+		if slot < 0 || slot >= len(frame.boxes) {
+			continue
+		}
+		arg := args[i]
+		if arg.Type == ValArray || arg.Type == ValHash || arg.Type == ValRef {
+			frame.ptrs[slot] = escapeValue(arg)
+		} else {
+			frame.boxes[slot] = *arg
+			frame.boxes[slot].flags = flagStackLocal
+			frame.ptrs[slot] = &frame.boxes[slot]
+		}
+	}
+	res, err := in.evalBlock(closure.Body, closure.Env)
+	if err != nil {
+		if err == sigReturn {
+			rv := in.ds.returnVal
+			in.ds.returnVal = nil
+			in.ds.popFrame(frame)
+			return in.promoteReturn(rv, callerTempMark), nil
+		}
+		in.ds.popFrame(frame)
+		if ret, ok := err.(*ReturnSignal); ok {
+			return in.promoteReturn(ret.Value, callerTempMark), nil
+		}
+		return nil, err
+	}
+	in.ds.popFrame(frame)
+	return in.promoteReturn(res, callerTempMark), nil
+}
+
 // InvokeCallable resolves candidate dispatch and invokes the closure with advice hooks.
 func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 	if callee == nil {
@@ -2527,14 +3456,14 @@ func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 	var subName string
 
 	if callee.Type == ValMultiSub {
-		cand, err := in.resolveMultiCandidate(callee.Candidates, args)
+		cand, err := in.resolveMultiCandidate(callee.Candidates(), args)
 		if err != nil {
 			return nil, err
 		}
 		closure = cand
 		subName = cand.Name
 	} else if callee.Type == ValClosure {
-		closure = callee.ClosureVal
+		closure = callee.Closure()
 		if closure != nil {
 			subName = closure.Name
 		}
@@ -2549,6 +3478,12 @@ func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 	if builtin, ok := in.Builtins[subName]; ok {
 		return builtin(in, args)
 	}
+
+	if !in.hasAdviceHooks && closure.FastSimple {
+		return in.invokeClosureFast(closure, args)
+	}
+
+	callerTempMark := in.ds.markTemp()
 
 	// 1. Run before hooks (if not an unwrapped raw call)
 	if !closure.IsRaw {
@@ -2613,13 +3548,16 @@ func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 				}
 				val, err := in.evalBlock(hook.Body, hookEnv)
 				if err != nil {
-					if ret, ok := err.(*ReturnSignal); ok {
+					if err == sigReturn {
+						val = in.ds.returnVal
+						in.ds.returnVal = nil
+					} else if ret, ok := err.(*ReturnSignal); ok {
 						val = ret.Value
 					} else {
 						return nil, err
 					}
 				}
-				return val, nil
+				return in.promoteReturn(val, callerTempMark), nil
 			}
 		}
 	}
@@ -2632,7 +3570,7 @@ func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 			argVal = args[i]
 		}
 		if p.Type != "" {
-			if argVal.Type == ValCStruct && argVal.CStructVal != nil && argVal.CStructVal.Class != nil && argVal.CStructVal.Class.Name == p.Type {
+			if argVal.Type == ValCStruct && argVal.CStruct() != nil && argVal.CStruct().Class != nil && argVal.CStruct().Class.Name == p.Type {
 				// struct matched
 			} else if _, ok := in.Structs[p.Type]; ok {
 				return nil, fmt.Errorf("type check failed for parameter %s in sub %s: expected struct %s, got %s",
@@ -2672,8 +3610,8 @@ func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 			var elements []*Value
 			if argVal.Type == ValArray {
 				elements = argVal.materializeArray()
-			} else if argVal.LazySeqVal != nil {
-				elements = argVal.LazySeqVal.Items
+			} else if argVal.LazySeq() != nil {
+				elements = argVal.LazySeq().Items
 			}
 			for dIdx, dp := range p.DestructArr {
 				if dp.IsSlurpy {
@@ -2708,13 +3646,41 @@ func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 		}
 	}
 
+	var frame *stackFrame
+	if closure.FrameSlots > 0 {
+		frame = in.ds.pushFrame(closure.FrameSlots, len(args))
+		for i := 0; i < len(args) && i < len(closure.ParamSlots); i++ {
+			slot := closure.ParamSlots[i]
+			if slot < 0 || slot >= len(frame.boxes) {
+				continue
+			}
+			arg := args[i]
+			if arg.Type == ValArray || arg.Type == ValHash || arg.Type == ValRef {
+				frame.ptrs[slot] = escapeValue(arg)
+			} else {
+				frame.boxes[slot] = *arg
+				frame.boxes[slot].flags = flagStackLocal
+				frame.ptrs[slot] = &frame.boxes[slot]
+			}
+		}
+	}
+
 	val, err := in.evalBlock(closure.Body, callEnv)
 	if err != nil {
-		if ret, ok := err.(*ReturnSignal); ok {
+		if err == sigReturn {
+			val = in.ds.returnVal
+			in.ds.returnVal = nil
+		} else if ret, ok := err.(*ReturnSignal); ok {
 			val = ret.Value
 		} else {
+			if frame != nil {
+				in.ds.popFrame(frame)
+			}
 			return nil, err
 		}
+	}
+	if frame != nil {
+		in.ds.popFrame(frame)
 	}
 
 	// 4. Run after hooks
@@ -2747,11 +3713,10 @@ func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 		}
 	}
 
-	return val, nil
+	return in.promoteReturn(val, callerTempMark), nil
 }
 
 func (in *Interp) resolveMultiCandidate(candidates []*Closure, args []*Value) (*Closure, error) {
-	var matching []*Closure
 	bestScore := -1
 	var bestCand *Closure
 
@@ -2763,7 +3728,7 @@ func (in *Interp) resolveMultiCandidate(candidates []*Closure, args []*Value) (*
 		score := 0
 		for i, p := range cand.Params {
 			if p.Type != "" {
-				if args[i].Type == ValCStruct && args[i].CStructVal != nil && args[i].CStructVal.Class != nil && args[i].CStructVal.Class.Name == p.Type {
+				if args[i].Type == ValCStruct && args[i].CStruct() != nil && args[i].CStruct().Class != nil && args[i].CStruct().Class.Name == p.Type {
 					score += 2
 				} else if _, ok := in.Structs[p.Type]; ok {
 					matches = false
@@ -2807,7 +3772,6 @@ func (in *Interp) resolveMultiCandidate(candidates []*Closure, args []*Value) (*
 			}
 		}
 		if matches {
-			matching = append(matching, cand)
 			if score > bestScore {
 				bestScore = score
 				bestCand = cand
@@ -2815,7 +3779,7 @@ func (in *Interp) resolveMultiCandidate(candidates []*Closure, args []*Value) (*
 		}
 	}
 
-	if len(matching) == 0 || bestCand == nil {
+	if bestCand == nil {
 		return nil, fmt.Errorf("no matching multi candidate found for arguments")
 	}
 	return bestCand, nil
@@ -2825,16 +3789,23 @@ func (in *Interp) evalBinaryFast(e *BinaryExpr, env *Env) (*Value, bool) {
 	if len(in.CustomInfixOps) > 0 {
 		return nil, false
 	}
+	switch e.Op {
+	case "+", "-", "*", "div", "%", "mod":
+		if res, ok := in.evalIntExprFast(e, env); ok {
+			return in.tempInt(res), true
+		}
+	}
+
 	lv, ok := e.Left.(*VarExpr)
 	if !ok {
 		return nil, false
 	}
-	left, ok := env.Lookup(lv.Name)
+	left, ok := in.getVar(lv, env)
 	if !ok || left == nil {
 		return nil, false
 	}
 	switch e.Op {
-	case "+", "-", "*", "div", "%", "mod", "<=", ">=", "<", ">", "==", "!=":
+	case "<=", ">=", "<", ">", "==", "!=", "%%":
 		if left.Type != ValInt {
 			return nil, false
 		}
@@ -2846,8 +3817,8 @@ func (in *Interp) evalBinaryFast(e *BinaryExpr, env *Env) (*Value, bool) {
 			}
 			ri = r.Value.(int64)
 		case *VarExpr:
-			rv, ok := env.Lookup(r.Name)
-			if !ok || rv.Type != ValInt {
+			rv, ok := in.getVar(r, env)
+			if !ok || rv == nil || rv.Type != ValInt {
 				return nil, false
 			}
 			ri = rv.IntVal
@@ -2856,22 +3827,6 @@ func (in *Interp) evalBinaryFast(e *BinaryExpr, env *Env) (*Value, bool) {
 		}
 		li := left.IntVal
 		switch e.Op {
-		case "+":
-			return IntValue(li + ri), true
-		case "-":
-			return IntValue(li - ri), true
-		case "*":
-			return IntValue(li * ri), true
-		case "div":
-			if ri == 0 {
-				return nil, false
-			}
-			return IntValue(li / ri), true
-		case "%", "mod":
-			if ri == 0 {
-				return nil, false
-			}
-			return IntValue(li % ri), true
 		case "<=":
 			return BoolValue(li <= ri), true
 		case ">=":
@@ -2884,6 +3839,11 @@ func (in *Interp) evalBinaryFast(e *BinaryExpr, env *Env) (*Value, bool) {
 			return BoolValue(li == ri), true
 		case "!=":
 			return BoolValue(li != ri), true
+		case "%%":
+			if ri == 0 {
+				return nil, false
+			}
+			return BoolValue(li%ri == 0), true
 		}
 	case "eq", "ne", "lt", "gt", "le", "ge":
 		if left.Type != ValString {
@@ -2897,8 +3857,8 @@ func (in *Interp) evalBinaryFast(e *BinaryExpr, env *Env) (*Value, bool) {
 			}
 			rs = r.Value.(string)
 		case *VarExpr:
-			rv, ok := env.Lookup(r.Name)
-			if !ok || rv.Type != ValString {
+			rv, ok := in.getVar(r, env)
+			if !ok || rv == nil || rv.Type != ValString {
 				return nil, false
 			}
 			rs = rv.StrVal
@@ -2926,34 +3886,36 @@ func (in *Interp) evalBinaryFast(e *BinaryExpr, env *Env) (*Value, bool) {
 
 func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, error) {
 	// Junction autothreading
-	if left.Type == ValJunction && left.JunctionVal != nil {
+	if left.Type == ValJunction && left.Junction() != nil {
+		lj := left.Junction()
 		var results []*Value
-		for _, elem := range left.JunctionVal.Values {
+		for _, elem := range lj.Values {
 			res, err := in.evalBinaryOp(elem, op, right)
 			if err != nil {
 				return nil, err
 			}
 			results = append(results, res)
 		}
-		return JunctionValue(left.JunctionVal.Kind, results), nil
+		return JunctionValue(lj.Kind, results), nil
 	}
-	if right.Type == ValJunction && right.JunctionVal != nil {
+	if right.Type == ValJunction && right.Junction() != nil {
+		rj := right.Junction()
 		var results []*Value
-		for _, elem := range right.JunctionVal.Values {
+		for _, elem := range rj.Values {
 			res, err := in.evalBinaryOp(left, op, elem)
 			if err != nil {
 				return nil, err
 			}
 			results = append(results, res)
 		}
-		return JunctionValue(right.JunctionVal.Kind, results), nil
+		return JunctionValue(rj.Kind, results), nil
 	}
 
 	// 1. Check for custom operator overloading (e.g. infix:+ or infix:<+>)
 	if len(in.CustomInfixOps) > 0 {
 		if fn, ok := in.CustomInfixOps[op]; ok {
 			if fn.Type == ValMultiSub {
-				if cand, err := in.resolveMultiCandidate(fn.Candidates, []*Value{left, right}); err == nil && cand != nil {
+				if cand, err := in.resolveMultiCandidate(fn.Candidates(), []*Value{left, right}); err == nil && cand != nil {
 					return in.InvokeCallable(fn, []*Value{left, right})
 				}
 			} else {
@@ -3021,33 +3983,33 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 	switch op {
 	case "+", "±":
 		if left.Type == ValFloat || right.Type == ValFloat {
-			return FloatValue(in.toFloat(left) + in.toFloat(right)), nil
+			return in.tempFloat(in.toFloat(left) + in.toFloat(right)), nil
 		}
-		return IntValue(in.toInt(left) + in.toInt(right)), nil
+		return in.tempInt(in.toInt(left) + in.toInt(right)), nil
 	case "-":
 		if left.Type == ValFloat || right.Type == ValFloat {
-			return FloatValue(in.toFloat(left) - in.toFloat(right)), nil
+			return in.tempFloat(in.toFloat(left) - in.toFloat(right)), nil
 		}
-		return IntValue(in.toInt(left) - in.toInt(right)), nil
+		return in.tempInt(in.toInt(left) - in.toInt(right)), nil
 	case "*", "×":
 		if left.Type == ValFloat || right.Type == ValFloat {
-			return FloatValue(in.toFloat(left) * in.toFloat(right)), nil
+			return in.tempFloat(in.toFloat(left) * in.toFloat(right)), nil
 		}
-		return IntValue(in.toInt(left) * in.toInt(right)), nil
+		return in.tempInt(in.toInt(left) * in.toInt(right)), nil
 	case "/", "÷":
 		rF := in.toFloat(right)
 		if rF == 0.0 {
 			return nil, fmt.Errorf("division by zero")
 		}
-		return FloatValue(in.toFloat(left) / rF), nil
+		return in.tempFloat(in.toFloat(left) / rF), nil
 	case "%":
 		rI := in.toInt(right)
 		if rI == 0 {
 			return nil, fmt.Errorf("modulo by zero")
 		}
-		return IntValue(in.toInt(left) % rI), nil
+		return in.tempInt(in.toInt(left) % rI), nil
 	case "**":
-		return FloatValue(math.Pow(in.toFloat(left), in.toFloat(right))), nil
+		return in.tempFloat(math.Pow(in.toFloat(left), in.toFloat(right))), nil
 
 	case "//", "orelse":
 		if left.Type != ValNil {
@@ -3062,48 +4024,48 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 		lf := in.toFloat(left)
 		rf := in.toFloat(right)
 		if lf < rf {
-			return IntValue(-1), nil
+			return in.tempInt(-1), nil
 		}
 		if lf > rf {
-			return IntValue(1), nil
+			return in.tempInt(1), nil
 		}
-		return IntValue(0), nil
+		return in.tempInt(0), nil
 
 	case "cmp":
 		ls := left.String()
 		rs := right.String()
 		if ls < rs {
-			return IntValue(-1), nil
+			return in.tempInt(-1), nil
 		}
 		if ls > rs {
-			return IntValue(1), nil
+			return in.tempInt(1), nil
 		}
-		return IntValue(0), nil
+		return in.tempInt(0), nil
 
 	case "+&":
-		return IntValue(in.toInt(left) & in.toInt(right)), nil
+		return in.tempInt(in.toInt(left) & in.toInt(right)), nil
 	case "+|":
-		return IntValue(in.toInt(left) | in.toInt(right)), nil
+		return in.tempInt(in.toInt(left) | in.toInt(right)), nil
 	case "+^":
-		return IntValue(in.toInt(left) ^ in.toInt(right)), nil
+		return in.tempInt(in.toInt(left) ^ in.toInt(right)), nil
 	case "+<":
-		return IntValue(in.toInt(left) << in.toInt(right)), nil
+		return in.tempInt(in.toInt(left) << in.toInt(right)), nil
 	case "+>":
-		return IntValue(in.toInt(left) >> in.toInt(right)), nil
+		return in.tempInt(in.toInt(left) >> in.toInt(right)), nil
 
 	case "div":
 		rI := in.toInt(right)
 		if rI == 0 {
 			return nil, fmt.Errorf("division by zero in div operator")
 		}
-		return IntValue(in.toInt(left) / rI), nil
+		return in.tempInt(in.toInt(left) / rI), nil
 
 	case "mod":
 		rI := in.toInt(right)
 		if rI == 0 {
 			return nil, fmt.Errorf("modulo by zero in mod operator")
 		}
-		return IntValue(in.toInt(left) % rI), nil
+		return in.tempInt(in.toInt(left) % rI), nil
 
 	case "%%":
 		rI := in.toInt(right)
@@ -3235,7 +4197,7 @@ func (in *Interp) evalUnaryOp(op string, rVal *Value, env *Env) (*Value, error) 
 	if len(in.CustomPrefixOps) > 0 {
 		if fn, ok := in.CustomPrefixOps[op]; ok {
 			if fn.Type == ValMultiSub {
-				if cand, err := in.resolveMultiCandidate(fn.Candidates, []*Value{rVal}); err == nil && cand != nil {
+				if cand, err := in.resolveMultiCandidate(fn.Candidates(), []*Value{rVal}); err == nil && cand != nil {
 					return in.InvokeCallable(fn, []*Value{rVal})
 				}
 			} else {
@@ -3249,9 +4211,9 @@ func (in *Interp) evalUnaryOp(op string, rVal *Value, env *Env) (*Value, error) 
 		return BoolValue(!rVal.IsTrue()), nil
 	case "-":
 		if rVal.Type == ValFloat {
-			return FloatValue(-rVal.FloatVal), nil
+			return in.tempFloat(-rVal.FloatVal), nil
 		}
-		return IntValue(-in.toInt(rVal)), nil
+		return in.tempInt(-in.toInt(rVal)), nil
 	case "+":
 		// Numeric context coercion
 		switch rVal.Type {
@@ -3262,29 +4224,29 @@ func (in *Interp) evalUnaryOp(op string, rVal *Value, env *Env) (*Value, error) 
 		case ValString:
 			if f, err := strconv.ParseFloat(rVal.StrVal, 64); err == nil {
 				if i, err2 := strconv.ParseInt(rVal.StrVal, 0, 64); err2 == nil {
-					return IntValue(i), nil
+					return in.tempInt(i), nil
 				}
-				return FloatValue(f), nil
+				return in.tempFloat(f), nil
 			}
-			return IntValue(0), nil
+			return in.tempInt(0), nil
 		case ValBool:
 			if rVal.BoolVal {
-				return IntValue(1), nil
+				return in.tempInt(1), nil
 			}
-			return IntValue(0), nil
+			return in.tempInt(0), nil
 		case ValArray:
-			return IntValue(int64(rVal.arrayLen())), nil
+			return in.tempInt(int64(rVal.arrayLen())), nil
 		case ValHash:
-			return IntValue(int64(len(rVal.HashVal))), nil
+			return in.tempInt(int64(len(rVal.HashVal))), nil
 		case ValLazySeq:
-			if rVal.LazySeqVal != nil {
-				return IntValue(int64(len(rVal.LazySeqVal.Items))), nil
+			if rVal.LazySeq() != nil {
+				return in.tempInt(int64(len(rVal.LazySeq().Items))), nil
 			}
-			return IntValue(0), nil
+			return in.tempInt(0), nil
 		case ValNil:
-			return IntValue(0), nil
+			return in.tempInt(0), nil
 		default:
-			return IntValue(in.toInt(rVal)), nil
+			return in.tempInt(in.toInt(rVal)), nil
 		}
 	case "~":
 		// String context coercion
@@ -3303,9 +4265,9 @@ func (in *Interp) evalUnaryOp(op string, rVal *Value, env *Env) (*Value, error) 
 		case ValNil:
 			return StringValue(""), nil
 		case ValArray:
-			if rVal.Ints != nil && rVal.ArrayVal == nil {
-				parts := make([]string, len(rVal.Ints))
-				for i, n := range rVal.Ints {
+			if ints := rVal.intLane(); ints != nil {
+				parts := make([]string, len(ints))
+				for i, n := range ints {
 					parts[i] = strconv.FormatInt(n, 10)
 				}
 				return StringValue(strings.Join(parts, " ")), nil
@@ -3418,35 +4380,39 @@ func (in *Interp) readCStructField(inst *CStructInstance, f CStructField) (*Valu
 			return cVal, nil
 		}
 	}
-	if inst.Ptr == 0 {
+	var ptr unsafe.Pointer
+	if len(inst.Buffer) > 0 {
+		ptr = unsafe.Pointer(&inst.Buffer[f.Offset])
+	} else if inst.Ptr != 0 {
+		ptr = unsafe.Pointer(inst.Ptr + uintptr(f.Offset))
+	} else {
 		return NilValue(), nil
 	}
-	ptr := unsafe.Pointer(inst.Ptr + uintptr(f.Offset))
 	switch f.Type {
 	case "int8", "char":
-		return IntValue(int64(*(*int8)(ptr))), nil
+		return in.tempInt(int64(*(*int8)(ptr))), nil
 	case "uint8", "byte":
-		return IntValue(int64(*(*uint8)(ptr))), nil
+		return in.tempInt(int64(*(*uint8)(ptr))), nil
 	case "int16", "short":
-		return IntValue(int64(*(*int16)(ptr))), nil
+		return in.tempInt(int64(*(*int16)(ptr))), nil
 	case "uint16", "WORD":
-		return IntValue(int64(*(*uint16)(ptr))), nil
+		return in.tempInt(int64(*(*uint16)(ptr))), nil
 	case "int32", "int", "long":
-		return IntValue(int64(*(*int32)(ptr))), nil
+		return in.tempInt(int64(*(*int32)(ptr))), nil
 	case "uint32", "uint", "DWORD":
-		return IntValue(int64(*(*uint32)(ptr))), nil
+		return in.tempInt(int64(*(*uint32)(ptr))), nil
 	case "int64", "Int":
-		return IntValue(*(*int64)(ptr)), nil
+		return in.tempInt(*(*int64)(ptr)), nil
 	case "uint64":
-		return IntValue(int64(*(*uint64)(ptr))), nil
+		return in.tempInt(int64(*(*uint64)(ptr))), nil
 	case "num32", "float32":
-		return FloatValue(float64(*(*float32)(ptr))), nil
+		return in.tempFloat(float64(*(*float32)(ptr))), nil
 	case "num64", "float64", "Num", "double":
-		return FloatValue(*(*float64)(ptr)), nil
+		return in.tempFloat(*(*float64)(ptr)), nil
 	case "ptr", "pointer", "Pointer", "OpaquePointer", "Callable", "closure":
 		return NativePtrValue(*(*uintptr)(ptr)), nil
 	default:
-		return IntValue(*(*int64)(ptr)), nil
+		return in.tempInt(*(*int64)(ptr)), nil
 	}
 }
 
@@ -3457,10 +4423,14 @@ func (in *Interp) writeCStructField(inst *CStructInstance, f CStructField, val *
 		}
 		inst.Closures[f.Name] = val
 	}
-	if inst.Ptr == 0 {
+	var ptr unsafe.Pointer
+	if len(inst.Buffer) > 0 {
+		ptr = unsafe.Pointer(&inst.Buffer[f.Offset])
+	} else if inst.Ptr != 0 {
+		ptr = unsafe.Pointer(inst.Ptr + uintptr(f.Offset))
+	} else {
 		return val, nil
 	}
-	ptr := unsafe.Pointer(inst.Ptr + uintptr(f.Offset))
 	switch f.Type {
 	case "int8", "char":
 		*(*int8)(ptr) = int8(in.toInt(val))

@@ -177,46 +177,34 @@ Comprehensive manuals in `docs/` (`raptor doc 01` … `raptor doc 18`):
 
 ## 8. Performance Architecture, Memory & Benchmarks
 
-Memory is the interpreter’s real budget. `--go` stays a tree-walk; C / `--moar` is the speed hatch. The following keep language semantics and cut heap churn.
+> [!NOTE]
+> Detailed 5-way comparative benchmarks against **C (`gcc -O3`)**, **Perl 5**, and **Perl 6 (Rakudo / MoarVM)**, as well as release progression metrics against `v1.2`, are maintained in **[BENCH.md](BENCH.md)**.
 
-1. **Interned small ints (±256)** plus **unique boxes in `Env`**. Ephemeral `IntValue(n)` for `|n|≤256` is a flyweight. Bindings (`my $i = 0`) detach so `+=` / atomics never mutate the intern pool.
-2. **In-place `+=` / `-=` and `~=` / `$s = $s ~ x`**. Unique int boxes increment without a new `Value`. Unique strings grow `strBuf` when capacity allows (strcat’s 1.4 GB was rope-less concat).
-3. **Lazy `Env` maps + recycled loop frames**. `NewChild` allocates one bindings map; types/wheres/state are on demand. `for` postfix reuses one child frame (`Reset`) instead of four maps per item.
-4. **HOST parse is O(n)**. `ParseProgram` lexes once; `<HOST_stmt>` / `<HOST_expr>` walk a shared token cursor. Previously each HOST call re-lexed the remainder (≈ n² tokens).
-5. **`$a OP $b` / `$n OP literal` fast path** in `evalExpr` (ints and `eq`/`lt`/`gt`/`ne`) skips custom-infix maps and the full `evalBinaryOp` type switch.
-6. **`labelMap` only if the block has labels**.
-7. **Homogeneous `int64` array lane** (`Value.Ints`). Ranges (`90..100`), `push` of ints, and `sort` of int lists stay packed — sortnums’s 50k fat Values drop to 50k `int64`s until something needs boxing.
-8. **`--moar` / `pack`**. `--moar` is native CompUnit v7 only (no silent Go fallback). Pack is the same interpreter in a fatter binary (no speed win).
+Memory and cache locality are the interpreter’s primary performance budget. The runtime incorporates:
 
-Flyweights for `Nil` / `True` / `False` / `""` and $O(1)$ C-struct field indexes are unchanged.
+1. **Goose-Style Segmented DataStacks (Option M2)**: Function invocations allocate frames on pre-allocated contiguous slabs in `dataStack.frameRecords` without creating Go heap maps. Intermediate sub-expressions use contiguous `tempSlabs` with $O(1)$ LIFO watermark rewinds (`rewindTemp`). Arguments pass via contiguous `argStack` slabs.
+2. **Lexical Slot Indexing (Option M3)**: Variable accesses resolve at compile time to `SlotLocal` (frame slot offset) or `SlotGlobal` (global slot offset), eliminating runtime string hash lookups.
+3. **Homogeneous Columnar Array Lanes (Option M3)**: `IntArrayValue`, `FloatArrayValue`, and pointerless `StrTapeArrayValue` maintain flat contiguous memory buffers, enabling cache-line vectorization and native `pdqsort` (`slices.Sort`).
+4. **Direct Range Loops**: Loops matching `for 1..N -> $i` execute directly via register-like integer counters into the loop variable's slot without allocating range slices.
+5. **In-place String Buffer Growth (`extStrBuf`)**: Dynamic string concatenations grow exponentially in an underlying slice buffer without quadratic allocation churn.
+6. **Interned Small Ints (±256) & Atomic-Safe Ranges**: Ephemeral `IntValue(n)` for small integers is interned, validated via pointer range checks with zero data race overhead.
+7. **HOST parse is O(n)**: `ParseProgram` lexes once; `<HOST_stmt>` / `<HOST_expr>` walk a shared token cursor.
+8. **Slimmed 88-Byte `Value` Struct**: Reduced memory footprint and at most 4 GC pointers for rapid mark/sweep garbage collection cycles.
 
-**Wall-clock** (Windows, 2026-08-16, process spawn of `bin/raptor.exe examples/bench/*.rp` after the memory pass). Rakudo 2026.05 unchanged. Lower is better.
+### Summary Benchmark Snapshot (Mean Wall-Clock, Lower is Better)
 
-| Kernel | Raptor `--go` | Rakudo | Same output? | Notes |
-| :--- | ---: | ---: | :---: | :--- |
-| startup | **29.5 ms** | 217.8 ms | yes | `Hello, World!` |
-| loopsum | 566.1 ms | **444.8 ms** | yes | still tree-walk; **memory** is the win |
-| fib | 1824.0 ms | **693.6 ms** | yes | recursive interpreter |
-| strcat | **217.7 ms** | 237.4 ms | yes | `$s = $s ~ "x"` reuses `strBuf` |
-| arrayops | **167.7 ms** | 396.8 ms | yes | |
-| sortnums | 3755.4 ms | **349.7 ms** | yes | packed `int64` sort; insertion sort still O(n²) on boxed path |
-| streq | 1698.1 ms | **409.9 ms** | yes | `$a eq $b` fast path |
-| hash | **94.3 ms** | 306.2 ms | **no** | not 1000 buckets |
-| regex | **39.8 ms** | 396.5 ms | **no** | |
-| bigint | **28.5 ms** | 383.5 ms | **no** | |
+| Benchmark Kernel | Workload Description | C (`gcc -O3`) | Perl 5 | Perl 6 (Raku) | Raptor Current |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **`startup`** | Process boot, parse, and `say "Hello, World!"` | **7.0 ms** | 22.3 ms | 221.3 ms | **30.8 ms** |
+| **`fib`** | Naive recursive Fibonacci `fib(29)` | **7.0 ms** | 375.6 ms | 688.2 ms | **208.2 ms** |
+| **`loopsum`** | 1,000,000 integer loop increments | **7.9 ms** | 57.6 ms | 448.5 ms | **80.2 ms** |
+| **`streq`** | 1,000,000 string comparisons | **7.3 ms** | 109.6 ms | 405.4 ms | **121.9 ms** |
+| **`hash`** | 100,000 hash bucket accesses and mutations | **7.1 ms** | 30.8 ms | 314.4 ms | **47.4 ms** |
+| **`sortnums`** | Sort 50,000 pseudo-random numbers via `pdqsort` | **11.4 ms** | 34.8 ms | 378.5 ms | **39.9 ms** |
+| **`strcat`** | 50,000 string concatenations (`$s ~= "x"`) | **6.4 ms** | 22.7 ms | 235.5 ms | **36.2 ms** |
+| **`arrayops`** | Filter, map, sum pipeline over 200,000 items | **7.1 ms** | 35.1 ms | 423.4 ms | **42.0 ms** |
 
-**Heap churn** (same kernels, in-process `Eval`, `TotalAlloc` / mallocs vs the previous 706 MB / 4.1M loopsum snapshot):
-
-| Kernel | TotalAlloc | mallocs | live HeapAlloc | Was (approx.) |
-| :--- | ---: | ---: | ---: | :--- |
-| loopsum | **2 MB** | 64k | 2 MB | 706 MB / 4.1M mallocs |
-| strcat | **11 MB** | 52k | 3 MB | ~1.4 GB quadratic `string()` copies |
-| streq | **96 MB** | 2.0M | 3 MB | ~10M mallocs |
-| sortnums | **48 MB** | 302k | **1 MB** | ~20 MB live fat Values |
-
-Speed did not magically beat Rakudo. The interpreter is still a tree-walk; C / `--moar` is the hot path if you need it. Memory is what moved.
-
-Reproduce: `go build -mod=mod -o bin/raptor.exe ./cmd/raptor` then time `bin/raptor.exe examples/bench/<name>.rp`. `--moar` is not a fair native column yet.
+For complete multi-run data, memory churn statistics, and reproduction commands, see **[BENCH.md](BENCH.md)**.
 
 ---
 

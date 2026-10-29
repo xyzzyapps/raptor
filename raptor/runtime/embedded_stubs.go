@@ -110,7 +110,7 @@ func (in *Interp) registerEmbeddedBuiltins() {
 		addr := int(in.toInt(args[0]))
 		var buf []byte
 		if args[1].Type == ValArray {
-			for _, b := range args[1].ArrayVal {
+			for _, b := range args[1].materializeArray() {
 				buf = append(buf, byte(in.toInt(b)))
 			}
 		} else {
@@ -151,7 +151,7 @@ func (in *Interp) registerEmbeddedBuiltins() {
 		}
 		var out []*Value
 		if args[0].Type == ValArray {
-			for _, b := range args[0].ArrayVal {
+			for _, b := range args[0].materializeArray() {
 				out = append(out, b)
 			}
 		} else {

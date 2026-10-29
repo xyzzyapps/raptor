@@ -431,11 +431,13 @@ func valuesDeepEqual(a, b *Value) bool {
 	case ValBool:
 		return a.BoolVal == b.BoolVal
 	case ValArray:
-		if len(a.ArrayVal) != len(b.ArrayVal) {
+		if a.arrayLen() != b.arrayLen() {
 			return false
 		}
-		for i := range a.ArrayVal {
-			if !valuesDeepEqual(a.ArrayVal[i], b.ArrayVal[i]) {
+		aElems := a.materializeArray()
+		bElems := b.materializeArray()
+		for i := range aElems {
+			if !valuesDeepEqual(aElems[i], bElems[i]) {
 				return false
 			}
 		}

@@ -521,8 +521,8 @@ func (in *Interp) resolveFunction(params []Param, body *BlockStmt, topSubSlots m
 		bodyEnvNeeded = blockTouchesEnv(body)
 	}
 	needsEnv = !allParamsFast || bodyEnvNeeded
-	fastSimple = allParamsFast && !needsEnv
 	noParamChecks = noChecks
+	fastSimple = allParamsFast && !needsEnv && noChecks
 	return
 }
 

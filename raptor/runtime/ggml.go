@@ -742,7 +742,7 @@ func (in *Interp) registerGGMLBuiltins() {
 		for _, c := range ggmlState.ctxs {
 			if t := c.tensor(ggmlAsInt(args[0])); t != nil {
 				t.ensureData()
-				for i, item := range args[1].ArrayVal {
+				for i, item := range args[1].materializeArray() {
 					if i >= len(t.data) {
 						break
 					}

@@ -255,17 +255,17 @@ func registerTUIBuiltins(in *Interp) {
 		}
 		var headers []string
 		if args[0].Type == ValArray {
-			for _, h := range args[0].ArrayVal {
+			for _, h := range args[0].materializeArray() {
 				headers = append(headers, h.String())
 			}
 		}
 
 		var rows [][]string
 		if args[1].Type == ValArray {
-			for _, r := range args[1].ArrayVal {
+			for _, r := range args[1].materializeArray() {
 				var row []string
 				if r.Type == ValArray {
-					for _, cell := range r.ArrayVal {
+					for _, cell := range r.materializeArray() {
 						row = append(row, cell.String())
 					}
 				}

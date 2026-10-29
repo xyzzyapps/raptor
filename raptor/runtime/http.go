@@ -211,7 +211,8 @@ func (in *Interp) registerHTTPBuiltins() {
 			reqHash["headers"] = HashValue(reqHeaders)
 			reqHash["query"] = HashValue(reqQuery)
 
-			resVal, err := in.InvokeCallable(handlerVal, []*Value{HashValue(reqHash)})
+			worker := in.forkWorker()
+			resVal, err := worker.InvokeCallable(handlerVal, []*Value{HashValue(reqHash)})
 			if err != nil {
 				http.Error(w, fmt.Sprintf("Internal Server Error: %v", err), http.StatusInternalServerError)
 				return

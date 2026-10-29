@@ -3,13 +3,14 @@ package raptor
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"unsafe"
 )
 
 // ValueType identifies the runtime kind of a Value.
-type ValueType int
+type ValueType uint8
 
 const (
 	ValNil ValueType = iota
@@ -28,6 +29,28 @@ const (
 	ValJunction
 	ValLazySeq
 	ValRef
+)
+
+// extKind discriminates the single rare-variant pointer stored in Value.ext.
+const (
+	extNone uint8 = iota
+	extClosure
+	extMultiSub
+	extCStruct
+	extPromise
+	extChannel
+	extJunction
+	extLazySeq
+	extRef
+	extStrBuf
+	extArrayLane
+)
+
+// Arena / stack ownership flags on Value.flags.
+const (
+	flagTempArena  uint8 = 1 << 0 // Allocated in per-Interp temporary bump arena
+	flagStackLocal uint8 = 1 << 1 // Inline box in an active function stackFrame
+	flagSlotBox    uint8 = 1 << 2 // Inline box in a persistent global slot
 )
 
 type JunctionKind int
@@ -76,36 +99,99 @@ type CStructInstance struct {
 
 // Closure represents a first-class callable with captured lexical environment.
 type Closure struct {
-	Name    string
-	Params  []Param
-	Body    *BlockStmt
-	Env     *Env
-	IsMulti bool
-	IsRaw   bool
+	Name          string
+	Params        []Param
+	Body          *BlockStmt
+	Env           *Env
+	IsMulti       bool
+	IsRaw         bool
+	FrameSlots    int
+	ParamSlots    []int
+	NeedsEnv      bool
+	FastSimple    bool
+	NoParamChecks bool
 }
 
-// Value represents any runtime value in Raku5.
+type multiSubBox struct {
+	candidates []*Closure
+}
+
+type strBufBox struct {
+	buf []byte
+}
+
+// StrTape is a Goose/Arrow-style pointerless contiguous string buffer.
+// Neither Offsets nor Data contains pointers, so Go's GC skips scanning the entire tape.
+type StrTape struct {
+	Offsets []uint32 // length N+1; element i is Data[Offsets[i]:Offsets[i+1]]
+	Data    []byte
+}
+
+func NewStrTape(capElems, capBytes int) *StrTape {
+	offs := make([]uint32, 1, capElems+1)
+	offs[0] = 0
+	var data []byte
+	if capBytes > 0 {
+		data = make([]byte, 0, capBytes)
+	}
+	return &StrTape{Offsets: offs, Data: data}
+}
+
+func (st *StrTape) Len() int {
+	if st == nil || len(st.Offsets) == 0 {
+		return 0
+	}
+	return len(st.Offsets) - 1
+}
+
+func (st *StrTape) At(i int) string {
+	start := st.Offsets[i]
+	end := st.Offsets[i+1]
+	if start == end {
+		return ""
+	}
+	return unsafe.String(&st.Data[start], int(end-start))
+}
+
+func (st *StrTape) Append(s string) {
+	st.Data = append(st.Data, s...)
+	st.Offsets = append(st.Offsets, uint32(len(st.Data)))
+}
+
+func (st *StrTape) Clone() *StrTape {
+	if st == nil {
+		return nil
+	}
+	offs := make([]uint32, len(st.Offsets))
+	copy(offs, st.Offsets)
+	data := make([]byte, len(st.Data))
+	copy(data, st.Data)
+	return &StrTape{Offsets: offs, Data: data}
+}
+
+// ArrayLane holds packed homogeneous columnar storage for ValArray.
+type ArrayLane struct {
+	Ints   []int64
+	Floats []float64
+	Strs   *StrTape
+}
+
+// Value represents any runtime value in Raptor.
+// Pointer fields are grouped at offsets 0..56 so Go's GC PtrBytes stops at 56 bytes
+// (4 pointer words instead of 12), and total struct size is 88 bytes (down from 216 bytes).
 type Value struct {
-	Type        ValueType
-	BoolVal     bool
-	IntVal      int64
-	FloatVal    float64
-	StrVal      string
-	ArrayVal    []*Value
-	HashVal     map[string]*Value
-	ClosureVal  *Closure
-	Candidates  []*Closure // For ValMultiSub: list of multi candidates
-	PtrVal      uintptr
-	CStructVal  *CStructInstance
-	PromiseVal  *Promise
-	ChannelVal  *Channel
-	JunctionVal *Junction
-	LazySeqVal  *LazySeq
-	RefVal      *Value
-	// strBuf is a unique growable backing store for in-place ~= / concat.
-	strBuf []byte
-	// Ints is a packed homogeneous int64 lane for ValArray (sortnums / ranges).
-	Ints []int64
+	StrVal   string
+	ArrayVal []*Value
+	HashVal  map[string]*Value
+	ext      unsafe.Pointer
+
+	IntVal   int64
+	FloatVal float64
+	PtrVal   uintptr
+	Type     ValueType
+	BoolVal  bool
+	extKind  uint8
+	flags    uint8
 }
 
 const (
@@ -113,12 +199,25 @@ const (
 	intInternMax int64 = 256
 )
 
-var intIntern [intInternMax - intInternMin + 1]*Value
+var (
+	intIntern    [intInternMax - intInternMin + 1]*Value
+	smallIntStrs [1024]string
+)
 
 func init() {
 	for i := intInternMin; i <= intInternMax; i++ {
 		intIntern[i-intInternMin] = &Value{Type: ValInt, IntVal: i}
 	}
+	for i := 0; i < len(smallIntStrs); i++ {
+		smallIntStrs[i] = strconv.Itoa(i)
+	}
+}
+
+func formatIntFast(n int64) string {
+	if n >= 0 && n < int64(len(smallIntStrs)) {
+		return smallIntStrs[n]
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 func isInternedInt(v *Value) bool {
@@ -142,22 +241,175 @@ func isFlyweight(v *Value) bool {
 	return isInternedInt(v)
 }
 
+// escapeValue promotes stack-local or temporary arena values to independent heap values
+// before they are stored into heap containers, globals, closures, or channels.
+func escapeValue(v *Value) *Value {
+	if v == nil {
+		return valNil
+	}
+	if v.flags == 0 {
+		return v
+	}
+	switch v.Type {
+	case ValNil:
+		return valNil
+	case ValBool:
+		return BoolValue(v.BoolVal)
+	case ValInt:
+		return IntValue(v.IntVal)
+	case ValFloat:
+		return &Value{Type: ValFloat, FloatVal: v.FloatVal}
+	case ValString:
+		if v.StrVal == "" && v.extKind != extStrBuf {
+			return valEmptyStr
+		}
+		s := v.StrVal
+		if v.extKind == extStrBuf {
+			s = strings.Clone(s)
+		}
+		return &Value{Type: ValString, StrVal: s}
+	default:
+		cp := *v
+		cp.flags = 0
+		return &cp
+	}
+}
+
+func escapeValues(vs []*Value) {
+	for i, v := range vs {
+		if v != nil && v.flags != 0 {
+			vs[i] = escapeValue(v)
+		}
+	}
+}
+
+// Rare-variant typed accessors backed by Value.ext.
+
+func (v *Value) Closure() *Closure {
+	if v == nil || v.extKind != extClosure || v.ext == nil {
+		return nil
+	}
+	return (*Closure)(v.ext)
+}
+
+func (v *Value) Candidates() []*Closure {
+	if v == nil || v.extKind != extMultiSub || v.ext == nil {
+		return nil
+	}
+	return (*multiSubBox)(v.ext).candidates
+}
+
+func (v *Value) AppendCandidate(cand *Closure) {
+	if v == nil {
+		return
+	}
+	if v.extKind != extMultiSub || v.ext == nil {
+		box := &multiSubBox{candidates: []*Closure{cand}}
+		v.ext = unsafe.Pointer(box)
+		v.extKind = extMultiSub
+		return
+	}
+	box := (*multiSubBox)(v.ext)
+	box.candidates = append(box.candidates, cand)
+}
+
+func (v *Value) CStruct() *CStructInstance {
+	if v == nil || v.extKind != extCStruct || v.ext == nil {
+		return nil
+	}
+	return (*CStructInstance)(v.ext)
+}
+
+func (v *Value) Promise() *Promise {
+	if v == nil || v.extKind != extPromise || v.ext == nil {
+		return nil
+	}
+	return (*Promise)(v.ext)
+}
+
+func (v *Value) Channel() *Channel {
+	if v == nil || v.extKind != extChannel || v.ext == nil {
+		return nil
+	}
+	return (*Channel)(v.ext)
+}
+
+func (v *Value) Junction() *Junction {
+	if v == nil || v.extKind != extJunction || v.ext == nil {
+		return nil
+	}
+	return (*Junction)(v.ext)
+}
+
+func (v *Value) LazySeq() *LazySeq {
+	if v == nil || v.extKind != extLazySeq || v.ext == nil {
+		return nil
+	}
+	return (*LazySeq)(v.ext)
+}
+
+func (v *Value) Ref() *Value {
+	if v == nil || v.extKind != extRef || v.ext == nil {
+		return nil
+	}
+	return (*Value)(v.ext)
+}
+
+func (v *Value) lane() *ArrayLane {
+	if v == nil || v.extKind != extArrayLane || v.ext == nil {
+		return nil
+	}
+	return (*ArrayLane)(v.ext)
+}
+
+func (v *Value) ensureLane() *ArrayLane {
+	if v.extKind == extArrayLane && v.ext != nil {
+		return (*ArrayLane)(v.ext)
+	}
+	l := &ArrayLane{}
+	v.ext = unsafe.Pointer(l)
+	v.extKind = extArrayLane
+	return l
+}
+
+func (v *Value) intLane() []int64 {
+	if v == nil || v.ArrayVal != nil || v.extKind != extArrayLane || v.ext == nil {
+		return nil
+	}
+	return (*ArrayLane)(v.ext).Ints
+}
+
+func (v *Value) floatLane() []float64 {
+	if v == nil || v.ArrayVal != nil || v.extKind != extArrayLane || v.ext == nil {
+		return nil
+	}
+	return (*ArrayLane)(v.ext).Floats
+}
+
+func (v *Value) strLane() *StrTape {
+	if v == nil || v.ArrayVal != nil || v.extKind != extArrayLane || v.ext == nil {
+		return nil
+	}
+	return (*ArrayLane)(v.ext).Strs
+}
+
 func JunctionValue(kind JunctionKind, vals []*Value) *Value {
+	escapeValues(vals)
+	j := &Junction{Kind: kind, Values: vals}
 	return &Value{
-		Type: ValJunction,
-		JunctionVal: &Junction{
-			Kind:   kind,
-			Values: vals,
-		},
+		Type:    ValJunction,
+		ext:     unsafe.Pointer(j),
+		extKind: extJunction,
 	}
 }
 
 func LazySeqValue(items []*Value) *Value {
+	escapeValues(items)
+	ls := &LazySeq{Items: items}
 	return &Value{
-		Type: ValLazySeq,
-		LazySeqVal: &LazySeq{
-			Items: items,
-		},
+		Type:    ValLazySeq,
+		ext:     unsafe.Pointer(ls),
+		extKind: extLazySeq,
 	}
 }
 
@@ -187,15 +439,44 @@ func IntValue(i int64) *Value {
 }
 
 func IntArrayValue(ints []int64) *Value {
-	return &Value{Type: ValArray, Ints: ints}
+	if ints == nil {
+		ints = []int64{}
+	}
+	l := &ArrayLane{Ints: ints}
+	return &Value{Type: ValArray, ext: unsafe.Pointer(l), extKind: extArrayLane}
+}
+
+func FloatArrayValue(floats []float64) *Value {
+	if floats == nil {
+		floats = []float64{}
+	}
+	l := &ArrayLane{Floats: floats}
+	return &Value{Type: ValArray, ext: unsafe.Pointer(l), extKind: extArrayLane}
+}
+
+func StrTapeArrayValue(tape *StrTape) *Value {
+	if tape == nil {
+		tape = NewStrTape(0, 0)
+	}
+	l := &ArrayLane{Strs: tape}
+	return &Value{Type: ValArray, ext: unsafe.Pointer(l), extKind: extArrayLane}
 }
 
 func (v *Value) arrayLen() int {
 	if v == nil || v.Type != ValArray {
 		return 0
 	}
-	if v.Ints != nil && v.ArrayVal == nil {
-		return len(v.Ints)
+	if v.ArrayVal == nil && v.extKind == extArrayLane && v.ext != nil {
+		l := (*ArrayLane)(v.ext)
+		if l.Ints != nil {
+			return len(l.Ints)
+		}
+		if l.Floats != nil {
+			return len(l.Floats)
+		}
+		if l.Strs != nil {
+			return l.Strs.Len()
+		}
 	}
 	return len(v.ArrayVal)
 }
@@ -204,11 +485,26 @@ func (v *Value) arrayAt(i int) *Value {
 	if v == nil || v.Type != ValArray {
 		return NilValue()
 	}
-	if v.Ints != nil && v.ArrayVal == nil {
-		if i < 0 || i >= len(v.Ints) {
-			return NilValue()
+	if v.ArrayVal == nil && v.extKind == extArrayLane && v.ext != nil {
+		l := (*ArrayLane)(v.ext)
+		if l.Ints != nil {
+			if i < 0 || i >= len(l.Ints) {
+				return NilValue()
+			}
+			return IntValue(l.Ints[i])
 		}
-		return IntValue(v.Ints[i])
+		if l.Floats != nil {
+			if i < 0 || i >= len(l.Floats) {
+				return NilValue()
+			}
+			return FloatValue(l.Floats[i])
+		}
+		if l.Strs != nil {
+			if i < 0 || i >= l.Strs.Len() {
+				return NilValue()
+			}
+			return StringValue(l.Strs.At(i))
+		}
 	}
 	if i < 0 || i >= len(v.ArrayVal) {
 		return NilValue()
@@ -223,15 +519,42 @@ func (v *Value) materializeArray() []*Value {
 	if v.ArrayVal != nil {
 		return v.ArrayVal
 	}
-	if v.Ints == nil {
+	l := v.lane()
+	if l == nil {
 		return nil
 	}
-	out := make([]*Value, len(v.Ints))
-	for i, n := range v.Ints {
-		out[i] = IntValue(n)
+	if l.Ints != nil {
+		out := make([]*Value, len(l.Ints))
+		for i, n := range l.Ints {
+			out[i] = IntValue(n)
+		}
+		v.ArrayVal = out
+		v.ext = nil
+		v.extKind = extNone
+		return out
 	}
-	v.ArrayVal = out
-	return out
+	if l.Floats != nil {
+		out := make([]*Value, len(l.Floats))
+		for i, f := range l.Floats {
+			out[i] = FloatValue(f)
+		}
+		v.ArrayVal = out
+		v.ext = nil
+		v.extKind = extNone
+		return out
+	}
+	if l.Strs != nil {
+		n := l.Strs.Len()
+		out := make([]*Value, n)
+		for i := 0; i < n; i++ {
+			out[i] = StringValue(strings.Clone(l.Strs.At(i)))
+		}
+		v.ArrayVal = out
+		v.ext = nil
+		v.extKind = extNone
+		return out
+	}
+	return nil
 }
 
 func (v *Value) pushValue(x *Value) {
@@ -239,21 +562,54 @@ func (v *Value) pushValue(x *Value) {
 		return
 	}
 	v.Type = ValArray
-	if x != nil && x.Type == ValInt && v.ArrayVal == nil {
-		v.Ints = append(v.Ints, x.IntVal)
-		return
+	if v.ArrayVal == nil {
+		l := v.lane()
+		if x != nil {
+			switch x.Type {
+			case ValInt:
+				if l == nil {
+					l = v.ensureLane()
+					l.Ints = make([]int64, 0, 8)
+				}
+				if l.Ints != nil && l.Floats == nil && l.Strs == nil {
+					l.Ints = append(l.Ints, x.IntVal)
+					return
+				}
+			case ValFloat:
+				if l == nil {
+					l = v.ensureLane()
+					l.Floats = make([]float64, 0, 8)
+				}
+				if l.Floats != nil && l.Ints == nil && l.Strs == nil {
+					l.Floats = append(l.Floats, x.FloatVal)
+					return
+				}
+			case ValString:
+				if l == nil {
+					l = v.ensureLane()
+					l.Strs = NewStrTape(8, len(x.StrVal)*8)
+				}
+				if l.Strs != nil && l.Ints == nil && l.Floats == nil {
+					l.Strs.Append(x.StrVal)
+					return
+				}
+			}
+		}
+		if l != nil {
+			v.materializeArray()
+		}
 	}
-	if v.Ints != nil && v.ArrayVal == nil {
-		v.materializeArray()
-	}
-	v.ArrayVal = append(v.ArrayVal, x)
+	v.ArrayVal = append(v.ArrayVal, escapeValue(x))
 }
 
 func (v *Value) appendString(suffix string) *Value {
 	if v == nil || isFlyweight(v) || v.Type != ValString {
 		return StringValue(v.String() + suffix)
 	}
-	if cap(v.strBuf) == 0 {
+	var sb *strBufBox
+	if v.extKind == extStrBuf && v.ext != nil {
+		sb = (*strBufBox)(v.ext)
+	} else {
 		need := len(v.StrVal) + len(suffix)
 		capn := need + 32
 		if capn < 64 {
@@ -261,11 +617,13 @@ func (v *Value) appendString(suffix string) *Value {
 		}
 		buf := make([]byte, len(v.StrVal), capn)
 		copy(buf, v.StrVal)
-		v.strBuf = buf
+		sb = &strBufBox{buf: buf}
+		v.ext = unsafe.Pointer(sb)
+		v.extKind = extStrBuf
 	}
-	v.strBuf = append(v.strBuf, suffix...)
+	sb.buf = append(sb.buf, suffix...)
 	// Share backing store — string() would copy and restore quadratic churn.
-	v.StrVal = unsafe.String(unsafe.SliceData(v.strBuf), len(v.strBuf))
+	v.StrVal = unsafe.String(unsafe.SliceData(sb.buf), len(sb.buf))
 	return v
 }
 
@@ -281,19 +639,26 @@ func StringValue(s string) *Value {
 }
 
 func ArrayValue(elems []*Value) *Value {
+	escapeValues(elems)
 	return &Value{Type: ValArray, ArrayVal: elems}
 }
 
 func HashValue(m map[string]*Value) *Value {
+	for k, v := range m {
+		if v != nil && v.flags != 0 {
+			m[k] = escapeValue(v)
+		}
+	}
 	return &Value{Type: ValHash, HashVal: m}
 }
 
 func ClosureValue(c *Closure) *Value {
-	return &Value{Type: ValClosure, ClosureVal: c}
+	return &Value{Type: ValClosure, ext: unsafe.Pointer(c), extKind: extClosure}
 }
 
 func MultiSubValue(candidates []*Closure) *Value {
-	return &Value{Type: ValMultiSub, Candidates: candidates}
+	box := &multiSubBox{candidates: candidates}
+	return &Value{Type: ValMultiSub, ext: unsafe.Pointer(box), extKind: extMultiSub}
 }
 
 func NativePtrValue(ptr uintptr) *Value {
@@ -301,19 +666,24 @@ func NativePtrValue(ptr uintptr) *Value {
 }
 
 func CStructValue(inst *CStructInstance) *Value {
-	return &Value{Type: ValCStruct, CStructVal: inst, PtrVal: inst.Ptr}
+	var ptr uintptr
+	if inst != nil {
+		ptr = inst.Ptr
+	}
+	return &Value{Type: ValCStruct, PtrVal: ptr, ext: unsafe.Pointer(inst), extKind: extCStruct}
 }
 
 func PromiseValue(p *Promise) *Value {
-	return &Value{Type: ValPromise, PromiseVal: p}
+	return &Value{Type: ValPromise, ext: unsafe.Pointer(p), extKind: extPromise}
 }
 
 func ChannelValue(c *Channel) *Value {
-	return &Value{Type: ValChannel, ChannelVal: c}
+	return &Value{Type: ValChannel, ext: unsafe.Pointer(c), extKind: extChannel}
 }
 
 func RefValue(target *Value) *Value {
-	return &Value{Type: ValRef, RefVal: target}
+	target = escapeValue(target)
+	return &Value{Type: ValRef, ext: unsafe.Pointer(target), extKind: extRef}
 }
 
 // IsTrue returns Raku truthiness.
@@ -339,19 +709,20 @@ func (v *Value) IsTrue() bool {
 	case ValClosure, ValMultiSub, ValNativePtr, ValCStruct, ValPromise, ValChannel, ValRef:
 		return true
 	case ValJunction:
-		if v.JunctionVal == nil {
+		j := v.Junction()
+		if j == nil {
 			return false
 		}
-		switch v.JunctionVal.Kind {
+		switch j.Kind {
 		case JunctionAll:
-			for _, elem := range v.JunctionVal.Values {
+			for _, elem := range j.Values {
 				if !elem.IsTrue() {
 					return false
 				}
 			}
-			return len(v.JunctionVal.Values) > 0
+			return len(j.Values) > 0
 		case JunctionAny:
-			for _, elem := range v.JunctionVal.Values {
+			for _, elem := range j.Values {
 				if elem.IsTrue() {
 					return true
 				}
@@ -359,14 +730,14 @@ func (v *Value) IsTrue() bool {
 			return false
 		case JunctionOne:
 			count := 0
-			for _, elem := range v.JunctionVal.Values {
+			for _, elem := range j.Values {
 				if elem.IsTrue() {
 					count++
 				}
 			}
 			return count == 1
 		case JunctionNone:
-			for _, elem := range v.JunctionVal.Values {
+			for _, elem := range j.Values {
 				if elem.IsTrue() {
 					return false
 				}
@@ -375,8 +746,8 @@ func (v *Value) IsTrue() bool {
 		}
 		return false
 	case ValLazySeq:
-		if v.LazySeqVal != nil {
-			return len(v.LazySeqVal.Items) > 0
+		if ls := v.LazySeq(); ls != nil {
+			return len(ls.Items) > 0
 		}
 		return false
 	default:
@@ -419,8 +790,8 @@ func (v *Value) TypeName() string {
 	case ValRef:
 		return "Ref"
 	case ValCStruct:
-		if v.CStructVal != nil && v.CStructVal.Class != nil {
-			return v.CStructVal.Class.Name
+		if cs := v.CStruct(); cs != nil && cs.Class != nil {
+			return cs.Class.Name
 		}
 		return "CStruct"
 	default:
@@ -464,8 +835,10 @@ func (v *Value) MatchesType(constraint string) bool {
 	case "Ref", "Reference":
 		return v.Type == ValRef
 	default:
-		if v.Type == ValCStruct && v.CStructVal != nil && v.CStructVal.Class != nil {
-			return v.CStructVal.Class.Name == constraint
+		if v.Type == ValCStruct {
+			if cs := v.CStruct(); cs != nil && cs.Class != nil {
+				return cs.Class.Name == constraint
+			}
 		}
 		return false
 	}
@@ -484,53 +857,70 @@ func (v *Value) String() string {
 		}
 		return "False"
 	case ValInt:
-		return fmt.Sprintf("%d", v.IntVal)
+		return formatIntFast(v.IntVal)
 	case ValFloat:
-		return fmt.Sprintf("%g", v.FloatVal)
+		return strconv.FormatFloat(v.FloatVal, 'g', -1, 64)
 	case ValString:
 		return v.StrVal
 	case ValArray:
-		if v.Ints != nil && v.ArrayVal == nil {
-			items := make([]string, len(v.Ints))
-			for i, n := range v.Ints {
-				items[i] = fmt.Sprintf("%d", n)
+		if v.ArrayVal == nil {
+			if ints := v.intLane(); ints != nil {
+				items := make([]string, len(ints))
+				for i, n := range ints {
+					items[i] = formatIntFast(n)
+				}
+				return "[" + strings.Join(items, " ") + "]"
 			}
-			return "[" + strings.Join(items, " ") + "]"
+			if floats := v.floatLane(); floats != nil {
+				items := make([]string, len(floats))
+				for i, f := range floats {
+					items[i] = strconv.FormatFloat(f, 'g', -1, 64)
+				}
+				return "[" + strings.Join(items, " ") + "]"
+			}
+			if strs := v.strLane(); strs != nil {
+				n := strs.Len()
+				items := make([]string, n)
+				for i := 0; i < n; i++ {
+					items[i] = strs.At(i)
+				}
+				return "[" + strings.Join(items, " ") + "]"
+			}
 		}
-		var items []string
-		for _, e := range v.ArrayVal {
-			items = append(items, e.String())
+		items := make([]string, len(v.ArrayVal))
+		for i, e := range v.ArrayVal {
+			items[i] = e.String()
 		}
 		return "[" + strings.Join(items, " ") + "]"
 	case ValHash:
 		var pairs []string
 		for k, val := range v.HashVal {
-			pairs = append(pairs, fmt.Sprintf("%s => %s", k, val.String()))
+			pairs = append(pairs, k+" => "+val.String())
 		}
 		return "{" + strings.Join(pairs, ", ") + "}"
 	case ValClosure:
-		if v.ClosureVal != nil && v.ClosureVal.Name != "" {
-			return fmt.Sprintf("sub %s { ... }", v.ClosureVal.Name)
+		if c := v.Closure(); c != nil && c.Name != "" {
+			return "sub " + c.Name + " { ... }"
 		}
 		return "sub { ... }"
 	case ValMultiSub:
-		return fmt.Sprintf("multi sub (%d candidates)", len(v.Candidates))
+		return fmt.Sprintf("multi sub (%d candidates)", len(v.Candidates()))
 	case ValNativePtr:
-		return fmt.Sprintf("0x%x", v.PtrVal)
+		return "0x" + strconv.FormatUint(uint64(v.PtrVal), 16)
 	case ValPromise:
-		if v.PromiseVal != nil {
-			return fmt.Sprintf("Promise(%s)", v.PromiseVal.Status)
+		if p := v.Promise(); p != nil {
+			return "Promise(" + p.Status + ")"
 		}
 		return "Promise"
 	case ValChannel:
 		return "Channel"
 	case ValJunction:
-		if v.JunctionVal != nil {
+		if j := v.Junction(); j != nil {
 			var parts []string
-			for _, elem := range v.JunctionVal.Values {
+			for _, elem := range j.Values {
 				parts = append(parts, elem.String())
 			}
-			switch v.JunctionVal.Kind {
+			switch j.Kind {
 			case JunctionAll:
 				return "all(" + strings.Join(parts, ", ") + ")"
 			case JunctionAny:
@@ -543,22 +933,22 @@ func (v *Value) String() string {
 		}
 		return "junction()"
 	case ValLazySeq:
-		if v.LazySeqVal != nil {
+		if ls := v.LazySeq(); ls != nil {
 			var parts []string
-			for _, it := range v.LazySeqVal.Items {
+			for _, it := range ls.Items {
 				parts = append(parts, it.String())
 			}
 			return "(" + strings.Join(parts, " ") + "...)"
 		}
 		return "Seq(...)"
 	case ValRef:
-		if v.RefVal != nil {
-			return "\\" + v.RefVal.String()
+		if r := v.Ref(); r != nil {
+			return "\\" + r.String()
 		}
 		return "\\(nil)"
 	case ValCStruct:
-		if v.CStructVal != nil && v.CStructVal.Class != nil {
-			return fmt.Sprintf("struct %s(0x%x)", v.CStructVal.Class.Name, v.CStructVal.Ptr)
+		if cs := v.CStruct(); cs != nil && cs.Class != nil {
+			return fmt.Sprintf("struct %s(0x%x)", cs.Class.Name, cs.Ptr)
 		}
 		return "struct (nil)"
 	default:
@@ -573,10 +963,11 @@ func (v *Value) RefType() string {
 	}
 	switch v.Type {
 	case ValRef:
-		if v.RefVal == nil {
+		r := v.Ref()
+		if r == nil {
 			return "SCALAR"
 		}
-		switch v.RefVal.Type {
+		switch r.Type {
 		case ValArray:
 			return "ARRAY"
 		case ValHash:
@@ -626,12 +1017,29 @@ func (v *Value) ToInterface() any {
 	case ValString:
 		return v.StrVal
 	case ValArray:
-		if v.Ints != nil && v.ArrayVal == nil {
-			list := make([]any, len(v.Ints))
-			for i, n := range v.Ints {
-				list[i] = n
+		if v.ArrayVal == nil {
+			if ints := v.intLane(); ints != nil {
+				list := make([]any, len(ints))
+				for i, n := range ints {
+					list[i] = n
+				}
+				return list
 			}
-			return list
+			if floats := v.floatLane(); floats != nil {
+				list := make([]any, len(floats))
+				for i, f := range floats {
+					list[i] = f
+				}
+				return list
+			}
+			if strs := v.strLane(); strs != nil {
+				n := strs.Len()
+				list := make([]any, n)
+				for i := 0; i < n; i++ {
+					list[i] = strings.Clone(strs.At(i))
+				}
+				return list
+			}
 		}
 		list := make([]any, 0, len(v.ArrayVal))
 		for _, item := range v.ArrayVal {

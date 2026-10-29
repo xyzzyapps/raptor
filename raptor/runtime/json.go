@@ -68,12 +68,29 @@ func valueToInterface(v *Value) any {
 	case ValString:
 		return v.StrVal
 	case ValArray:
-		if v.Ints != nil && v.ArrayVal == nil {
-			list := make([]any, len(v.Ints))
-			for i, n := range v.Ints {
-				list[i] = n
+		if v.ArrayVal == nil {
+			if ints := v.intLane(); ints != nil {
+				list := make([]any, len(ints))
+				for i, n := range ints {
+					list[i] = n
+				}
+				return list
 			}
-			return list
+			if floats := v.floatLane(); floats != nil {
+				list := make([]any, len(floats))
+				for i, f := range floats {
+					list[i] = f
+				}
+				return list
+			}
+			if strs := v.strLane(); strs != nil {
+				n := strs.Len()
+				list := make([]any, n)
+				for i := 0; i < n; i++ {
+					list[i] = strs.At(i)
+				}
+				return list
+			}
 		}
 		list := make([]any, 0, len(v.ArrayVal))
 		for _, elem := range v.ArrayVal {
@@ -87,9 +104,9 @@ func valueToInterface(v *Value) any {
 		}
 		return dict
 	case ValLazySeq:
-		if v.LazySeqVal != nil {
+		if ls := v.LazySeq(); ls != nil {
 			var list []any
-			for _, elem := range v.LazySeqVal.Items {
+			for _, elem := range ls.Items {
 				list = append(list, valueToInterface(elem))
 			}
 			return list

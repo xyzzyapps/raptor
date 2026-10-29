@@ -574,7 +574,7 @@ func walkLoop(m *gcre.Match) Stmt {
 			if v := p.Get("var"); v != nil && v.Ok {
 				name = v.Str
 			}
-			return &AssignStmt{Target: &VarExpr{Name: name}, Op: "=", Value: walkExpr(p.Get("expression"))}
+			return &AssignStmt{Target: &VarExpr{Name: name}, Op: "=", Value: walkExpr(p.Get("expression")), IsMyDecl: true}
 		}
 		return walkExpr(p.Get("expression"))
 	}

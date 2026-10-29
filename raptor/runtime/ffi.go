@@ -100,18 +100,18 @@ func (in *Interp) registerFFI() {
 						callArgs = append(callArgs, 0)
 					}
 				case ValCStruct:
-					if a.CStructVal != nil {
-						if a.CStructVal.Class != nil && a.CStructVal.Class.TotalSize <= 8 && a.CStructVal.Class.TotalSize > 0 {
+					if cs := a.CStruct(); cs != nil {
+						if cs.Class != nil && cs.Class.TotalSize <= 8 && cs.Class.TotalSize > 0 {
 							var u64 uint64
-							if len(a.CStructVal.Buffer) > 0 {
-								copy((*[8]byte)(unsafe.Pointer(&u64))[:], a.CStructVal.Buffer)
-							} else if a.CStructVal.Ptr != 0 {
-								ptrBytes := unsafe.Slice((*byte)(unsafe.Pointer(a.CStructVal.Ptr)), a.CStructVal.Class.TotalSize)
+							if len(cs.Buffer) > 0 {
+								copy((*[8]byte)(unsafe.Pointer(&u64))[:], cs.Buffer)
+							} else if cs.Ptr != 0 {
+								ptrBytes := unsafe.Slice((*byte)(unsafe.Pointer(cs.Ptr)), cs.Class.TotalSize)
 								copy((*[8]byte)(unsafe.Pointer(&u64))[:], ptrBytes)
 							}
 							callArgs = append(callArgs, uintptr(u64))
 						} else {
-							callArgs = append(callArgs, a.CStructVal.Ptr)
+							callArgs = append(callArgs, cs.Ptr)
 						}
 					} else {
 						callArgs = append(callArgs, a.PtrVal)

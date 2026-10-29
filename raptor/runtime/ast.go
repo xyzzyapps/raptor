@@ -19,10 +19,20 @@ type Expr interface {
 
 // Program is the root AST node containing all top-level statements.
 type Program struct {
-	Stmts []Stmt
+	Stmts    []Stmt
+	Resolved bool
 }
 
 func (p *Program) node() {}
+
+// SlotKind identifies how a lexical or top-level variable is addressed at runtime.
+type SlotKind uint8
+
+const (
+	SlotNone   SlotKind = iota // Dynamic / heap Env map lookup
+	SlotLocal                  // Current function DataStack frame slot
+	SlotGlobal                 // Top-level Interp global DataStack slot
+)
 
 // Param represents a typed formal parameter in a sub or closure signature.
 type Param struct {
@@ -55,7 +65,10 @@ func (t *TakeStmt) expr() {}
 
 // BlockStmt represents a sequence of statements inside braces.
 type BlockStmt struct {
-	Stmts []Stmt
+	Stmts         []Stmt
+	HasLabels     bool
+	NeedsBlockEnv bool
+	Resolved      bool
 }
 
 func (b *BlockStmt) node() {}
@@ -63,11 +76,13 @@ func (b *BlockStmt) stmt() {}
 
 // VarDeclStmt represents a 'my', 'our', or 'state' variable declaration.
 type VarDeclStmt struct {
-	Scope string // "my", "our", or "state"
-	Type  string // "Int", "Str", etc. (empty for untyped)
-	Name  string // "$x", "@a", "%h"
-	Where Expr   // optional where constraint: { $_ > 0 }
-	Value Expr   // optional initializer
+	Scope    string // "my", "our", or "state"
+	Type     string // "Int", "Str", etc. (empty for untyped)
+	Name     string // "$x", "@a", "%h"
+	Where    Expr   // optional where constraint: { $_ > 0 }
+	Value    Expr   // optional initializer
+	SlotKind SlotKind
+	Slot     int
 }
 
 func (v *VarDeclStmt) node() {}
@@ -85,9 +100,10 @@ func (p *PackageDeclStmt) stmt() {}
 
 // AssignStmt represents variable, index, or hash element assignment.
 type AssignStmt struct {
-	Target Expr   // VarExpr, IndexExpr, or HashAccessExpr
-	Op     string // "=", "+=", "-=", "~="
-	Value  Expr
+	Target   Expr   // VarExpr, IndexExpr, or HashAccessExpr
+	Op       string // "=", "+=", "-=", "~="
+	Value    Expr
+	IsMyDecl bool
 }
 
 func (a *AssignStmt) node() {}
@@ -117,9 +133,10 @@ func (u *UnlessStmt) stmt() {}
 
 // WhileStmt represents a 'while' or 'until' loop.
 type WhileStmt struct {
-	IsUntil   bool
-	Condition Expr
-	Body      *BlockStmt
+	IsUntil      bool
+	Condition    Expr
+	Body         *BlockStmt
+	NeedsLoopEnv bool
 }
 
 func (w *WhileStmt) node() {}
@@ -127,9 +144,13 @@ func (w *WhileStmt) stmt() {}
 
 // ForStmt represents a 'for' list iteration loop.
 type ForStmt struct {
-	Iterable Expr
-	VarName  string // e.g. "$x" from pointy block
-	Body     *BlockStmt
+	Iterable     Expr
+	VarName      string // e.g. "$x" from pointy block
+	Body         *BlockStmt
+	VarSlotKind  SlotKind
+	VarSlot      int
+	UsesTopic    bool
+	NeedsLoopEnv bool
 }
 
 func (f *ForStmt) node() {}
@@ -137,10 +158,12 @@ func (f *ForStmt) stmt() {}
 
 // LoopStmt represents a C-style loop (init; cond; step).
 type LoopStmt struct {
-	Init Expr
-	Cond Expr
-	Step Expr
-	Body *BlockStmt
+	Init         Expr
+	Cond         Expr
+	Step         Expr
+	Body         *BlockStmt
+	NeedsLoopEnv bool
+	NeedsBodyEnv bool
 }
 
 func (l *LoopStmt) node() {}
@@ -157,10 +180,16 @@ func (s *SubsetDeclStmt) stmt() {}
 
 // SubDeclStmt represents a sub or multi sub declaration.
 type SubDeclStmt struct {
-	IsMulti bool
-	Name    string
-	Params  []Param
-	Body    *BlockStmt
+	IsMulti       bool
+	Name          string
+	Params        []Param
+	Body          *BlockStmt
+	FrameSlots    int
+	ParamSlots    []int
+	NeedsEnv      bool
+	FastSimple    bool
+	NoParamChecks bool
+	GlobalSlot    int
 }
 
 func (s *SubDeclStmt) node() {}
@@ -220,7 +249,9 @@ func (l *LiteralExpr) expr() {}
 
 // VarExpr represents variable evaluation by name.
 type VarExpr struct {
-	Name string // "$x", "@a", "%h"
+	Name     string // "$x", "@a", "%h"
+	SlotKind SlotKind
+	Slot     int
 }
 
 func (v *VarExpr) node() {}
@@ -257,8 +288,12 @@ func (t *TernaryExpr) expr() {}
 
 // CallExpr represents function or sub invocation.
 type CallExpr struct {
-	Callee Expr
-	Args   []Expr
+	Callee         Expr
+	Args           []Expr
+	GlobalSubSlot  int
+	BuiltinChecked bool
+	BuiltinEpoch   uint32
+	CachedBuiltin  BuiltinFunc
 }
 
 func (c *CallExpr) node() {}
@@ -310,8 +345,13 @@ func (h *HashAccessExpr) expr() {}
 
 // ClosureExpr represents an anonymous sub or block closure.
 type ClosureExpr struct {
-	Params []Param
-	Body   *BlockStmt
+	Params        []Param
+	Body          *BlockStmt
+	FrameSlots    int
+	ParamSlots    []int
+	NeedsEnv      bool
+	FastSimple    bool
+	NoParamChecks bool
 }
 
 func (c *ClosureExpr) node() {}

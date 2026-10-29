@@ -135,16 +135,17 @@ $seq;
 	if err != nil {
 		t.Fatalf("eval failed: %v", err)
 	}
-	if val.Type != ValLazySeq || val.LazySeqVal == nil {
+	ls := val.LazySeq()
+	if val.Type != ValLazySeq || ls == nil {
 		t.Fatalf("expected LazySeq, got %+v", val)
 	}
-	if len(val.LazySeqVal.Items) != 6 {
-		t.Fatalf("expected 6 items, got %d", len(val.LazySeqVal.Items))
+	if len(ls.Items) != 6 {
+		t.Fatalf("expected 6 items, got %d", len(ls.Items))
 	}
 	expected := []int64{10, 20, 100, 200, 300, 50}
 	for i, exp := range expected {
-		if val.LazySeqVal.Items[i].IntVal != exp {
-			t.Errorf("item [%d] mismatch: expected %d, got %v", i, exp, val.LazySeqVal.Items[i])
+		if ls.Items[i].IntVal != exp {
+			t.Errorf("item [%d] mismatch: expected %d, got %v", i, exp, ls.Items[i])
 		}
 	}
 }

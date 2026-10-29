@@ -138,7 +138,7 @@ func registerVerificationBuiltins(in *Interp) {
 			return nil, fmt.Errorf("PROPERTY requires name string and verification closure")
 		}
 		name := args[0].String()
-		closure := args[1].ClosureVal
+		closure := args[1].Closure()
 		iterations := 100
 		if len(args) > 2 && args[2].Type == ValHash {
 			if countOpt, ok := args[2].HashVal["iterations"]; ok {

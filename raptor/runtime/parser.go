@@ -697,7 +697,7 @@ func (p *Parser) parseLoop() (Stmt, error) {
 		if err != nil {
 			return nil, err
 		}
-		initExpr = &AssignStmt{Target: &VarExpr{Name: vTok.Literal}, Op: "=", Value: val}
+		initExpr = &AssignStmt{Target: &VarExpr{Name: vTok.Literal}, Op: "=", Value: val, IsMyDecl: true}
 	} else if p.peek().Type != TokSemicolon {
 		e, err := p.parseExpression(0)
 		if err != nil {

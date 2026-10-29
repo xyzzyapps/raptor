@@ -22,6 +22,7 @@ func NewPromise() *Promise {
 
 // Keep resolves the promise with a successful value.
 func (p *Promise) Keep(val *Value) {
+	val = escapeValue(val)
 	p.Mu.Lock()
 	defer p.Mu.Unlock()
 	if p.Status != "Planned" {
@@ -68,6 +69,7 @@ func NewChannel(capacity int) *Channel {
 
 // Send enqueues a value into the channel.
 func (c *Channel) Send(val *Value) error {
+	val = escapeValue(val)
 	c.Mu.Lock()
 	if c.Closed {
 		c.Mu.Unlock()
@@ -117,10 +119,12 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 			return nil, fmt.Errorf("atomic_add requires target and delta")
 		}
 		delta := in.toInt(args[1])
-		if args[0].Type == ValCStruct && args[0].CStructVal != nil && args[0].CStructVal.Ptr != 0 {
-			ptr := (*int64)(unsafePointer(args[0].CStructVal.Ptr))
-			newVal := atomic.AddInt64(ptr, delta)
-			return IntValue(newVal), nil
+		if args[0].Type == ValCStruct {
+			if cs := args[0].CStruct(); cs != nil && cs.Ptr != 0 {
+				ptr := (*int64)(unsafePointer(cs.Ptr))
+				newVal := atomic.AddInt64(ptr, delta)
+				return IntValue(newVal), nil
+			}
 		}
 		if isInternedInt(args[0]) {
 			return nil, fmt.Errorf("atomic_add: interned int is immutable")
@@ -134,10 +138,12 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 			return nil, fmt.Errorf("atomic_sub requires target and delta")
 		}
 		delta := in.toInt(args[1])
-		if args[0].Type == ValCStruct && args[0].CStructVal != nil && args[0].CStructVal.Ptr != 0 {
-			ptr := (*int64)(unsafePointer(args[0].CStructVal.Ptr))
-			newVal := atomic.AddInt64(ptr, -delta)
-			return IntValue(newVal), nil
+		if args[0].Type == ValCStruct {
+			if cs := args[0].CStruct(); cs != nil && cs.Ptr != 0 {
+				ptr := (*int64)(unsafePointer(cs.Ptr))
+				newVal := atomic.AddInt64(ptr, -delta)
+				return IntValue(newVal), nil
+			}
 		}
 		if isInternedInt(args[0]) {
 			return nil, fmt.Errorf("atomic_sub: interned int is immutable")
@@ -150,10 +156,12 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 		if len(args) < 1 {
 			return nil, fmt.Errorf("atomic_load requires target")
 		}
-		if args[0].Type == ValCStruct && args[0].CStructVal != nil && args[0].CStructVal.Ptr != 0 {
-			ptr := (*int64)(unsafePointer(args[0].CStructVal.Ptr))
-			val := atomic.LoadInt64(ptr)
-			return IntValue(val), nil
+		if args[0].Type == ValCStruct {
+			if cs := args[0].CStruct(); cs != nil && cs.Ptr != 0 {
+				ptr := (*int64)(unsafePointer(cs.Ptr))
+				val := atomic.LoadInt64(ptr)
+				return IntValue(val), nil
+			}
 		}
 		val := atomic.LoadInt64(&args[0].IntVal)
 		return IntValue(val), nil
@@ -164,10 +172,12 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 			return nil, fmt.Errorf("atomic_store requires target and value")
 		}
 		val := in.toInt(args[1])
-		if args[0].Type == ValCStruct && args[0].CStructVal != nil && args[0].CStructVal.Ptr != 0 {
-			ptr := (*int64)(unsafePointer(args[0].CStructVal.Ptr))
-			atomic.StoreInt64(ptr, val)
-			return IntValue(val), nil
+		if args[0].Type == ValCStruct {
+			if cs := args[0].CStruct(); cs != nil && cs.Ptr != 0 {
+				ptr := (*int64)(unsafePointer(cs.Ptr))
+				atomic.StoreInt64(ptr, val)
+				return IntValue(val), nil
+			}
 		}
 		if isInternedInt(args[0]) {
 			return nil, fmt.Errorf("atomic_store: interned int is immutable")
@@ -183,8 +193,8 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 		oldVal := in.toInt(args[1])
 		newVal := in.toInt(args[2])
 		var swapped bool
-		if args[0].Type == ValCStruct && args[0].CStructVal != nil && args[0].CStructVal.Ptr != 0 {
-			ptr := (*int64)(unsafePointer(args[0].CStructVal.Ptr))
+		if args[0].Type == ValCStruct && args[0].CStruct() != nil && args[0].CStruct().Ptr != 0 {
+			ptr := (*int64)(unsafePointer(args[0].CStruct().Ptr))
 			swapped = atomic.CompareAndSwapInt64(ptr, oldVal, newVal)
 		} else {
 			if isInternedInt(args[0]) {
@@ -200,15 +210,16 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 		if len(args) < 1 {
 			return nil, fmt.Errorf("start requires a closure")
 		}
-		callee := args[0]
+		callee := escapeValue(args[0])
 		p := NewPromise()
+		worker := in.forkWorker()
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					p.Break(fmt.Errorf("panic in async task: %v", r))
 				}
 			}()
-			res, err := in.InvokeCallable(callee, nil)
+			res, err := worker.InvokeCallable(callee, nil)
 			if err != nil {
 				p.Break(err)
 			} else {
@@ -223,14 +234,14 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 			return NilValue(), nil
 		}
 		if len(args) == 1 {
-			if args[0].Type == ValPromise && args[0].PromiseVal != nil {
-				return args[0].PromiseVal.Await()
+			if args[0].Type == ValPromise && args[0].Promise() != nil {
+				return args[0].Promise().Await()
 			}
 			if args[0].Type == ValArray {
 				var results []*Value
-				for _, item := range args[0].ArrayVal {
-					if item.Type == ValPromise && item.PromiseVal != nil {
-						res, err := item.PromiseVal.Await()
+				for _, item := range args[0].materializeArray() {
+					if item.Type == ValPromise && item.Promise() != nil {
+						res, err := item.Promise().Await()
 						if err != nil {
 							return nil, err
 						}
@@ -245,8 +256,8 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 		}
 		var results []*Value
 		for _, a := range args {
-			if a.Type == ValPromise && a.PromiseVal != nil {
-				res, err := a.PromiseVal.Await()
+			if a.Type == ValPromise && a.Promise() != nil {
+				res, err := a.Promise().Await()
 				if err != nil {
 					return nil, err
 				}
@@ -435,21 +446,42 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 		return BoolValue(true), nil
 	}
 
-	// 7. Parallel Map / Worker Pool
+	// 7. Parallel Map / Worker Pool (isolated per-worker DataStacks + packed lane support)
 	in.Builtins["parallel_map"] = func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) < 2 {
 			return nil, fmt.Errorf("parallel_map requires items array and worker sub")
 		}
 		items := args[0]
-		worker := args[1]
+		workerFn := escapeValue(args[1])
 
+		total := 0
 		var list []*Value
+		var ints []int64
+		var floats []float64
+		var strs *StrTape
 		if items.Type == ValArray {
-			list = items.ArrayVal
-		} else if items.Type == ValLazySeq && items.LazySeqVal != nil {
-			list = items.LazySeqVal.Items
+			ints = items.intLane()
+			floats = items.floatLane()
+			strs = items.strLane()
+			if ints != nil {
+				total = len(ints)
+			} else if floats != nil {
+				total = len(floats)
+			} else if strs != nil {
+				total = strs.Len()
+			} else {
+				list = items.ArrayVal
+				total = len(list)
+			}
+		} else if items.Type == ValLazySeq && items.LazySeq() != nil {
+			list = items.LazySeq().Items
+			total = len(list)
 		} else {
-			list = []*Value{items}
+			list = []*Value{escapeValue(items)}
+			total = 1
+		}
+		if total == 0 {
+			return ArrayValue(nil), nil
 		}
 
 		limit := 8
@@ -459,38 +491,66 @@ func (in *Interp) registerConcurrencyAndAtomics() {
 				limit = l
 			}
 		}
+		if limit > total {
+			limit = total
+		}
 
-		results := make([]*Value, len(list))
-		sem := make(chan struct{}, limit)
+		results := make([]*Value, total)
+		var cursor int64
 		var wg sync.WaitGroup
 		var firstErr error
 		var errMu sync.Mutex
 
-		for i, item := range list {
+		for w := 0; w < limit; w++ {
 			wg.Add(1)
-			sem <- struct{}{}
-			go func(idx int, it *Value) {
+			wInterp := in.forkWorker()
+			go func(wi *Interp) {
 				defer wg.Done()
-				defer func() { <-sem }()
-
-				res, err := in.InvokeCallable(worker, []*Value{it, IntValue(int64(idx))})
-				if err != nil {
-					errMu.Lock()
-					if firstErr == nil {
-						firstErr = err
+				var callBuf [2]*Value
+				for {
+					idx := int(atomic.AddInt64(&cursor, 1) - 1)
+					if idx >= total {
+						return
 					}
-					errMu.Unlock()
-				} else {
-					results[idx] = res
+					tMark := wi.ds.markTemp()
+					var it *Value
+					if ints != nil {
+						it = wi.tempInt(ints[idx])
+					} else if floats != nil {
+						it = wi.tempFloat(floats[idx])
+					} else if strs != nil {
+						it = StringValue(strs.At(idx))
+					} else {
+						it = list[idx]
+					}
+					callBuf[0] = it
+					callBuf[1] = wi.tempInt(int64(idx))
+					res, err := wi.InvokeCallable(workerFn, callBuf[:])
+					if err != nil {
+						wi.ds.rewindTemp(tMark)
+						errMu.Lock()
+						if firstErr == nil {
+							firstErr = err
+						}
+						errMu.Unlock()
+						atomic.StoreInt64(&cursor, int64(total))
+						return
+					}
+					results[idx] = escapeValue(res)
+					wi.ds.rewindTemp(tMark)
 				}
-			}(i, item)
+			}(wInterp)
 		}
 
 		wg.Wait()
 		if firstErr != nil {
 			return nil, firstErr
 		}
-		return ArrayValue(results), nil
+		out := &Value{Type: ValArray}
+		for _, r := range results {
+			out.pushValue(r)
+		}
+		return out, nil
 	}
 
 	// 8. Reactive Event Streams (Supply / Supplier)

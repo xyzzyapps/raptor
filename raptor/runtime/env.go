@@ -61,6 +61,7 @@ func (e *Env) RecycleChild(child *Env) *Env {
 
 // DefineState binds a state variable cell to the environment frame.
 func (e *Env) DefineState(name string, cell *StateCell) {
+	cell.Val = escapeValue(cell.Val)
 	e.bindings[name] = cell.Val
 	if e.stateBindings == nil {
 		e.stateBindings = make(map[string]*StateCell)
@@ -70,8 +71,14 @@ func (e *Env) DefineState(name string, cell *StateCell) {
 
 // Define declares a new variable in the current frame.
 func detachInt(v *Value) *Value {
-	if v != nil && v.Type == ValInt {
+	if v == nil {
+		return valNil
+	}
+	if v.Type == ValInt {
 		return &Value{Type: ValInt, IntVal: v.IntVal}
+	}
+	if v.flags != 0 {
+		return escapeValue(v)
 	}
 	return v
 }
@@ -136,18 +143,18 @@ func (e *Env) RegisterMulti(name string, cand *Closure) {
 	}
 
 	if existing.Type == ValMultiSub {
-		for _, c := range existing.Candidates {
+		for _, c := range existing.Candidates() {
 			if c == cand {
 				return
 			}
 		}
-		existing.Candidates = append(existing.Candidates, cand)
+		existing.AppendCandidate(cand)
 		return
 	}
 
 	if existing.Type == ValClosure {
 		// Upgrade existing single closure to multi sub
-		multi := MultiSubValue([]*Closure{existing.ClosureVal, cand})
+		multi := MultiSubValue([]*Closure{existing.Closure(), cand})
 		e.bindings[name] = multi
 		e.bindings["&"+name] = multi
 		return

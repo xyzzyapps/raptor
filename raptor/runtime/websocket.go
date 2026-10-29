@@ -116,7 +116,8 @@ func (in *Interp) registerWebSocketBuiltins() {
 			go wsInst.readLoop()
 
 			// Call on_connect
-			_, _ = in.InvokeCallable(onConnectVal, []*Value{wsVal})
+			worker := in.forkWorker()
+			_, _ = worker.InvokeCallable(onConnectVal, []*Value{wsVal})
 		})
 
 		server := &http.Server{Handler: mux}

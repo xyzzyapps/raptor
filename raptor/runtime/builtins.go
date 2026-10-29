@@ -8,7 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
-	"sort"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -175,10 +176,10 @@ func (in *Interp) registerBuiltins() {
 		for _, a := range args {
 			if a.Type == ValArray {
 				elements = append(elements, a.materializeArray()...)
-			} else if a.Type == ValLazySeq && a.LazySeqVal != nil {
-				elements = append(elements, a.LazySeqVal.Items...)
+			} else if a.Type == ValLazySeq && a.LazySeq() != nil {
+				elements = append(elements, a.LazySeq().Items...)
 			} else {
-				elements = append(elements, a)
+				elements = append(elements, escapeValue(a))
 			}
 		}
 		return JunctionValue(JunctionAll, elements), nil
@@ -189,10 +190,10 @@ func (in *Interp) registerBuiltins() {
 		for _, a := range args {
 			if a.Type == ValArray {
 				elements = append(elements, a.materializeArray()...)
-			} else if a.Type == ValLazySeq && a.LazySeqVal != nil {
-				elements = append(elements, a.LazySeqVal.Items...)
+			} else if a.Type == ValLazySeq && a.LazySeq() != nil {
+				elements = append(elements, a.LazySeq().Items...)
 			} else {
-				elements = append(elements, a)
+				elements = append(elements, escapeValue(a))
 			}
 		}
 		return JunctionValue(JunctionAny, elements), nil
@@ -203,10 +204,10 @@ func (in *Interp) registerBuiltins() {
 		for _, a := range args {
 			if a.Type == ValArray {
 				elements = append(elements, a.materializeArray()...)
-			} else if a.Type == ValLazySeq && a.LazySeqVal != nil {
-				elements = append(elements, a.LazySeqVal.Items...)
+			} else if a.Type == ValLazySeq && a.LazySeq() != nil {
+				elements = append(elements, a.LazySeq().Items...)
 			} else {
-				elements = append(elements, a)
+				elements = append(elements, escapeValue(a))
 			}
 		}
 		return JunctionValue(JunctionOne, elements), nil
@@ -217,10 +218,10 @@ func (in *Interp) registerBuiltins() {
 		for _, a := range args {
 			if a.Type == ValArray {
 				elements = append(elements, a.materializeArray()...)
-			} else if a.Type == ValLazySeq && a.LazySeqVal != nil {
-				elements = append(elements, a.LazySeqVal.Items...)
+			} else if a.Type == ValLazySeq && a.LazySeq() != nil {
+				elements = append(elements, a.LazySeq().Items...)
 			} else {
-				elements = append(elements, a)
+				elements = append(elements, escapeValue(a))
 			}
 		}
 		return JunctionValue(JunctionNone, elements), nil
@@ -328,13 +329,10 @@ func (in *Interp) registerBuiltins() {
 	}
 
 	in.Builtins["push"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 2 {
-			return nil, fmt.Errorf("push requires array and at least one element")
+		if len(args) < 2 || args[0].Type != ValArray {
+			return NilValue(), nil
 		}
 		arr := args[0]
-		if arr.Type != ValArray {
-			return nil, fmt.Errorf("push requires array target")
-		}
 		for _, x := range args[1:] {
 			arr.pushValue(x)
 		}
@@ -346,11 +344,26 @@ func (in *Interp) registerBuiltins() {
 			return NilValue(), nil
 		}
 		arr := args[0]
-		if arr.Ints != nil && arr.ArrayVal == nil {
-			lastIdx := len(arr.Ints) - 1
-			val := IntValue(arr.Ints[lastIdx])
-			arr.Ints = arr.Ints[:lastIdx]
-			return val, nil
+		if l := arr.lane(); l != nil && arr.ArrayVal == nil {
+			if l.Ints != nil {
+				lastIdx := len(l.Ints) - 1
+				val := in.tempInt(l.Ints[lastIdx])
+				l.Ints = l.Ints[:lastIdx]
+				return val, nil
+			}
+			if l.Floats != nil {
+				lastIdx := len(l.Floats) - 1
+				val := in.tempFloat(l.Floats[lastIdx])
+				l.Floats = l.Floats[:lastIdx]
+				return val, nil
+			}
+			if l.Strs != nil {
+				lastIdx := l.Strs.Len() - 1
+				val := StringValue(strings.Clone(l.Strs.At(lastIdx)))
+				l.Strs.Data = l.Strs.Data[:l.Strs.Offsets[lastIdx]]
+				l.Strs.Offsets = l.Strs.Offsets[:lastIdx+1]
+				return val, nil
+			}
 		}
 		lastIdx := len(arr.ArrayVal) - 1
 		val := arr.ArrayVal[lastIdx]
@@ -363,11 +376,19 @@ func (in *Interp) registerBuiltins() {
 			return NilValue(), nil
 		}
 		arr := args[0]
-		if arr.Ints != nil && arr.ArrayVal == nil {
-			val := IntValue(arr.Ints[0])
-			arr.Ints = arr.Ints[1:]
-			return val, nil
+		if l := arr.lane(); l != nil && arr.ArrayVal == nil {
+			if l.Ints != nil {
+				val := in.tempInt(l.Ints[0])
+				l.Ints = l.Ints[1:]
+				return val, nil
+			}
+			if l.Floats != nil {
+				val := in.tempFloat(l.Floats[0])
+				l.Floats = l.Floats[1:]
+				return val, nil
+			}
 		}
+		arr.materializeArray()
 		val := arr.ArrayVal[0]
 		arr.ArrayVal = arr.ArrayVal[1:]
 		return val, nil
@@ -375,11 +396,15 @@ func (in *Interp) registerBuiltins() {
 
 	in.Builtins["unshift"] = func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) < 2 || args[0].Type != ValArray {
-			return nil, fmt.Errorf("unshift requires array and elements")
+			return NilValue(), nil
 		}
 		arr := args[0]
 		arr.materializeArray()
-		arr.ArrayVal = append(append([]*Value(nil), args[1:]...), arr.ArrayVal...)
+		items := make([]*Value, len(args)-1)
+		for i, a := range args[1:] {
+			items[i] = escapeValue(a)
+		}
+		arr.ArrayVal = append(items, arr.ArrayVal...)
 		return IntValue(int64(len(arr.ArrayVal))), nil
 	}
 
@@ -423,11 +448,11 @@ func (in *Interp) registerBuiltins() {
 		delim := args[0].String()
 		target := args[1].String()
 		parts := strings.Split(target, delim)
-		var res []*Value
+		tape := NewStrTape(len(parts), len(target))
 		for _, p := range parts {
-			res = append(res, StringValue(p))
+			tape.Append(p)
 		}
-		return ArrayValue(res), nil
+		return StrTapeArrayValue(tape), nil
 	}
 
 	in.Builtins["join"] = func(in *Interp, args []*Value) (*Value, error) {
@@ -435,16 +460,34 @@ func (in *Interp) registerBuiltins() {
 			return StringValue(""), nil
 		}
 		delim := args[0].String()
+		if args[1].Type == ValArray && args[1].ArrayVal == nil {
+			if ints := args[1].intLane(); ints != nil {
+				parts := make([]string, len(ints))
+				for i, n := range ints {
+					parts[i] = formatIntFast(n)
+				}
+				return StringValue(strings.Join(parts, delim)), nil
+			}
+			if floats := args[1].floatLane(); floats != nil {
+				parts := make([]string, len(floats))
+				for i, f := range floats {
+					parts[i] = strconv.FormatFloat(f, 'g', -1, 64)
+				}
+				return StringValue(strings.Join(parts, delim)), nil
+			}
+			if strs := args[1].strLane(); strs != nil {
+				n := strs.Len()
+				parts := make([]string, n)
+				for i := 0; i < n; i++ {
+					parts[i] = strs.At(i)
+				}
+				return StringValue(strings.Join(parts, delim)), nil
+			}
+		}
 		var parts []string
 		if args[1].Type == ValArray {
-			if args[1].Ints != nil && args[1].ArrayVal == nil {
-				for _, n := range args[1].Ints {
-					parts = append(parts, fmt.Sprintf("%d", n))
-				}
-			} else {
-				for _, item := range args[1].ArrayVal {
-					parts = append(parts, item.String())
-				}
+			for _, item := range args[1].ArrayVal {
+				parts = append(parts, item.String())
 			}
 		} else {
 			for _, item := range args[1:] {
@@ -513,7 +556,6 @@ func (in *Interp) registerBuiltins() {
 		if len(args) < 2 {
 			return ArrayValue(nil), nil
 		}
-		// UFCS: first arg may be the list, second the callable
 		var list *Value
 		var callable *Value
 		if args[0].Type == ValArray {
@@ -526,15 +568,63 @@ func (in *Interp) registerBuiltins() {
 		if list.Type != ValArray {
 			return ArrayValue(nil), nil
 		}
-		var result []*Value
-		for _, elem := range list.materializeArray() {
-			val, err := in.InvokeCallable(callable, []*Value{elem})
+		out := &Value{Type: ValArray}
+		var oneArg [1]*Value
+		if ints := list.intLane(); ints != nil {
+			for _, n := range ints {
+				tMark := in.ds.markTemp()
+				oneArg[0] = in.tempInt(n)
+				val, err := in.InvokeCallable(callable, oneArg[:])
+				if err != nil {
+					in.ds.rewindTemp(tMark)
+					return nil, err
+				}
+				out.pushValue(val)
+				in.ds.rewindTemp(tMark)
+			}
+			return out, nil
+		}
+		if floats := list.floatLane(); floats != nil {
+			for _, f := range floats {
+				tMark := in.ds.markTemp()
+				oneArg[0] = in.tempFloat(f)
+				val, err := in.InvokeCallable(callable, oneArg[:])
+				if err != nil {
+					in.ds.rewindTemp(tMark)
+					return nil, err
+				}
+				out.pushValue(val)
+				in.ds.rewindTemp(tMark)
+			}
+			return out, nil
+		}
+		if strs := list.strLane(); strs != nil {
+			cnt := strs.Len()
+			for i := 0; i < cnt; i++ {
+				tMark := in.ds.markTemp()
+				oneArg[0] = StringValue(strs.At(i))
+				val, err := in.InvokeCallable(callable, oneArg[:])
+				if err != nil {
+					in.ds.rewindTemp(tMark)
+					return nil, err
+				}
+				out.pushValue(val)
+				in.ds.rewindTemp(tMark)
+			}
+			return out, nil
+		}
+		for _, elem := range list.ArrayVal {
+			tMark := in.ds.markTemp()
+			oneArg[0] = elem
+			val, err := in.InvokeCallable(callable, oneArg[:])
 			if err != nil {
+				in.ds.rewindTemp(tMark)
 				return nil, err
 			}
-			result = append(result, val)
+			out.pushValue(val)
+			in.ds.rewindTemp(tMark)
 		}
-		return ArrayValue(result), nil
+		return out, nil
 	}
 
 	// grep($callable, @list) or @list.grep($callable)
@@ -554,15 +644,73 @@ func (in *Interp) registerBuiltins() {
 		if list.Type != ValArray {
 			return ArrayValue(nil), nil
 		}
+		var oneArg [1]*Value
+		if ints := list.intLane(); ints != nil {
+			var res []int64
+			for _, n := range ints {
+				tMark := in.ds.markTemp()
+				oneArg[0] = in.tempInt(n)
+				val, err := in.InvokeCallable(callable, oneArg[:])
+				if err != nil {
+					in.ds.rewindTemp(tMark)
+					return nil, err
+				}
+				if val.IsTrue() {
+					res = append(res, n)
+				}
+				in.ds.rewindTemp(tMark)
+			}
+			return IntArrayValue(res), nil
+		}
+		if floats := list.floatLane(); floats != nil {
+			var res []float64
+			for _, f := range floats {
+				tMark := in.ds.markTemp()
+				oneArg[0] = in.tempFloat(f)
+				val, err := in.InvokeCallable(callable, oneArg[:])
+				if err != nil {
+					in.ds.rewindTemp(tMark)
+					return nil, err
+				}
+				if val.IsTrue() {
+					res = append(res, f)
+				}
+				in.ds.rewindTemp(tMark)
+			}
+			return FloatArrayValue(res), nil
+		}
+		if strs := list.strLane(); strs != nil {
+			cnt := strs.Len()
+			tape := NewStrTape(cnt/2+1, len(strs.Data)/2+1)
+			for i := 0; i < cnt; i++ {
+				tMark := in.ds.markTemp()
+				s := strs.At(i)
+				oneArg[0] = StringValue(s)
+				val, err := in.InvokeCallable(callable, oneArg[:])
+				if err != nil {
+					in.ds.rewindTemp(tMark)
+					return nil, err
+				}
+				if val.IsTrue() {
+					tape.Append(s)
+				}
+				in.ds.rewindTemp(tMark)
+			}
+			return StrTapeArrayValue(tape), nil
+		}
 		var result []*Value
-		for _, elem := range list.materializeArray() {
-			val, err := in.InvokeCallable(callable, []*Value{elem})
+		for _, elem := range list.ArrayVal {
+			tMark := in.ds.markTemp()
+			oneArg[0] = elem
+			val, err := in.InvokeCallable(callable, oneArg[:])
 			if err != nil {
+				in.ds.rewindTemp(tMark)
 				return nil, err
 			}
 			if val.IsTrue() {
 				result = append(result, elem)
 			}
+			in.ds.rewindTemp(tMark)
 		}
 		return ArrayValue(result), nil
 	}
@@ -580,24 +728,37 @@ func (in *Interp) registerBuiltins() {
 		} else {
 			return ArrayValue(nil), nil
 		}
-		if list.Ints != nil && list.ArrayVal == nil {
-			cp := make([]int64, len(list.Ints))
-			copy(cp, list.Ints)
-			sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
-			return IntArrayValue(cp), nil
+		if list.ArrayVal == nil {
+			if ints := list.intLane(); ints != nil {
+				cp := make([]int64, len(ints))
+				copy(cp, ints)
+				slices.Sort(cp)
+				return IntArrayValue(cp), nil
+			}
+			if floats := list.floatLane(); floats != nil {
+				cp := make([]float64, len(floats))
+				copy(cp, floats)
+				slices.Sort(cp)
+				return FloatArrayValue(cp), nil
+			}
+			if strs := list.strLane(); strs != nil {
+				n := strs.Len()
+				tmp := make([]string, n)
+				for i := 0; i < n; i++ {
+					tmp[i] = strs.At(i)
+				}
+				slices.Sort(tmp)
+				tape := NewStrTape(n, len(strs.Data))
+				for _, s := range tmp {
+					tape.Append(s)
+				}
+				return StrTapeArrayValue(tape), nil
+			}
 		}
 		src := list.materializeArray()
 		sorted := make([]*Value, len(src))
 		copy(sorted, src)
-		for i := 1; i < len(sorted); i++ {
-			for j := i; j > 0; j-- {
-				cmp := in.compareValues(sorted[j-1], sorted[j])
-				if cmp <= 0 {
-					break
-				}
-				sorted[j-1], sorted[j] = sorted[j], sorted[j-1]
-			}
-		}
+		slices.SortStableFunc(sorted, in.compareValues)
 		return ArrayValue(sorted), nil
 	}
 
@@ -606,13 +767,29 @@ func (in *Interp) registerBuiltins() {
 		if len(args) < 1 || args[0].Type != ValArray {
 			return ArrayValue(nil), nil
 		}
-		if args[0].Ints != nil && args[0].ArrayVal == nil {
-			src := args[0].Ints
-			res := make([]int64, len(src))
-			for i, n := range src {
-				res[len(src)-1-i] = n
+		if args[0].ArrayVal == nil {
+			if src := args[0].intLane(); src != nil {
+				res := make([]int64, len(src))
+				for i, n := range src {
+					res[len(src)-1-i] = n
+				}
+				return IntArrayValue(res), nil
 			}
-			return IntArrayValue(res), nil
+			if src := args[0].floatLane(); src != nil {
+				res := make([]float64, len(src))
+				for i, f := range src {
+					res[len(src)-1-i] = f
+				}
+				return FloatArrayValue(res), nil
+			}
+			if src := args[0].strLane(); src != nil {
+				n := src.Len()
+				tape := NewStrTape(n, len(src.Data))
+				for i := n - 1; i >= 0; i-- {
+					tape.Append(src.At(i))
+				}
+				return StrTapeArrayValue(tape), nil
+			}
 		}
 		src := args[0].ArrayVal
 		result := make([]*Value, len(src))
@@ -636,17 +813,22 @@ func (in *Interp) registerBuiltins() {
 			callable = args[0]
 			list = args[1]
 		}
-		if list.Type != ValArray || list.arrayLen() == 0 {
+		n := list.arrayLen()
+		if list.Type != ValArray || n == 0 {
 			return NilValue(), nil
 		}
-		elems := list.materializeArray()
-		acc := elems[0]
-		for i := 1; i < len(elems); i++ {
-			val, err := in.InvokeCallable(callable, []*Value{acc, elems[i]})
+		var twoArgs [2]*Value
+		acc := escapeValue(list.arrayAt(0))
+		for i := 1; i < n; i++ {
+			tMark := in.ds.markTemp()
+			twoArgs[0] = acc
+			twoArgs[1] = list.arrayAt(i)
+			val, err := in.InvokeCallable(callable, twoArgs[:])
 			if err != nil {
+				in.ds.rewindTemp(tMark)
 				return nil, err
 			}
-			acc = val
+			acc = in.promoteReturn(val, tMark)
 		}
 		return acc, nil
 	}
@@ -1129,45 +1311,6 @@ func (in *Interp) registerBuiltins() {
 		return StringValue(strings.TrimRight(args[0].String(), " \t\r\n")), nil
 	}
 
-	in.Builtins["split"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 2 {
-			return ArrayValue(nil), nil
-		}
-		sep := args[0].String()
-		str := args[1].String()
-		parts := strings.Split(str, sep)
-		var list []*Value
-		for _, p := range parts {
-			list = append(list, StringValue(p))
-		}
-		return ArrayValue(list), nil
-	}
-
-	in.Builtins["join"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 2 {
-			return StringValue(""), nil
-		}
-		sep := args[0].String()
-		if args[1].Type == ValArray && args[1].Ints != nil && args[1].ArrayVal == nil {
-			strParts := make([]string, len(args[1].Ints))
-			for i, n := range args[1].Ints {
-				strParts[i] = fmt.Sprintf("%d", n)
-			}
-			return StringValue(strings.Join(strParts, sep)), nil
-		}
-		var list []*Value
-		if args[1].Type == ValArray {
-			list = args[1].ArrayVal
-		} else {
-			list = args[1:]
-		}
-		var strParts []string
-		for _, v := range list {
-			strParts = append(strParts, v.String())
-		}
-		return StringValue(strings.Join(strParts, sep)), nil
-	}
-
 	in.Builtins["replace"] = func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) < 3 {
 			return StringValue(""), nil
@@ -1227,57 +1370,6 @@ func (in *Interp) registerBuiltins() {
 	}
 
 	// Array / List Operations
-	in.Builtins["push"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 2 || args[0].Type != ValArray {
-			return NilValue(), nil
-		}
-		for _, x := range args[1:] {
-			args[0].pushValue(x)
-		}
-		return IntValue(int64(args[0].arrayLen())), nil
-	}
-
-	in.Builtins["pop"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValArray || args[0].arrayLen() == 0 {
-			return NilValue(), nil
-		}
-		arr := args[0]
-		if arr.Ints != nil && arr.ArrayVal == nil {
-			lastIdx := len(arr.Ints) - 1
-			last := IntValue(arr.Ints[lastIdx])
-			arr.Ints = arr.Ints[:lastIdx]
-			return last, nil
-		}
-		last := arr.ArrayVal[len(arr.ArrayVal)-1]
-		arr.ArrayVal = arr.ArrayVal[:len(arr.ArrayVal)-1]
-		return last, nil
-	}
-
-	in.Builtins["shift"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValArray || args[0].arrayLen() == 0 {
-			return NilValue(), nil
-		}
-		arr := args[0]
-		if arr.Ints != nil && arr.ArrayVal == nil {
-			first := IntValue(arr.Ints[0])
-			arr.Ints = arr.Ints[1:]
-			return first, nil
-		}
-		first := arr.ArrayVal[0]
-		arr.ArrayVal = arr.ArrayVal[1:]
-		return first, nil
-	}
-
-	in.Builtins["unshift"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 2 || args[0].Type != ValArray {
-			return NilValue(), nil
-		}
-		args[0].materializeArray()
-		items := append([]*Value(nil), args[1:]...)
-		args[0].ArrayVal = append(items, args[0].ArrayVal...)
-		return IntValue(int64(len(args[0].ArrayVal))), nil
-	}
-
 	in.Builtins["splice"] = func(in *Interp, args []*Value) (*Value, error) {
 		if len(args) < 1 || args[0].Type != ValArray {
 			return ArrayValue(nil), nil
@@ -1349,10 +1441,25 @@ func (in *Interp) registerBuiltins() {
 		if len(args) < 1 || args[0].Type != ValArray || args[0].arrayLen() == 0 {
 			return ArrayValue(nil), nil
 		}
-		if args[0].Ints != nil && args[0].ArrayVal == nil {
-			cp := make([]int64, len(args[0].Ints)-1)
-			copy(cp, args[0].Ints[1:])
-			return IntArrayValue(cp), nil
+		if args[0].ArrayVal == nil {
+			if ints := args[0].intLane(); ints != nil {
+				cp := make([]int64, len(ints)-1)
+				copy(cp, ints[1:])
+				return IntArrayValue(cp), nil
+			}
+			if floats := args[0].floatLane(); floats != nil {
+				cp := make([]float64, len(floats)-1)
+				copy(cp, floats[1:])
+				return FloatArrayValue(cp), nil
+			}
+			if strs := args[0].strLane(); strs != nil {
+				n := strs.Len()
+				tape := NewStrTape(n-1, len(strs.Data))
+				for i := 1; i < n; i++ {
+					tape.Append(strs.At(i))
+				}
+				return StrTapeArrayValue(tape), nil
+			}
 		}
 		return ArrayValue(append([]*Value(nil), args[0].ArrayVal[1:]...)), nil
 	}
@@ -1373,11 +1480,18 @@ func (in *Interp) registerBuiltins() {
 		if list.Type != ValArray {
 			return NilValue(), nil
 		}
-		for _, item := range list.materializeArray() {
-			res, err := in.InvokeCallable(callable, []*Value{item})
+		var oneArg [1]*Value
+		n := list.arrayLen()
+		for i := 0; i < n; i++ {
+			tMark := in.ds.markTemp()
+			item := list.arrayAt(i)
+			oneArg[0] = item
+			res, err := in.InvokeCallable(callable, oneArg[:])
 			if err == nil && res.IsTrue() {
+				in.ds.rewindTemp(tMark)
 				return item, nil
 			}
+			in.ds.rewindTemp(tMark)
 		}
 		return NilValue(), nil
 	}

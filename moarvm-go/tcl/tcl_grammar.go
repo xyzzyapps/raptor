@@ -26,12 +26,6 @@ func GetTclGrammar() (*gcre.Grammar, error) {
 	return cachedTclGrammar, nil
 }
 
-// TclCmd represents a parsed AST command.
-type TclCmd struct {
-	Name string
-	Args []string
-}
-
 // ParseTclWithGrammar parses and executes Tcl scripts using the Grammar engine.
 func ParseTclWithGrammar(in *Interp, script string) (string, error) {
 	g, err := GetTclGrammar()

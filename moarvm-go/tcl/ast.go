@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"gcre"
 	"strings"
-	"unicode"
 )
 
 // WordKind classifies a parsed Tcl word.
@@ -142,12 +141,4 @@ func trimWS(s string) string {
 		j--
 	}
 	return s[i:j]
-}
-
-func (w Word) isIdentStart() bool {
-	if w.Inner == "" {
-		return false
-	}
-	r := rune(w.Inner[0])
-	return unicode.IsLetter(r) || r == '_'
 }

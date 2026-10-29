@@ -163,19 +163,6 @@ func clip(s string, n int) string {
 	return s[:n] + "..."
 }
 
-func firstNamed(m *gcre.Match, names ...string) (*gcre.Match, string) {
-	if m == nil {
-		return nil, ""
-	}
-	for _, n := range names {
-		sub := m.Get(n)
-		if sub != nil && sub.Ok {
-			return sub, n
-		}
-	}
-	return nil, ""
-}
-
 func walkStatement(m *gcre.Match) Stmt {
 	if m == nil || !m.Ok {
 		return nil
@@ -258,7 +245,7 @@ func walkStatement(m *gcre.Match) Stmt {
 		st := strings.TrimSpace(s.Str)
 		for _, k := range []string{"PROPERTY", "SUBTEST", "INVARIANT", "ASSERT", "CHECK", "TEST", "PRE", "POST"} {
 			if strings.HasPrefix(st, k+" ") || strings.HasPrefix(st, k+"{") || strings.HasPrefix(st, k+"\t") || st == k {
-				kind = verifyKind(k)
+				kind = k
 				break
 			}
 		}
@@ -284,17 +271,6 @@ func walkStatement(m *gcre.Match) Stmt {
 			Body:    walkBlock(s.Get("block")),
 			Message: msg,
 		}
-	}
-	if s := m.Get("assert_stmt"); s != nil && s.Ok {
-		exprs := s.GetAll("expression")
-		var cond, msg Expr
-		if len(exprs) > 0 {
-			cond = walkExpr(exprs[0])
-		}
-		if len(exprs) > 1 {
-			msg = walkExpr(exprs[1])
-		}
-		return &AssertStmt{Condition: cond, Message: msg}
 	}
 	if s := m.Get("use_stmt"); s != nil && s.Ok {
 		mod := ""
@@ -716,33 +692,75 @@ func walkEnum(m *gcre.Match) Stmt {
 	return &EnumDeclStmt{Name: en, Values: vals}
 }
 
+func parseRawGrammarDecl(raw string, line int) (*GrammarDeclStmt, error) {
+	defs, err := gcre.ParseGrammarDefs(raw)
+	if err != nil || len(defs) == 0 {
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %w", line, err)
+		}
+		return nil, fmt.Errorf("line %d: invalid grammar declaration", line)
+	}
+	def := defs[len(defs)-1]
+	bodies := extractRuleBodies(raw)
+	var rules []RuleDecl
+	for _, r := range def.Rules {
+		kind := "rule"
+		if r.IsToken {
+			kind = "token"
+		}
+		pat := bodies[r.Name]
+		if pat == "" && r.Sym != "" {
+			pat = r.Sym
+		}
+		rules = append(rules, RuleDecl{
+			Kind:    kind,
+			Name:    r.Name,
+			Pattern: pat,
+		})
+	}
+	return &GrammarDeclStmt{
+		Name:   def.Name,
+		Parent: def.Parent,
+		Source: raw,
+		Rules:  rules,
+	}, nil
+}
+
+func extractRuleBodies(raw string) map[string]string {
+	out := make(map[string]string)
+	// Best-effort extraction of top-level rule/token/regex bodies for hash introspection
+	lines := strings.Split(raw, "\n")
+	for _, ln := range lines {
+		s := strings.TrimSpace(ln)
+		for _, kw := range []string{"multi token ", "multi rule ", "multi regex ", "token ", "rule ", "regex "} {
+			if strings.HasPrefix(s, kw) {
+				rest := strings.TrimSpace(s[len(kw):])
+				if bi := strings.Index(rest, "{"); bi > 0 {
+					head := strings.Fields(rest[:bi])
+					if len(head) > 0 {
+						rName := head[0]
+						body := rest[bi+1:]
+						if end := strings.LastIndex(body, "}"); end >= 0 {
+							out[rName] = strings.TrimSpace(body[:end])
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+	return out
+}
+
 func walkGrammarDecl(m *gcre.Match) Stmt {
+	if stmt, err := parseRawGrammarDecl(m.Str, 0); err == nil {
+		return stmt
+	}
 	name := ""
 	if n := m.Get("name"); n != nil && n.Ok {
 		name = n.Str
 	}
-	var rules []RuleDecl
-	for _, r := range m.GetAll("g_rule") {
-		kind := "token"
-		st := strings.TrimSpace(r.Str)
-		for _, k := range []string{"token", "rule", "regex"} {
-			if strings.HasPrefix(st, k) {
-				kind = k
-				break
-			}
-		}
-		rn := ""
-		if n := r.Get("name"); n != nil && n.Ok {
-			rn = n.Str
-		}
-		pat := r.Str
-		if i := strings.Index(pat, "{"); i >= 0 {
-			pat = strings.TrimSpace(pat[i+1:])
-			pat = strings.TrimSuffix(pat, "}")
-		}
-		rules = append(rules, RuleDecl{Kind: kind, Name: rn, Pattern: strings.TrimSpace(pat)})
-	}
-	return &GrammarDeclStmt{Name: name, Rules: rules}
+	return &GrammarDeclStmt{Name: name, Source: m.Str}
 }
 
 func walkBlock(m *gcre.Match) *BlockStmt {

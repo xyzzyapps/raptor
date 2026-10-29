@@ -68,7 +68,14 @@ func valueToInterface(v *Value) any {
 	case ValString:
 		return v.StrVal
 	case ValArray:
-		var list []any
+		if v.Ints != nil && v.ArrayVal == nil {
+			list := make([]any, len(v.Ints))
+			for i, n := range v.Ints {
+				list[i] = n
+			}
+			return list
+		}
+		list := make([]any, 0, len(v.ArrayVal))
 		for _, elem := range v.ArrayVal {
 			list = append(list, valueToInterface(elem))
 		}

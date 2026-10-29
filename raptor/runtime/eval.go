@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"unsafe"
+
+	"gcre"
 )
 
 // ReturnSignal unwinds the stack upon reaching 'return'.
@@ -61,9 +63,10 @@ type Interp struct {
 	CustomPrefixOps map[string]*Value
 	Packages        map[string]map[string]*Value
 	CurrentPackage  string
-	StateVars       map[Stmt]*StateCell
-	Grammars        map[string]*GrammarDeclStmt
-	CurrentEnv      *Env
+	StateVars        map[Stmt]*StateCell
+	Grammars         map[string]*GrammarDeclStmt
+	CompiledGrammars map[string]*gcre.Grammar
+	CurrentEnv       *Env
 }
 
 // BuiltinFunc is a standard library function signature in Raku5.
@@ -84,8 +87,9 @@ func NewInterp() *Interp {
 		CustomPrefixOps: make(map[string]*Value),
 		Packages:        make(map[string]map[string]*Value),
 		CurrentPackage:  "main",
-		StateVars:       make(map[Stmt]*StateCell),
-		Grammars:        make(map[string]*GrammarDeclStmt),
+		StateVars:        make(map[Stmt]*StateCell),
+		Grammars:         make(map[string]*GrammarDeclStmt),
+		CompiledGrammars: make(map[string]*gcre.Grammar),
 	}
 	in.Packages["main"] = make(map[string]*Value)
 	in.registerBuiltins()
@@ -124,8 +128,14 @@ func NewInterp() *Interp {
 		var sum float64
 		for _, a := range args {
 			if a.Type == ValArray {
-				for _, e := range a.ArrayVal {
-					sum += in.toFloat(e)
+				if a.Ints != nil && a.ArrayVal == nil {
+					for _, n := range a.Ints {
+						sum += float64(n)
+					}
+				} else {
+					for _, e := range a.ArrayVal {
+						sum += in.toFloat(e)
+					}
 				}
 			} else {
 				sum += in.toFloat(a)
@@ -140,8 +150,14 @@ func NewInterp() *Interp {
 		prod := 1.0
 		for _, a := range args {
 			if a.Type == ValArray {
-				for _, e := range a.ArrayVal {
-					prod *= in.toFloat(e)
+				if a.Ints != nil && a.ArrayVal == nil {
+					for _, n := range a.Ints {
+						prod *= float64(n)
+					}
+				} else {
+					for _, e := range a.ArrayVal {
+						prod *= in.toFloat(e)
+					}
 				}
 			} else {
 				prod *= in.toFloat(a)
@@ -423,9 +439,40 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 		if in.Grammars == nil {
 			in.Grammars = make(map[string]*GrammarDeclStmt)
 		}
+		if in.CompiledGrammars == nil {
+			in.CompiledGrammars = make(map[string]*gcre.Grammar)
+		}
 		in.Grammars[s.Name] = s
+		rawSrc := s.Source
+		if rawSrc == "" {
+			var sb strings.Builder
+			sb.WriteString("grammar ")
+			sb.WriteString(s.Name)
+			if s.Parent != "" {
+				sb.WriteString(" is ")
+				sb.WriteString(s.Parent)
+			}
+			sb.WriteString(" {\n")
+			for _, r := range s.Rules {
+				sb.WriteString("    ")
+				sb.WriteString(r.Kind)
+				sb.WriteString(" ")
+				sb.WriteString(r.Name)
+				sb.WriteString(" { ")
+				sb.WriteString(r.Pattern)
+				sb.WriteString(" }\n")
+			}
+			sb.WriteString("}\n")
+			rawSrc = sb.String()
+		}
+		if cg, err := gcre.LoadGrammarWithParents(rawSrc, in.CompiledGrammars); err == nil && cg != nil {
+			in.CompiledGrammars[s.Name] = cg
+		}
 		grammarHash := make(map[string]*Value)
 		grammarHash["name"] = StringValue(s.Name)
+		if s.Parent != "" {
+			grammarHash["parent"] = StringValue(s.Parent)
+		}
 		for _, r := range s.Rules {
 			grammarHash[r.Name] = StringValue(r.Pattern)
 		}
@@ -758,6 +805,8 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			list := []*Value{iterVal}
 			if iterVal.Type == ValArray {
 				list = iterVal.materializeArray()
+			} else if iterVal.Type == ValLazySeq && iterVal.LazySeqVal != nil {
+				list = iterVal.LazySeqVal.Items
 			}
 			for _, item := range list {
 				stop, err := runItem(item)
@@ -983,11 +1032,11 @@ func (in *Interp) evalStmt(stmt Stmt, env *Env) (*Value, error) {
 			}
 			var items []*Value
 			if iterVal.Type == ValArray {
-				items = iterVal.ArrayVal
+				items = iterVal.materializeArray()
 			} else if iterVal.Type == ValLazySeq && iterVal.LazySeqVal != nil {
 				items = iterVal.LazySeqVal.Items
 			} else if iterVal.Type == ValRef && iterVal.RefVal != nil && iterVal.RefVal.Type == ValArray {
-				items = iterVal.RefVal.ArrayVal
+				items = iterVal.RefVal.materializeArray()
 			} else {
 				items = []*Value{iterVal}
 			}
@@ -1251,6 +1300,9 @@ func (in *Interp) tryInPlaceAssign(s *AssignStmt, env *Env) (*Value, bool, error
 	if !ok {
 		return nil, false, nil
 	}
+	if tName, wExpr, ok := env.LookupType(ve.Name); ok && (tName != "" || wExpr != nil) {
+		return nil, false, nil
+	}
 	cur, has := env.Lookup(ve.Name)
 
 	// $n += $k / $n += 1 — mutate a unique int box.
@@ -1414,6 +1466,15 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 		if err != nil {
 			return nil, err
 		}
+		if arrVal.Type == ValNil {
+			if ve, ok := t.Array.(*VarExpr); ok && strings.HasPrefix(ve.Name, "$") {
+				if _, hasS := env.Lookup(ve.Name); !hasS {
+					if av, hasA := env.Lookup("@" + ve.Name[1:]); hasA {
+						arrVal = av
+					}
+				}
+			}
+		}
 		if arrVal.Type != ValArray {
 			return nil, fmt.Errorf("cannot index non-array type %s", arrVal.TypeName())
 		}
@@ -1428,6 +1489,23 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 		}
 		if idx < 0 {
 			return nil, fmt.Errorf("array index out of bounds: %d", idx)
+		}
+		if op != "=" {
+			var cur *Value = NilValue()
+			if idx < n {
+				cur = arrVal.arrayAt(idx)
+			}
+			if op == "//=" {
+				if cur.Type != ValNil {
+					return cur, nil
+				}
+			} else {
+				newVal, err := in.evalBinaryOp(cur, op[:len(op)-1], val)
+				if err != nil {
+					return nil, err
+				}
+				val = newVal
+			}
 		}
 		if arrVal.Ints != nil && arrVal.ArrayVal == nil && val.Type == ValInt {
 			for len(arrVal.Ints) <= idx {
@@ -1448,6 +1526,15 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 		if err != nil {
 			return nil, err
 		}
+		if hashVal.Type == ValNil {
+			if ve, ok := t.Hash.(*VarExpr); ok && strings.HasPrefix(ve.Name, "$") {
+				if _, hasS := env.Lookup(ve.Name); !hasS {
+					if hv, hasH := env.Lookup("%" + ve.Name[1:]); hasH {
+						hashVal = hv
+					}
+				}
+			}
+		}
 		if hashVal.Type != ValHash {
 			return nil, fmt.Errorf("cannot access non-hash type %s", hashVal.TypeName())
 		}
@@ -1455,9 +1542,26 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 		if err != nil {
 			return nil, err
 		}
-		k := keyVal.StrVal
+		k := keyVal.String()
 		if hashVal.HashVal == nil {
 			hashVal.HashVal = make(map[string]*Value)
+		}
+		if op != "=" {
+			cur, exists := hashVal.HashVal[k]
+			if !exists {
+				cur = NilValue()
+			}
+			if op == "//=" {
+				if cur.Type != ValNil {
+					return cur, nil
+				}
+			} else {
+				newVal, err := in.evalBinaryOp(cur, op[:len(op)-1], val)
+				if err != nil {
+					return nil, err
+				}
+				val = newVal
+			}
 		}
 		hashVal.HashVal[k] = val
 		return val, nil
@@ -1495,6 +1599,7 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 			if err != nil {
 				return nil, err
 			}
+			arrVal.materializeArray()
 			idx := int(in.toInt(idxVal))
 			if idx < 0 {
 				idx = len(arrVal.ArrayVal) + idx
@@ -1529,7 +1634,7 @@ func (in *Interp) evalAssign(target Expr, op string, val *Value, env *Env) (*Val
 			if err != nil {
 				return nil, err
 			}
-			k := keyVal.StrVal
+			k := keyVal.String()
 			if hashVal.HashVal == nil {
 				hashVal.HashVal = make(map[string]*Value)
 			}
@@ -1654,13 +1759,12 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 				}
 			}
 		}
-		if builtin, ok := in.Builtins[e.Name]; ok {
+		if _, ok := in.Builtins[e.Name]; ok {
 			return ClosureValue(&Closure{
 				Name: e.Name,
 				Body: &BlockStmt{},
 				Env:  env,
 			}), nil
-			_ = builtin
 		}
 		if !strings.HasPrefix(e.Name, "$") && !strings.HasPrefix(e.Name, "@") && !strings.HasPrefix(e.Name, "%") && !strings.HasPrefix(e.Name, "&") {
 			return StringValue(e.Name), nil
@@ -1750,13 +1854,14 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 				return nil, err
 			}
 			idx := int(in.toInt(idxVal))
+			n := arrVal.arrayLen()
 			if idx < 0 {
-				idx = len(arrVal.ArrayVal) + idx
+				idx = n + idx
 			}
-			if idx < 0 || idx >= len(arrVal.ArrayVal) {
+			if idx < 0 || idx >= n {
 				return NilValue(), nil
 			}
-			return arrVal.ArrayVal[idx], nil
+			return arrVal.arrayAt(idx), nil
 
 		case DerefArrowHash:
 			hashVal := refVal
@@ -1770,7 +1875,7 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			k := keyVal.StrVal
+			k := keyVal.String()
 			if hashVal.HashVal == nil {
 				return NilValue(), nil
 			}
@@ -1802,7 +1907,7 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		if v, ok := in.evalBinaryFast(e, env); ok {
 			return v, nil
 		}
-		if e.Op == "//" {
+		if e.Op == "//" || e.Op == "orelse" {
 			lVal, err := in.evalExpr(e.Left, env)
 			if err != nil {
 				return nil, err
@@ -1849,10 +1954,15 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			return nil, err
 		}
 		if rVal.Type == ValJunction && rVal.JunctionVal != nil {
+			// Boolean context coercions collapse a Junction to a single Bool.
+			if e.Op == "?" || e.Op == "so" {
+				return BoolValue(rVal.IsTrue()), nil
+			}
+			if e.Op == "!" || e.Op == "not" {
+				return BoolValue(!rVal.IsTrue()), nil
+			}
 			var results []*Value
 			for _, elem := range rVal.JunctionVal.Values {
-				subU := &UnaryExpr{Op: e.Op, Right: &LiteralExpr{Type: TokString, Value: ""}}
-				_ = subU
 				res, err := in.evalUnaryOp(e.Op, elem, env)
 				if err != nil {
 					return nil, err
@@ -1885,7 +1995,7 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 			if err != nil {
 				return nil, err
 			}
-			m[kVal.StrVal] = vVal
+			m[kVal.String()] = vVal
 		}
 		return HashValue(m), nil
 
@@ -1893,6 +2003,15 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		arrVal, err := in.evalExpr(e.Array, env)
 		if err != nil {
 			return nil, err
+		}
+		if arrVal.Type == ValNil {
+			if ve, ok := e.Array.(*VarExpr); ok && strings.HasPrefix(ve.Name, "$") {
+				if _, hasS := env.Lookup(ve.Name); !hasS {
+					if av, hasA := env.Lookup("@" + ve.Name[1:]); hasA {
+						arrVal = av
+					}
+				}
+			}
 		}
 		idxVal, err := in.evalExpr(e.Index, env)
 		if err != nil {
@@ -1921,6 +2040,15 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		if hVal.Type == ValNil {
+			if ve, ok := e.Hash.(*VarExpr); ok && strings.HasPrefix(ve.Name, "$") {
+				if _, hasS := env.Lookup(ve.Name); !hasS {
+					if hv, hasH := env.Lookup("%" + ve.Name[1:]); hasH {
+						hVal = hv
+					}
+				}
+			}
+		}
 		kVal, err := in.evalExpr(e.Key, env)
 		if err != nil {
 			return nil, err
@@ -1936,7 +2064,7 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		if hVal.Type != ValHash || hVal.HashVal == nil {
 			return NilValue(), nil
 		}
-		if val, ok := hVal.HashVal[kVal.StrVal]; ok {
+		if val, ok := hVal.HashVal[kVal.String()]; ok {
 			return val, nil
 		}
 
@@ -2146,6 +2274,13 @@ func (in *Interp) evalExpr(expr Expr, env *Env) (*Value, error) {
 		}
 
 		if invocantVal.Type == ValHash && invocantVal.HashVal != nil {
+			if (e.Method == "parse" || e.Method == "subparse") && len(e.Args) >= 1 {
+				if nv, ok := invocantVal.HashVal["name"]; ok && nv != nil && nv.Type == ValString {
+					if cg, exists := in.CompiledGrammars[nv.StrVal]; exists && cg != nil {
+						return in.evalGrammarParse(cg, e.Method == "parse", e.Args, env)
+					}
+				}
+			}
 			if v, ok := invocantVal.HashVal[e.Method]; ok && len(e.Args) == 0 {
 				return v, nil
 			}
@@ -2536,7 +2671,7 @@ func (in *Interp) InvokeCallable(callee *Value, args []*Value) (*Value, error) {
 		if len(p.DestructArr) > 0 && (argVal.Type == ValArray || argVal.Type == ValLazySeq) {
 			var elements []*Value
 			if argVal.Type == ValArray {
-				elements = argVal.ArrayVal
+				elements = argVal.materializeArray()
 			} else if argVal.LazySeqVal != nil {
 				elements = argVal.LazySeqVal.Items
 			}
@@ -2750,7 +2885,7 @@ func (in *Interp) evalBinaryFast(e *BinaryExpr, env *Env) (*Value, bool) {
 		case "!=":
 			return BoolValue(li != ri), true
 		}
-	case "eq", "ne", "lt", "gt":
+	case "eq", "ne", "lt", "gt", "le", "ge":
 		if left.Type != ValString {
 			return nil, false
 		}
@@ -2780,6 +2915,10 @@ func (in *Interp) evalBinaryFast(e *BinaryExpr, env *Env) (*Value, bool) {
 			return BoolValue(ls < rs), true
 		case "gt":
 			return BoolValue(ls > rs), true
+		case "le":
+			return BoolValue(ls <= rs), true
+		case "ge":
+			return BoolValue(ls >= rs), true
 		}
 	}
 	return nil, false
@@ -2827,7 +2966,7 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 	switch op {
 	case "∈": // is element of
 		if right.Type == ValArray {
-			for _, item := range right.ArrayVal {
+			for _, item := range right.materializeArray() {
 				if in.smartMatch(left, item) {
 					return BoolValue(true), nil
 				}
@@ -2836,7 +2975,7 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 		}
 	case "∉": // is not element of
 		if right.Type == ValArray {
-			for _, item := range right.ArrayVal {
+			for _, item := range right.materializeArray() {
 				if in.smartMatch(left, item) {
 					return BoolValue(false), nil
 				}
@@ -2846,8 +2985,9 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 	case "∩": // set intersection
 		if left.Type == ValArray && right.Type == ValArray {
 			var inter []*Value
-			for _, a := range left.ArrayVal {
-				for _, b := range right.ArrayVal {
+			rItems := right.materializeArray()
+			for _, a := range left.materializeArray() {
+				for _, b := range rItems {
 					if in.smartMatch(a, b) {
 						inter = append(inter, a)
 						break
@@ -2860,14 +3000,14 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 		if left.Type == ValArray && right.Type == ValArray {
 			unionMap := make(map[string]*Value)
 			var unionList []*Value
-			for _, a := range left.ArrayVal {
+			for _, a := range left.materializeArray() {
 				s := a.String()
 				if _, ok := unionMap[s]; !ok {
 					unionMap[s] = a
 					unionList = append(unionList, a)
 				}
 			}
-			for _, b := range right.ArrayVal {
+			for _, b := range right.materializeArray() {
 				s := b.String()
 				if _, ok := unionMap[s]; !ok {
 					unionMap[s] = b
@@ -2909,11 +3049,36 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 	case "**":
 		return FloatValue(math.Pow(in.toFloat(left), in.toFloat(right))), nil
 
-	case "//":
+	case "//", "orelse":
 		if left.Type != ValNil {
 			return left, nil
 		}
 		return right, nil
+
+	case "xor":
+		return BoolValue(left.IsTrue() != right.IsTrue()), nil
+
+	case "<=>":
+		lf := in.toFloat(left)
+		rf := in.toFloat(right)
+		if lf < rf {
+			return IntValue(-1), nil
+		}
+		if lf > rf {
+			return IntValue(1), nil
+		}
+		return IntValue(0), nil
+
+	case "cmp":
+		ls := left.String()
+		rs := right.String()
+		if ls < rs {
+			return IntValue(-1), nil
+		}
+		if ls > rs {
+			return IntValue(1), nil
+		}
+		return IntValue(0), nil
 
 	case "+&":
 		return IntValue(in.toInt(left) & in.toInt(right)), nil
@@ -3006,6 +3171,10 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 		return BoolValue(left.String() < right.String()), nil
 	case "gt":
 		return BoolValue(left.String() > right.String()), nil
+	case "le":
+		return BoolValue(left.String() <= right.String()), nil
+	case "ge":
+		return BoolValue(left.String() >= right.String()), nil
 	case "~~":
 		return BoolValue(in.smartMatch(left, right)), nil
 
@@ -3025,8 +3194,9 @@ func (in *Interp) evalBinaryOp(left *Value, op string, right *Value) (*Value, er
 		}
 		var list []*Value
 		if left.Type == ValArray {
+			elems := left.materializeArray()
 			for c := 0; c < count; c++ {
-				list = append(list, left.ArrayVal...)
+				list = append(list, elems...)
 			}
 		} else {
 			for c := 0; c < count; c++ {
@@ -3103,7 +3273,7 @@ func (in *Interp) evalUnaryOp(op string, rVal *Value, env *Env) (*Value, error) 
 			}
 			return IntValue(0), nil
 		case ValArray:
-			return IntValue(int64(len(rVal.ArrayVal))), nil
+			return IntValue(int64(rVal.arrayLen())), nil
 		case ValHash:
 			return IntValue(int64(len(rVal.HashVal))), nil
 		case ValLazySeq:
@@ -3133,6 +3303,13 @@ func (in *Interp) evalUnaryOp(op string, rVal *Value, env *Env) (*Value, error) 
 		case ValNil:
 			return StringValue(""), nil
 		case ValArray:
+			if rVal.Ints != nil && rVal.ArrayVal == nil {
+				parts := make([]string, len(rVal.Ints))
+				for i, n := range rVal.Ints {
+					parts[i] = strconv.FormatInt(n, 10)
+				}
+				return StringValue(strings.Join(parts, " ")), nil
+			}
 			parts := make([]string, len(rVal.ArrayVal))
 			for i, v := range rVal.ArrayVal {
 				parts[i] = v.String()
@@ -3235,32 +3412,6 @@ func (in *Interp) toFloat(v *Value) float64 {
 	}
 }
 
-func (in *Interp) interpolateString(template string, env *Env) string {
-	var sb strings.Builder
-	runes := []rune(template)
-	n := len(runes)
-	i := 0
-	for i < n {
-		if (runes[i] == '$' || runes[i] == '@' || runes[i] == '%') && i+1 < n && (runes[i+1] == '_' || runes[i+1] == '*' || (runes[i+1] >= 'a' && runes[i+1] <= 'z') || (runes[i+1] >= 'A' && runes[i+1] <= 'Z')) {
-			sigil := runes[i]
-			i++
-			var varName strings.Builder
-			varName.WriteRune(sigil)
-			for i < n && (runes[i] == '_' || runes[i] == '*' || (runes[i] >= 'a' && runes[i] <= 'z') || (runes[i] >= 'A' && runes[i] <= 'Z') || (runes[i] >= '0' && runes[i] <= '9')) {
-				varName.WriteRune(runes[i])
-				i++
-			}
-			if val, ok := env.Lookup(varName.String()); ok {
-				sb.WriteString(val.String())
-			}
-			continue
-		}
-		sb.WriteRune(runes[i])
-		i++
-	}
-	return sb.String()
-}
-
 func (in *Interp) readCStructField(inst *CStructInstance, f CStructField) (*Value, error) {
 	if inst.Closures != nil {
 		if cVal, ok := inst.Closures[f.Name]; ok {
@@ -3358,4 +3509,83 @@ func extractRawOperatorName(name string) string {
 	norm = strings.TrimPrefix(norm, "prefix:")
 	norm = strings.TrimPrefix(norm, "postfix:")
 	return norm
+}
+
+func (in *Interp) evalGrammarParse(cg *gcre.Grammar, requireFull bool, argExprs []Expr, env *Env) (*Value, error) {
+	inVal, err := in.evalExpr(argExprs[0], env)
+	if err != nil {
+		return nil, err
+	}
+	inputStr := inVal.String()
+	ruleName := "TOP"
+	if len(argExprs) >= 2 {
+		rVal, err := in.evalExpr(argExprs[1], env)
+		if err != nil {
+			return nil, err
+		}
+		if rVal.Type == ValHash && rVal.HashVal != nil {
+			if rv, ok := rVal.HashVal["rule"]; ok && rv != nil {
+				ruleName = rv.String()
+			}
+		} else if s := rVal.String(); s != "" {
+			ruleName = s
+		}
+	}
+
+	m, parseErr := cg.ParseRule(ruleName, inputStr, nil)
+	if parseErr != nil || m == nil || !m.Ok {
+		env.Define("$/", NilValue())
+		in.GlobalEnv.Define("$/", NilValue())
+		return NilValue(), nil
+	}
+
+	if requireFull {
+		runes := []rune(inputStr)
+		rem := strings.TrimSpace(string(runes[m.To:]))
+		if rem != "" {
+			env.Define("$/", NilValue())
+			in.GlobalEnv.Define("$/", NilValue())
+			return NilValue(), nil
+		}
+	}
+
+	res := gcreMatchToValue(m)
+	env.Define("$/", res)
+	in.GlobalEnv.Define("$/", res)
+	return res, nil
+}
+
+func gcreMatchToValue(m *gcre.Match) *Value {
+	if m == nil || !m.Ok {
+		return NilValue()
+	}
+	h := make(map[string]*Value)
+	h["Str"] = StringValue(m.Str)
+	h["str"] = StringValue(m.Str)
+	h["from"] = IntValue(int64(m.From))
+	h["to"] = IntValue(int64(m.To))
+	h["ok"] = BoolValue(m.Ok)
+	if m.Rule != "" {
+		h["rule"] = StringValue(m.Rule)
+	}
+	posVals := make([]*Value, len(m.Pos))
+	for i, pm := range m.Pos {
+		pv := gcreMatchToValue(pm)
+		posVals[i] = pv
+		h[strconv.Itoa(i)] = pv
+	}
+	h["pos"] = ArrayValue(posVals)
+
+	for k, list := range m.List {
+		if len(list) == 1 {
+			h[k] = gcreMatchToValue(list[0])
+		} else if len(list) > 1 {
+			elems := make([]*Value, len(list))
+			for i, sm := range list {
+				elems[i] = gcreMatchToValue(sm)
+			}
+			h[k] = ArrayValue(elems)
+		}
+	}
+	return HashValue(h)
 }

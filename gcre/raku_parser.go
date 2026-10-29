@@ -17,819 +17,425 @@ import (
 	"unicode/utf8"
 )
 
+func pegRule(line int, name string, expr any) *rule {
+	return &rule{name: name, pos: position{line: line, col: 1}, expr: expr}
+}
+func pegSeq(exprs ...any) *seqExpr           { return &seqExpr{exprs: exprs} }
+func pegChoice(alts ...any) *choiceExpr      { return &choiceExpr{alternatives: alts} }
+func pegStar(e any) *zeroOrMoreExpr          { return &zeroOrMoreExpr{expr: e} }
+func pegPlus(e any) *oneOrMoreExpr           { return &oneOrMoreExpr{expr: e} }
+func pegOpt(e any) *zeroOrOneExpr            { return &zeroOrOneExpr{expr: e} }
+func pegNot(e any) *notExpr                  { return &notExpr{expr: e} }
+func pegRef(name string) *ruleRefExpr        { return &ruleRefExpr{name: name} }
+func pegLit(val string) *litMatcher          { return &litMatcher{val: val, want: strconv.Quote(val)} }
+func pegAny() *anyMatcher                    { return &anyMatcher{} }
+func pegCC(val string, chars []rune, ranges []rune) *charClassMatcher {
+	return &charClassMatcher{val: val, chars: chars, ranges: ranges}
+}
+
 var g = &grammar{
 	rules: []*rule{
-		{
-			name: "GrammarFile",
-			pos:  position{line: 8, col: 1, offset: 150},
-			expr: &seqExpr{
-				pos: position{line: 8, col: 16, offset: 165},
-				exprs: []any{
-					&ruleRefExpr{
-						pos:  position{line: 8, col: 16, offset: 165},
-						name: "_",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 8, col: 18, offset: 167},
-						name: "GrammarDecl",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 8, col: 30, offset: 179},
-						name: "_",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 8, col: 32, offset: 181},
-						name: "EOF",
-					},
-				},
-			},
-		},
-		{
-			name: "GrammarDecl",
-			pos:  position{line: 10, col: 1, offset: 186},
-			expr: &seqExpr{
-				pos: position{line: 10, col: 16, offset: 201},
-				exprs: []any{
-					&litMatcher{
-						pos:        position{line: 10, col: 16, offset: 201},
-						val:        "grammar",
-						ignoreCase: false,
-						want:       "\"grammar\"",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 10, col: 26, offset: 211},
-						name: "_",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 10, col: 28, offset: 213},
-						name: "NameTok",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 10, col: 36, offset: 221},
-						name: "_",
-					},
-					&litMatcher{
-						pos:        position{line: 10, col: 38, offset: 223},
-						val:        "{",
-						ignoreCase: false,
-						want:       "\"{\"",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 10, col: 42, offset: 227},
-						name: "_",
-					},
-					&zeroOrMoreExpr{
-						pos: position{line: 10, col: 44, offset: 229},
-						expr: &ruleRefExpr{
-							pos:  position{line: 10, col: 44, offset: 229},
-							name: "RuleDecl",
-						},
-					},
-					&ruleRefExpr{
-						pos:  position{line: 10, col: 54, offset: 239},
-						name: "_",
-					},
-					&litMatcher{
-						pos:        position{line: 10, col: 56, offset: 241},
-						val:        "}",
-						ignoreCase: false,
-						want:       "\"}\"",
-					},
-				},
-			},
-		},
-		{
-			name: "RuleDecl",
-			pos:  position{line: 12, col: 1, offset: 246},
-			expr: &seqExpr{
-				pos: position{line: 12, col: 13, offset: 258},
-				exprs: []any{
-					&ruleRefExpr{
-						pos:  position{line: 12, col: 13, offset: 258},
-						name: "RuleKind",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 12, col: 22, offset: 267},
-						name: "_",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 12, col: 24, offset: 269},
-						name: "NameTok",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 12, col: 32, offset: 277},
-						name: "_",
-					},
-					&litMatcher{
-						pos:        position{line: 12, col: 34, offset: 279},
-						val:        "{",
-						ignoreCase: false,
-						want:       "\"{\"",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 12, col: 38, offset: 283},
-						name: "_",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 12, col: 40, offset: 285},
-						name: "RxAlt",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 12, col: 46, offset: 291},
-						name: "_",
-					},
-					&litMatcher{
-						pos:        position{line: 12, col: 48, offset: 293},
-						val:        "}",
-						ignoreCase: false,
-						want:       "\"}\"",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 12, col: 52, offset: 297},
-						name: "_",
-					},
-				},
-			},
-		},
-		{
-			name: "RuleKind",
-			pos:  position{line: 14, col: 1, offset: 300},
-			expr: &choiceExpr{
-				pos: position{line: 14, col: 13, offset: 312},
-				alternatives: []any{
-					&litMatcher{
-						pos:        position{line: 14, col: 13, offset: 312},
-						val:        "token",
-						ignoreCase: false,
-						want:       "\"token\"",
-					},
-					&litMatcher{
-						pos:        position{line: 14, col: 23, offset: 322},
-						val:        "regex",
-						ignoreCase: false,
-						want:       "\"regex\"",
-					},
-					&litMatcher{
-						pos:        position{line: 14, col: 33, offset: 332},
-						val:        "rule",
-						ignoreCase: false,
-						want:       "\"rule\"",
-					},
-				},
-			},
-		},
-		{
-			name: "RxAlt",
-			pos:  position{line: 16, col: 1, offset: 340},
-			expr: &seqExpr{
-				pos: position{line: 16, col: 10, offset: 349},
-				exprs: []any{
-					&zeroOrOneExpr{
-						pos: position{line: 16, col: 10, offset: 349},
-						expr: &seqExpr{
-							pos: position{line: 16, col: 11, offset: 350},
-							exprs: []any{
-								&ruleRefExpr{
-									pos:  position{line: 16, col: 11, offset: 350},
-									name: "_",
-								},
-								&litMatcher{
-									pos:        position{line: 16, col: 13, offset: 352},
-									val:        "|",
-									ignoreCase: false,
-									want:       "\"|\"",
-								},
-							},
-						},
-					},
-					&ruleRefExpr{
-						pos:  position{line: 16, col: 19, offset: 358},
-						name: "_",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 16, col: 21, offset: 360},
-						name: "RxSeq",
-					},
-					&zeroOrMoreExpr{
-						pos: position{line: 16, col: 27, offset: 366},
-						expr: &seqExpr{
-							pos: position{line: 16, col: 28, offset: 367},
-							exprs: []any{
-								&ruleRefExpr{
-									pos:  position{line: 16, col: 28, offset: 367},
-									name: "_",
-								},
-								&litMatcher{
-									pos:        position{line: 16, col: 30, offset: 369},
-									val:        "|",
-									ignoreCase: false,
-									want:       "\"|\"",
-								},
-								&ruleRefExpr{
-									pos:  position{line: 16, col: 34, offset: 373},
-									name: "_",
-								},
-								&ruleRefExpr{
-									pos:  position{line: 16, col: 36, offset: 375},
-									name: "RxSeq",
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "RxSeq",
-			pos:  position{line: 18, col: 1, offset: 384},
-			expr: &seqExpr{
-				pos: position{line: 18, col: 10, offset: 393},
-				exprs: []any{
-					&ruleRefExpr{
-						pos:  position{line: 18, col: 10, offset: 393},
-						name: "RxAtom",
-					},
-					&zeroOrMoreExpr{
-						pos: position{line: 18, col: 17, offset: 400},
-						expr: &seqExpr{
-							pos: position{line: 18, col: 18, offset: 401},
-							exprs: []any{
-								&ruleRefExpr{
-									pos:  position{line: 18, col: 18, offset: 401},
-									name: "_",
-								},
-								&ruleRefExpr{
-									pos:  position{line: 18, col: 20, offset: 403},
-									name: "RxAtom",
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "RxAtom",
-			pos:  position{line: 20, col: 1, offset: 413},
-			expr: &seqExpr{
-				pos: position{line: 20, col: 11, offset: 423},
-				exprs: []any{
-					&ruleRefExpr{
-						pos:  position{line: 20, col: 11, offset: 423},
-						name: "RxPrimary",
-					},
-					&zeroOrOneExpr{
-						pos: position{line: 20, col: 21, offset: 433},
-						expr: &ruleRefExpr{
-							pos:  position{line: 20, col: 21, offset: 433},
-							name: "Quant",
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "Quant",
-			pos:  position{line: 22, col: 1, offset: 441},
-			expr: &choiceExpr{
-				pos: position{line: 22, col: 10, offset: 450},
-				alternatives: []any{
-					&litMatcher{
-						pos:        position{line: 22, col: 10, offset: 450},
-						val:        "*",
-						ignoreCase: false,
-						want:       "\"*\"",
-					},
-					&litMatcher{
-						pos:        position{line: 22, col: 16, offset: 456},
-						val:        "+",
-						ignoreCase: false,
-						want:       "\"+\"",
-					},
-					&litMatcher{
-						pos:        position{line: 22, col: 22, offset: 462},
-						val:        "?",
-						ignoreCase: false,
-						want:       "\"?\"",
-					},
-				},
-			},
-		},
-		{
-			name: "RxPrimary",
-			pos:  position{line: 24, col: 1, offset: 467},
-			expr: &choiceExpr{
-				pos: position{line: 24, col: 14, offset: 480},
-				alternatives: []any{
-					&ruleRefExpr{
-						pos:  position{line: 24, col: 14, offset: 480},
-						name: "RxGroup",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 24, col: 24, offset: 490},
-						name: "RxAngle",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 24, col: 34, offset: 500},
-						name: "RxSq",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 24, col: 41, offset: 507},
-						name: "RxDq",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 24, col: 48, offset: 514},
-						name: "RxEsc",
-					},
-					&litMatcher{
-						pos:        position{line: 24, col: 56, offset: 522},
-						val:        ".",
-						ignoreCase: false,
-						want:       "\".\"",
-					},
-					&litMatcher{
-						pos:        position{line: 24, col: 62, offset: 528},
-						val:        "#",
-						ignoreCase: false,
-						want:       "\"#\"",
-					},
-					&litMatcher{
-						pos:        position{line: 24, col: 68, offset: 534},
-						val:        ";",
-						ignoreCase: false,
-						want:       "\";\"",
-					},
-					&litMatcher{
-						pos:        position{line: 24, col: 74, offset: 540},
-						val:        "$",
-						ignoreCase: false,
-						want:       "\"$\"",
-					},
-				},
-			},
-		},
-		{
-			name: "RxGroup",
-			pos:  position{line: 26, col: 1, offset: 545},
-			expr: &seqExpr{
-				pos: position{line: 26, col: 12, offset: 556},
-				exprs: []any{
-					&litMatcher{
-						pos:        position{line: 26, col: 12, offset: 556},
-						val:        "[",
-						ignoreCase: false,
-						want:       "\"[\"",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 26, col: 16, offset: 560},
-						name: "_",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 26, col: 18, offset: 562},
-						name: "RxAlt",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 26, col: 24, offset: 568},
-						name: "_",
-					},
-					&litMatcher{
-						pos:        position{line: 26, col: 26, offset: 570},
-						val:        "]",
-						ignoreCase: false,
-						want:       "\"]\"",
-					},
-				},
-			},
-		},
-		{
-			name: "RxAngle",
-			pos:  position{line: 28, col: 1, offset: 575},
-			expr: &seqExpr{
-				pos: position{line: 28, col: 12, offset: 586},
-				exprs: []any{
-					&litMatcher{
-						pos:        position{line: 28, col: 12, offset: 586},
-						val:        "<",
-						ignoreCase: false,
-						want:       "\"<\"",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 28, col: 16, offset: 590},
-						name: "DotOpt",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 28, col: 23, offset: 597},
-						name: "AngleBody",
-					},
-					&litMatcher{
-						pos:        position{line: 28, col: 33, offset: 607},
-						val:        ">",
-						ignoreCase: false,
-						want:       "\">\"",
-					},
-				},
-			},
-		},
-		{
-			name: "DotOpt",
-			pos:  position{line: 30, col: 1, offset: 612},
-			expr: &choiceExpr{
-				pos: position{line: 30, col: 11, offset: 622},
-				alternatives: []any{
-					&litMatcher{
-						pos:        position{line: 30, col: 11, offset: 622},
-						val:        ".",
-						ignoreCase: false,
-						want:       "\".\"",
-					},
-					&litMatcher{
-						pos:        position{line: 30, col: 17, offset: 628},
-						val:        "",
-						ignoreCase: false,
-						want:       "\"\"",
-					},
-				},
-			},
-		},
-		{
-			name: "AngleBody",
-			pos:  position{line: 32, col: 1, offset: 632},
-			expr: &choiceExpr{
-				pos: position{line: 32, col: 14, offset: 645},
-				alternatives: []any{
-					&ruleRefExpr{
-						pos:  position{line: 32, col: 14, offset: 645},
-						name: "ClassSpec",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 32, col: 26, offset: 657},
-						name: "NameTok",
-					},
-				},
-			},
-		},
-		{
-			name: "ClassSpec",
-			pos:  position{line: 34, col: 1, offset: 666},
-			expr: &seqExpr{
-				pos: position{line: 34, col: 14, offset: 679},
-				exprs: []any{
-					&zeroOrOneExpr{
-						pos: position{line: 34, col: 14, offset: 679},
-						expr: &litMatcher{
-							pos:        position{line: 34, col: 14, offset: 679},
-							val:        "-",
-							ignoreCase: false,
-							want:       "\"-\"",
-						},
-					},
-					&litMatcher{
-						pos:        position{line: 34, col: 19, offset: 684},
-						val:        "[",
-						ignoreCase: false,
-						want:       "\"[\"",
-					},
-					&ruleRefExpr{
-						pos:  position{line: 34, col: 23, offset: 688},
-						name: "ClassInner",
-					},
-					&litMatcher{
-						pos:        position{line: 34, col: 34, offset: 699},
-						val:        "]",
-						ignoreCase: false,
-						want:       "\"]\"",
-					},
-				},
-			},
-		},
-		{
-			name: "ClassInner",
-			pos:  position{line: 36, col: 1, offset: 704},
-			expr: &zeroOrMoreExpr{
-				pos: position{line: 36, col: 15, offset: 718},
-				expr: &ruleRefExpr{
-					pos:  position{line: 36, col: 15, offset: 718},
-					name: "ClassPart",
-				},
-			},
-		},
-		{
-			name: "ClassPart",
-			pos:  position{line: 38, col: 1, offset: 730},
-			expr: &choiceExpr{
-				pos: position{line: 38, col: 14, offset: 743},
-				alternatives: []any{
-					&seqExpr{
-						pos: position{line: 38, col: 14, offset: 743},
-						exprs: []any{
-							&litMatcher{
-								pos:        position{line: 38, col: 14, offset: 743},
-								val:        "\\",
-								ignoreCase: false,
-								want:       "\"\\\\\"",
-							},
-							&anyMatcher{
-								line: 38, col: 19, offset: 748,
-							},
-						},
-					},
-					&seqExpr{
-						pos: position{line: 38, col: 23, offset: 752},
-						exprs: []any{
-							&notExpr{
-								pos: position{line: 38, col: 23, offset: 752},
-								expr: &litMatcher{
-									pos:        position{line: 38, col: 24, offset: 753},
-									val:        "]",
-									ignoreCase: false,
-									want:       "\"]\"",
-								},
-							},
-							&anyMatcher{
-								line: 38, col: 28, offset: 757,
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "RxSq",
-			pos:  position{line: 40, col: 1, offset: 760},
-			expr: &seqExpr{
-				pos: position{line: 40, col: 9, offset: 768},
-				exprs: []any{
-					&litMatcher{
-						pos:        position{line: 40, col: 9, offset: 768},
-						val:        "'",
-						ignoreCase: false,
-						want:       "\"'\"",
-					},
-					&zeroOrMoreExpr{
-						pos: position{line: 40, col: 13, offset: 772},
-						expr: &ruleRefExpr{
-							pos:  position{line: 40, col: 13, offset: 772},
-							name: "SqChar",
-						},
-					},
-					&litMatcher{
-						pos:        position{line: 40, col: 21, offset: 780},
-						val:        "'",
-						ignoreCase: false,
-						want:       "\"'\"",
-					},
-				},
-			},
-		},
-		{
-			name: "SqChar",
-			pos:  position{line: 42, col: 1, offset: 785},
-			expr: &choiceExpr{
-				pos: position{line: 42, col: 11, offset: 795},
-				alternatives: []any{
-					&seqExpr{
-						pos: position{line: 42, col: 11, offset: 795},
-						exprs: []any{
-							&litMatcher{
-								pos:        position{line: 42, col: 11, offset: 795},
-								val:        "\\",
-								ignoreCase: false,
-								want:       "\"\\\\\"",
-							},
-							&anyMatcher{
-								line: 42, col: 16, offset: 800,
-							},
-						},
-					},
-					&seqExpr{
-						pos: position{line: 42, col: 20, offset: 804},
-						exprs: []any{
-							&notExpr{
-								pos: position{line: 42, col: 20, offset: 804},
-								expr: &litMatcher{
-									pos:        position{line: 42, col: 21, offset: 805},
-									val:        "'",
-									ignoreCase: false,
-									want:       "\"'\"",
-								},
-							},
-							&anyMatcher{
-								line: 42, col: 25, offset: 809,
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "RxDq",
-			pos:  position{line: 44, col: 1, offset: 812},
-			expr: &seqExpr{
-				pos: position{line: 44, col: 9, offset: 820},
-				exprs: []any{
-					&litMatcher{
-						pos:        position{line: 44, col: 9, offset: 820},
-						val:        "\"",
-						ignoreCase: false,
-						want:       "\"\\\"\"",
-					},
-					&zeroOrMoreExpr{
-						pos: position{line: 44, col: 13, offset: 824},
-						expr: &ruleRefExpr{
-							pos:  position{line: 44, col: 13, offset: 824},
-							name: "DqChar",
-						},
-					},
-					&litMatcher{
-						pos:        position{line: 44, col: 21, offset: 832},
-						val:        "\"",
-						ignoreCase: false,
-						want:       "\"\\\"\"",
-					},
-				},
-			},
-		},
-		{
-			name: "DqChar",
-			pos:  position{line: 46, col: 1, offset: 837},
-			expr: &choiceExpr{
-				pos: position{line: 46, col: 11, offset: 847},
-				alternatives: []any{
-					&seqExpr{
-						pos: position{line: 46, col: 11, offset: 847},
-						exprs: []any{
-							&litMatcher{
-								pos:        position{line: 46, col: 11, offset: 847},
-								val:        "\\",
-								ignoreCase: false,
-								want:       "\"\\\\\"",
-							},
-							&anyMatcher{
-								line: 46, col: 16, offset: 852,
-							},
-						},
-					},
-					&seqExpr{
-						pos: position{line: 46, col: 20, offset: 856},
-						exprs: []any{
-							&notExpr{
-								pos: position{line: 46, col: 20, offset: 856},
-								expr: &litMatcher{
-									pos:        position{line: 46, col: 21, offset: 857},
-									val:        "\"",
-									ignoreCase: false,
-									want:       "\"\\\"\"",
-								},
-							},
-							&anyMatcher{
-								line: 46, col: 25, offset: 861,
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "RxEsc",
-			pos:  position{line: 48, col: 1, offset: 864},
-			expr: &choiceExpr{
-				pos: position{line: 48, col: 10, offset: 873},
-				alternatives: []any{
-					&seqExpr{
-						pos: position{line: 48, col: 10, offset: 873},
-						exprs: []any{
-							&litMatcher{
-								pos:        position{line: 48, col: 10, offset: 873},
-								val:        "\\",
-								ignoreCase: false,
-								want:       "\"\\\\\"",
-							},
-							&charClassMatcher{
-								pos:        position{line: 48, col: 15, offset: 878},
-								val:        "[ntrsdwNTRSDW]",
-								chars:      []rune{'n', 't', 'r', 's', 'd', 'w', 'N', 'T', 'R', 'S', 'D', 'W'},
-								ignoreCase: false,
-								inverted:   false,
-							},
-						},
-					},
-					&seqExpr{
-						pos: position{line: 48, col: 32, offset: 895},
-						exprs: []any{
-							&litMatcher{
-								pos:        position{line: 48, col: 32, offset: 895},
-								val:        "\\",
-								ignoreCase: false,
-								want:       "\"\\\\\"",
-							},
-							&anyMatcher{
-								line: 48, col: 37, offset: 900,
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "NameTok",
-			pos:  position{line: 50, col: 1, offset: 903},
-			expr: &seqExpr{
-				pos: position{line: 50, col: 12, offset: 914},
-				exprs: []any{
-					&charClassMatcher{
-						pos:        position{line: 50, col: 12, offset: 914},
-						val:        "[a-zA-Z_]",
-						chars:      []rune{'_'},
-						ranges:     []rune{'a', 'z', 'A', 'Z'},
-						ignoreCase: false,
-						inverted:   false,
-					},
-					&zeroOrMoreExpr{
-						pos: position{line: 50, col: 22, offset: 924},
-						expr: &charClassMatcher{
-							pos:        position{line: 50, col: 22, offset: 924},
-							val:        "[a-zA-Z0-9_-]",
-							chars:      []rune{'_', '-'},
-							ranges:     []rune{'a', 'z', 'A', 'Z', '0', '9'},
-							ignoreCase: false,
-							inverted:   false,
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "_",
-			pos:  position{line: 52, col: 1, offset: 940},
-			expr: &zeroOrMoreExpr{
-				pos: position{line: 52, col: 6, offset: 945},
-				expr: &choiceExpr{
-					pos: position{line: 52, col: 8, offset: 947},
-					alternatives: []any{
-						&oneOrMoreExpr{
-							pos: position{line: 52, col: 8, offset: 947},
-							expr: &charClassMatcher{
-								pos:        position{line: 52, col: 8, offset: 947},
-								val:        "[ \\t\\r\\n]",
-								chars:      []rune{' ', '\t', '\r', '\n'},
-								ignoreCase: false,
-								inverted:   false,
-							},
-						},
-						&ruleRefExpr{
-							pos:  position{line: 52, col: 21, offset: 960},
-							name: "Comment",
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "Comment",
-			pos:  position{line: 54, col: 1, offset: 972},
-			expr: &seqExpr{
-				pos: position{line: 54, col: 12, offset: 983},
-				exprs: []any{
-					&litMatcher{
-						pos:        position{line: 54, col: 12, offset: 983},
-						val:        "#",
-						ignoreCase: false,
-						want:       "\"#\"",
-					},
-					&zeroOrMoreExpr{
-						pos: position{line: 54, col: 16, offset: 987},
-						expr: &seqExpr{
-							pos: position{line: 54, col: 17, offset: 988},
-							exprs: []any{
-								&notExpr{
-									pos: position{line: 54, col: 17, offset: 988},
-									expr: &charClassMatcher{
-										pos:        position{line: 54, col: 18, offset: 989},
-										val:        "[\\n]",
-										chars:      []rune{'\n'},
-										ignoreCase: false,
-										inverted:   false,
-									},
-								},
-								&anyMatcher{
-									line: 54, col: 23, offset: 994,
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "EOF",
-			pos:  position{line: 56, col: 1, offset: 999},
-			expr: &notExpr{
-				pos: position{line: 56, col: 8, offset: 1006},
-				expr: &anyMatcher{
-					line: 56, col: 9, offset: 1007,
-				},
-			},
-		},
+		pegRule(8, "GrammarFile", pegSeq(
+			pegRef("_"),
+			pegRef("GrammarDecl"),
+			pegStar(pegSeq(pegRef("_"), pegRef("GrammarDecl"))),
+			pegRef("_"),
+			pegRef("EOF"),
+		)),
+		pegRule(10, "GrammarDecl", pegSeq(
+			pegLit("grammar"),
+			pegNot(pegRef("NameCont")),
+			pegRef("_"),
+			pegRef("NameTok"),
+			pegOpt(pegRef("ParentSpec")),
+			pegRef("_"),
+			pegLit("{"),
+			pegRef("_"),
+			pegStar(pegRef("GrammarMember")),
+			pegRef("_"),
+			pegLit("}"),
+		)),
+		pegRule(12, "ParentSpec", pegSeq(
+			pegRef("_"),
+			pegLit("is"),
+			pegNot(pegRef("NameCont")),
+			pegRef("_"),
+			pegRef("NameTok"),
+		)),
+		pegRule(14, "GrammarMember", pegChoice(
+			pegRef("ProtoDecl"),
+			pegRef("RuleDecl"),
+			pegRef("SemiMember"),
+		)),
+		pegRule(16, "SemiMember", pegSeq(pegLit(";"), pegRef("_"))),
+		pegRule(18, "ProtoDecl", pegSeq(
+			pegLit("proto"),
+			pegNot(pegRef("NameCont")),
+			pegRef("_"),
+			pegRef("RuleKind"),
+			pegRef("_"),
+			pegRef("NameTok"),
+			pegStar(pegRef("RuleTrait")),
+			pegRef("_"),
+			pegLit("{"),
+			pegRef("_"),
+			pegRef("ProtoBody"),
+			pegRef("_"),
+			pegLit("}"),
+			pegRef("_"),
+		)),
+		pegRule(20, "ProtoBody", pegChoice(
+			pegSeq(pegLit("{"), pegRef("_"), pegLit("*"), pegRef("_"), pegLit("}")),
+			pegLit("*"),
+			pegLit("<...>"),
+			pegLit("..."),
+			pegLit(""),
+		)),
+		pegRule(22, "RuleDecl", pegSeq(
+			pegOpt(pegRef("MultiPrefix")),
+			pegRef("RuleKind"),
+			pegRef("_"),
+			pegRef("RuleName"),
+			pegStar(pegRef("RuleTrait")),
+			pegRef("_"),
+			pegLit("{"),
+			pegRef("_"),
+			pegOpt(pegRef("RxAlt")),
+			pegRef("_"),
+			pegLit("}"),
+			pegRef("_"),
+		)),
+		pegRule(24, "MultiPrefix", pegSeq(
+			pegLit("multi"),
+			pegNot(pegRef("NameCont")),
+			pegRef("_"),
+		)),
+		pegRule(26, "RuleKind", pegSeq(
+			pegChoice(pegLit("token"), pegLit("regex"), pegLit("rule")),
+			pegNot(pegRef("NameCont")),
+		)),
+		pegRule(28, "RuleName", pegSeq(
+			pegRef("NameTok"),
+			pegOpt(pegRef("SymAdverb")),
+		)),
+		pegRule(30, "SymAdverb", pegSeq(
+			pegLit(":sym"),
+			pegRef("SymDelim"),
+		)),
+		pegRule(32, "SymDelim", pegChoice(
+			pegRef("SymAngle"),
+			pegRef("SymFrench"),
+			pegRef("SymTexas"),
+			pegRef("SymBracket"),
+		)),
+		pegRule(34, "SymAngle", pegSeq(
+			pegLit("<"),
+			pegPlus(pegSeq(pegNot(pegLit(">")), pegAny())),
+			pegLit(">"),
+		)),
+		pegRule(36, "SymFrench", pegSeq(
+			pegLit("«"),
+			pegPlus(pegSeq(pegNot(pegLit("»")), pegAny())),
+			pegLit("»"),
+		)),
+		pegRule(38, "SymTexas", pegSeq(
+			pegLit("<<"),
+			pegPlus(pegSeq(pegNot(pegLit(">>")), pegAny())),
+			pegLit(">>"),
+		)),
+		pegRule(40, "SymBracket", pegSeq(
+			pegLit("["),
+			pegPlus(pegSeq(pegNot(pegLit("]")), pegAny())),
+			pegLit("]"),
+		)),
+		pegRule(42, "RuleTrait", pegSeq(
+			pegRef("_"),
+			pegLit("is"),
+			pegNot(pegRef("NameCont")),
+			pegRef("_"),
+			pegRef("NameTok"),
+			pegOpt(pegRef("TraitArg")),
+		)),
+		pegRule(44, "TraitArg", pegChoice(
+			pegSeq(pegLit("("), pegStar(pegSeq(pegNot(pegLit(")")), pegAny())), pegLit(")")),
+			pegSeq(pegLit("«"), pegStar(pegSeq(pegNot(pegLit("»")), pegAny())), pegLit("»")),
+			pegSeq(pegLit("["), pegStar(pegSeq(pegNot(pegLit("]")), pegAny())), pegLit("]")),
+			pegSeq(pegLit("<"), pegStar(pegSeq(pegNot(pegLit(">")), pegAny())), pegLit(">")),
+		)),
+		pegRule(46, "RxAlt", pegSeq(
+			pegOpt(pegSeq(pegRef("_"), pegLit("||"))),
+			pegRef("_"),
+			pegRef("RxLTMAlt"),
+			pegStar(pegSeq(pegRef("_"), pegLit("||"), pegRef("_"), pegRef("RxLTMAlt"))),
+		)),
+		pegRule(48, "RxLTMAlt", pegSeq(
+			pegOpt(pegSeq(pegRef("_"), pegLit("|"), pegNot(pegLit("|")))),
+			pegRef("_"),
+			pegRef("RxSeq"),
+			pegStar(pegSeq(pegRef("_"), pegLit("|"), pegNot(pegLit("|")), pegRef("_"), pegRef("RxSeq"))),
+		)),
+		pegRule(50, "RxSeq", pegSeq(
+			pegRef("RxItem"),
+			pegStar(pegSeq(pegRef("_"), pegRef("RxItem"))),
+		)),
+		pegRule(52, "RxItem", pegChoice(
+			pegRef("NamedCap"),
+			pegRef("GoalOrAtom"),
+		)),
+		pegRule(54, "NamedCap", pegSeq(
+			pegLit("$<"),
+			pegRef("NameTok"),
+			pegLit(">"),
+			pegRef("_"),
+			pegLit("="),
+			pegRef("_"),
+			pegRef("PlainAtom"),
+		)),
+		pegRule(56, "GoalOrAtom", pegSeq(
+			pegRef("PlainAtom"),
+			pegOpt(pegRef("GoalTail")),
+		)),
+		pegRule(58, "GoalTail", pegSeq(
+			pegRef("_"),
+			pegLit("~"),
+			pegRef("_"),
+			pegRef("PlainAtom"),
+			pegRef("_"),
+			pegRef("RxItem"),
+		)),
+		pegRule(60, "PlainAtom", pegSeq(
+			pegRef("RxPrimary"),
+			pegOpt(pegRef("QuantSpec")),
+			pegOpt(pegRef("SepClause")),
+		)),
+		pegRule(62, "QuantSpec", pegChoice(
+			pegRef("StarStarQuant"),
+			pegRef("SimpleQuant"),
+		)),
+		pegRule(64, "StarStarQuant", pegSeq(
+			pegRef("_"),
+			pegLit("**"),
+			pegRef("_"),
+			pegRef("CountRange"),
+			pegRef("FrugalOpt"),
+		)),
+		pegRule(66, "SimpleQuant", pegChoice(
+			pegLit("*?"),
+			pegLit("+?"),
+			pegLit("??"),
+			pegLit("*"),
+			pegLit("+"),
+			pegLit("?"),
+		)),
+		pegRule(68, "FrugalOpt", pegChoice(pegLit("?"), pegLit(""))),
+		pegRule(70, "CountRange", pegChoice(
+			pegSeq(pegRef("Digits"), pegRef("_"), pegLit(".."), pegRef("_"), pegRef("UpperBound")),
+			pegRef("Digits"),
+		)),
+		pegRule(72, "UpperBound", pegChoice(pegLit("*"), pegRef("Digits"))),
+		pegRule(74, "Digits", pegPlus(pegCC("[0-9]", nil, []rune{'0', '9'}))),
+		pegRule(76, "SepClause", pegSeq(
+			pegRef("_"),
+			pegRef("SepOp"),
+			pegRef("_"),
+			pegRef("SepAtom"),
+		)),
+		pegRule(78, "SepOp", pegChoice(pegLit("%%"), pegLit("%"))),
+		pegRule(80, "SepAtom", pegSeq(
+			pegRef("RxPrimary"),
+			pegOpt(pegRef("QuantSpec")),
+		)),
+		pegRule(82, "RxPrimary", pegChoice(
+			pegRef("ActionStub"),
+			pegRef("RxGroup"),
+			pegRef("RxCapture"),
+			pegRef("RxAngle"),
+			pegRef("RxSq"),
+			pegRef("RxDq"),
+			pegRef("RxEsc"),
+			pegLit("^^"),
+			pegLit("$$"),
+			pegLit("<<"),
+			pegLit(">>"),
+			pegLit("«"),
+			pegLit("»"),
+			pegLit("^"),
+			pegLit("$"),
+			pegLit("."),
+			pegLit("#"),
+			pegLit(";"),
+		)),
+		pegRule(101, "ActionStub", pegSeq(
+			pegLit("{"),
+			pegRef("_"),
+			pegLit("*"),
+			pegRef("_"),
+			pegLit("}"),
+		)),
+		pegRule(103, "RxGroup", pegSeq(
+			pegLit("["),
+			pegRef("_"),
+			pegOpt(pegRef("RxAlt")),
+			pegRef("_"),
+			pegLit("]"),
+		)),
+		pegRule(105, "RxCapture", pegSeq(
+			pegLit("("),
+			pegRef("_"),
+			pegOpt(pegRef("RxAlt")),
+			pegRef("_"),
+			pegLit(")"),
+		)),
+		pegRule(107, "RxAngle", pegChoice(
+			pegRef("LookaheadPos"),
+			pegRef("LookaheadNeg"),
+			pegRef("LookbehindPos"),
+			pegRef("LookbehindNeg"),
+			pegRef("StdAngle"),
+		)),
+		pegRule(113, "LookaheadPos", pegSeq(
+			pegLit("<?"),
+			pegRef("_"),
+			pegLit("before"),
+			pegNot(pegRef("NameCont")),
+			pegRef("_"),
+			pegRef("RxAlt"),
+			pegRef("_"),
+			pegLit(">"),
+		)),
+		pegRule(115, "LookaheadNeg", pegSeq(
+			pegLit("<!"),
+			pegRef("_"),
+			pegLit("before"),
+			pegNot(pegRef("NameCont")),
+			pegRef("_"),
+			pegRef("RxAlt"),
+			pegRef("_"),
+			pegLit(">"),
+		)),
+		pegRule(117, "LookbehindPos", pegSeq(
+			pegLit("<?"),
+			pegRef("_"),
+			pegLit("after"),
+			pegNot(pegRef("NameCont")),
+			pegRef("_"),
+			pegRef("RxAlt"),
+			pegRef("_"),
+			pegLit(">"),
+		)),
+		pegRule(119, "LookbehindNeg", pegSeq(
+			pegLit("<!"),
+			pegRef("_"),
+			pegLit("after"),
+			pegNot(pegRef("NameCont")),
+			pegRef("_"),
+			pegRef("RxAlt"),
+			pegRef("_"),
+			pegLit(">"),
+		)),
+		pegRule(121, "StdAngle", pegSeq(
+			pegLit("<"),
+			pegRef("AnglePrefix"),
+			pegRef("AngleBody"),
+			pegLit(">"),
+		)),
+		pegRule(123, "AnglePrefix", pegChoice(
+			pegLit("?"),
+			pegLit("!"),
+			pegLit("."),
+			pegLit(""),
+		)),
+		pegRule(125, "AngleBody", pegChoice(
+			pegRef("CharClassExpr"),
+			pegRef("SubruleAlias"),
+			pegRef("HostName"),
+			pegRef("NameTok"),
+		)),
+		pegRule(127, "SubruleAlias", pegSeq(
+			pegRef("NameTok"),
+			pegLit("="),
+			pegChoice(pegRef("HostName"), pegRef("NameTok")),
+		)),
+		pegRule(130, "HostName", pegSeq(
+			pegLit("HOST_"),
+			pegRef("NameTok"),
+		)),
+		pegRule(134, "CharClassExpr", pegSeq(
+			pegRef("ClassFirstTerm"),
+			pegStar(pegSeq(pegRef("_"), pegRef("ClassSetOp"), pegRef("_"), pegRef("ClassTerm"))),
+		)),
+		pegRule(136, "ClassFirstTerm", pegChoice(
+			pegSeq(pegOpt(pegRef("ClassSign")), pegLit("["), pegRef("ClassInner"), pegLit("]")),
+			pegSeq(pegRef("ClassSign"), pegRef("PropSpec")),
+			pegRef("PropSpec"),
+		)),
+		pegRule(138, "ClassSign", pegChoice(pegLit("+"), pegLit("-"))),
+		pegRule(140, "ClassSetOp", pegChoice(pegLit("+"), pegLit("-"))),
+		pegRule(142, "ClassTerm", pegChoice(
+			pegSeq(pegLit("["), pegRef("ClassInner"), pegLit("]")),
+			pegRef("PropSpec"),
+		)),
+		pegRule(144, "ClassInner", pegStar(pegRef("ClassPart"))),
+		pegRule(146, "ClassPart", pegChoice(
+			pegRef("HexEsc"),
+			pegSeq(pegLit("\\"), pegAny()),
+			pegSeq(pegNot(pegLit("]")), pegAny()),
+		)),
+		pegRule(148, "PropSpec", pegSeq(
+			pegLit(":"),
+			pegOpt(pegLit("!")),
+			pegRef("NameTok"),
+		)),
+		pegRule(150, "RxSq", pegSeq(
+			pegLit("'"),
+			pegStar(pegRef("SqChar")),
+			pegLit("'"),
+		)),
+		pegRule(152, "SqChar", pegChoice(
+			pegSeq(pegLit("\\"), pegAny()),
+			pegSeq(pegNot(pegLit("'")), pegAny()),
+		)),
+		pegRule(154, "RxDq", pegSeq(
+			pegLit("\""),
+			pegStar(pegRef("DqChar")),
+			pegLit("\""),
+		)),
+		pegRule(156, "DqChar", pegChoice(
+			pegSeq(pegLit("\\"), pegAny()),
+			pegSeq(pegNot(pegLit("\"")), pegAny()),
+		)),
+		pegRule(158, "RxEsc", pegChoice(
+			pegRef("HexEsc"),
+			pegRef("ClassEsc"),
+			pegRef("AnyEsc"),
+		)),
+		pegRule(160, "HexEsc", pegSeq(
+			pegLit("\\x["),
+			pegPlus(pegCC("[0-9a-fA-F, ]", []rune{',', ' '}, []rune{'0', '9', 'a', 'f', 'A', 'F'})),
+			pegLit("]"),
+		)),
+		pegRule(162, "ClassEsc", pegSeq(
+			pegLit("\\"),
+			pegCC("[ntrsdwhvNTRSDWHV]", []rune{'n', 't', 'r', 's', 'd', 'w', 'h', 'v', 'N', 'T', 'R', 'S', 'D', 'W', 'H', 'V'}, nil),
+		)),
+		pegRule(164, "AnyEsc", pegSeq(
+			pegLit("\\"),
+			pegAny(),
+		)),
+		pegRule(166, "NameTok", pegSeq(
+			pegCC("[a-zA-Z_]", []rune{'_'}, []rune{'a', 'z', 'A', 'Z'}),
+			pegStar(pegRef("NameCont")),
+		)),
+		pegRule(168, "NameCont", pegCC("[a-zA-Z0-9_-]", []rune{'_', '-'}, []rune{'a', 'z', 'A', 'Z', '0', '9'})),
+		pegRule(170, "_", pegStar(pegChoice(
+			pegPlus(pegCC("[ \\t\\r\\n]", []rune{' ', '\t', '\r', '\n'}, nil)),
+			pegRef("Comment"),
+		))),
+		pegRule(172, "Comment", pegSeq(
+			pegLit("#"),
+			pegStar(pegSeq(pegNot(pegCC("[\\n]", []rune{'\n'}, nil)), pegAny())),
+		)),
+		pegRule(174, "EOF", pegNot(pegAny())),
 	},
 }
 

@@ -137,6 +137,32 @@ done_testing;
 
 Lowercase `post` is a normal identifier (`sub post`, HTTP helpers). `PRE`/`POST`/`INVARIANT`/`CHECK`/`ASSERT` are statement or block forms; TAP (`plan`/`ok`/`is`/`isnt`/`like`/`done_testing`) uses the same no-paren / `{ }` style. Parenthesized calls still work.
 
+## 6. Embedded NQP / QRegex Declarative Grammars (`gcre`)
+
+Raptor compiles inline `grammar` blocks via `gcre`, supporting grammar inheritance (`is Parent`), protoregexes (`proto` + `:sym<...>`), LTM (`|`) vs sequential (`||`) alternation, declarative `is optable` Pratt precedence, `%` / `%%` separated lists, `'(' ~ ')'` goal matching, lookarounds, and character class set algebra:
+
+```perl
+grammar BaseExpr {
+    token EXPR is optable { <term> }
+    proto token term { * }
+    token term:sym<int> { \d+ }
+    proto token infix { * }
+    token infix:sym<+> { <sym> }
+    token infix:sym<*> is tighter<+> { <sym> }
+}
+
+grammar MiniLang is BaseExpr {
+    rule TOP { ^ <stmt>+ % ';' ';'? $ }
+    proto rule stmt { * }
+    rule stmt:sym<let> { <sym> <lhs=ident> '=' <rhs=EXPR> }
+}
+
+my $m = MiniLang.parse("let x = 2 + 3 * 4;");
+say $m{"stmt"}{"rule"};       # stmt:sym<let>
+say $m{"stmt"}{"lhs"}{"str"}; # x
+say $/{"str"};                # let x = 2 + 3 * 4;
+```
+
 ## AI credit
 
 The first prototype was written by **Gemini**. The language was mostly written by Anti Gravity — Gemini 3.6. Library bindings and PodLit were written by Gemini 3.7. Later work was modified by **Grok**.

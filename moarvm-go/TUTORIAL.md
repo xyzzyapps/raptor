@@ -1,4 +1,4 @@
-# Tcl on MoarVM — Tutorial
+# Tcl & NQP Grammars on MoarVM — Tutorial
 
 ## 1. What this frontend is
 
@@ -6,9 +6,9 @@
 
 | Stage | Where | What |
 | :--- | :--- | :--- |
-| Parse | [`tcl/tcl.raku`](tcl/tcl.raku) via **[gcre](../gcre)** | Commands and words only. No evaluation. gcre is a Raku subset that is PEG-compatible. |
+| Parse | [`tcl/tcl.raku`](tcl/tcl.raku) via **[gcre](../gcre)** | Commands and words only. No evaluation. `gcre` is our Go NQP / QRegex declarative grammar engine. |
 | Operations | Go (`tcl/compiler.go`) | Each Tcl command is a Go function that **emits MoarVM opcodes**. |
-| Image | `engine.CompUnitEmitter` | CompUnit v7 (`.moarvm`): header, frames, string heap, bytecode. |
+| Image | `engine.CompUnitEmitter` | CompUnit v7 (`.moarvm`): header, SC, frames, callsites, string heap, bytecode. |
 | Run | `moar.dll` via Go (`MVM_vm_run_bytecode`) | Same process as the host; ship the DLL with the binary. |
 
 Commands the compiler cannot emit (`proc`, `foreach`, `string`, C/Go FFI, `moar::*`) still run as Go builtins after a failed compile of the whole script. Nested `eval` inside those builtins never re-enters the bytecode compiler, so scopes stay consistent.
@@ -17,15 +17,15 @@ Commands the compiler cannot emit (`proc`, `foreach`, `string`, C/Go FFI, `moar:
 
 ## 2. Parse (MoarVM-side grammar)
 
-The grammar is declarative Raku notation, compiled to combinators:
+The grammar is declarative Raku / NQP notation, compiled to combinators by `gcre`:
 
 ```raku
 grammar Tcl {
     rule TOP { <command_line>* }
     rule command { <word>+ }
     token word {
-        | <braced_word> | <quoted_word>
-        | <cmd_subst> | <var_subst> | <bare_word>
+        || <braced_word> || <quoted_word>
+        || <cmd_subst> || <var_subst> || <bare_word>
     }
 }
 ```
@@ -67,14 +67,12 @@ The compiler does **not** interpret arithmetic in Go. It only chooses opcodes.
 
 ### In-process Moar (`moar.dll`)
 
-`moargo.RunNative(bytecode)` loads the DLL (next to the exe, `MOAR_DLL`, or `bin/moar.dll`) and calls `MVM_vm_run_bytecode`. Output is Moar’s `say`. CLI:
+`moargo.RunNative(bytecode)` loads the DLL (next to the exe, `MOAR_DLL`, or `bin/moar.dll`) and calls `MVM_vm_run_bytecode`. Output is Moar’s `say`. Pass `-mod=mod` when running from source (because `vendor/MoarVM` holds C sources, not Go modules):
 
 ```powershell
-go run ./cmd/tcl -o out.moarvm examples/demo_tcl.tcl
-go run ./cmd/tcl -native -dll build/moarvm/bin/moar.dll examples/demo_tcl.tcl
+go run -mod=mod ./cmd/tcl -emit-only -o out.moarvm examples/demo_tcl.tcl
+go run -mod=mod ./cmd/tcl -native -dll build/moarvm/bin/moar.dll examples/demo_tcl.tcl
 ```
-
-Native run requires a fuller CompUnit (SC, code objects). Until those are emitted, treat `-native` as experimental.
 
 ---
 
@@ -133,8 +131,80 @@ moar::destroy
 ## 9. CLI
 
 ```powershell
-go run ./cmd/tcl                          # REPL (Go eval + optional DLL)
-go run ./cmd/tcl script.tcl               # parse → bytecode → interpret
-go run ./cmd/tcl -emit-only -o x.moarvm script.tcl
-go run ./cmd/tcl -native script.tcl
+go run -mod=mod ./cmd/tcl                          # REPL (Go eval + optional DLL)
+go run -mod=mod ./cmd/tcl script.tcl               # parse → bytecode → interpret
+go run -mod=mod ./cmd/tcl -emit-only -o x.moarvm script.tcl
+go run -mod=mod ./cmd/tcl -native script.tcl
 ```
+
+---
+
+## 10. Authoring NQP / QRegex Grammars with `gcre`
+
+When building a new language frontend for `moarvm-go`, write your syntax in an NQP-style `.raku` file and load it via [`gcre`](../gcre/README.md) (see [`../gcre/examples/nqp_lang.raku`](../gcre/examples/nqp_lang.raku)):
+
+```raku
+grammar ExprCore {
+    token EXPR is optable { <term> }
+
+    proto token term { * }
+    token term:sym<int>   { \d+ {*} }
+    token term:sym<hex>   { '0x' <xdigit>+ {*} }
+    token term:sym<group> { '(' ~ ')' [ <.ws> <EXPR> <.ws> ] {*} }
+
+    proto token prefix { * }
+    token prefix:sym<-> is tighter<*> { <sym> }
+
+    proto token infix { * }
+    token infix:sym<+>  { <sym> }
+    token infix:sym<*>  is tighter<+> { <sym> }
+    token infix:sym<**> is tighter<*> is assoc<right> { <sym> }
+}
+
+grammar MyLang is ExprCore {
+    rule TOP { ^ <stmt>+ % ';' ';'? $ }
+
+    proto rule stmt { * }
+    rule stmt:sym<let>   { <sym> <lhs=ident> '=' <rhs=EXPR> {*} }
+    rule stmt:sym<print> { <sym> <arg=EXPR> {*} }
+}
+```
+
+### Key NQP Constructs Available in `gcre`
+
+- **Grammar inheritance (`grammar Child is Parent`)**: Inherits rules, `proto` multi-dispatch groups, and `is optable` operators; child `:sym<...>` rules extend inherited protoregexes.
+- **Protoregexes & `:sym<...>`**: `proto token|rule|regex name { * }` dispatches across all `name:sym<...>` candidates using Longest-Token Matching (LTM), binding `<sym>` and recording `m.Rule` (e.g., `"stmt:sym<let>"`).
+- **LTM (`|`) vs Sequential (`||`)**: `|` picks the longest match across declarative branches; `||` picks the first matching branch left-to-right (`|` binds tighter than `||`).
+- **Declarative Operator Tables (`is optable`)**: `token EXPR is optable { <term> }` builds a Pratt precedence parser from `prefix:sym<...>`, `infix:sym<...>`, and `postfix:sym<...>` rules annotated with `is tighter<...>`, `is looser<...>`, `is equiv<...>`, and `is assoc<left|right|non|chain>`.
+- **Quantifiers, Separators & Goals**: Counted `** N..M`, frugal `*?` / `+?` / `??`, separated lists `%` / `%%`, and goal matching `'(' ~ ')' <EXPR>` with structured goal error diagnostics.
+- **Lookarounds & Character Algebra**: `<?before ...>`, `<!before ...>`, `<?after ...>`, `<!after ...>`, anchors (`^`, `$`, `^^`, `$$`, `<<`, `>>`, `<?wb>`, `<!ww>`), and set algebra (`<[a..z] + :Digit - [aeiou]>`).
+
+### Reducing Matches to ASTs in Go
+
+```go
+type Actions struct{}
+
+func (a *Actions) HandleAction(rule string, m *gcre.Match) {
+    switch rule {
+    case "term:sym<int>":
+        n, _ := strconv.ParseInt(m.Str, 10, 64)
+        m.Make(n)
+    }
+}
+
+g, err := gcre.LoadGrammarFromFile("mylang.raku")
+match, err := g.Parse("let x = 2 + 3 * 4;", &Actions{})
+```
+
+---
+
+## 11. Comparison with Upstream Raku NQP
+
+| Layer | Upstream Raku NQP (`Rakudo/nqp`) | `gcre` + `moarvm-go` |
+| :--- | :--- | :--- |
+| **Host & Bootstrap** | Self-hosted NQP → QAST → MAST → MoarVM | Pure Go host (`gcre` + `moargo.CompUnitEmitter`) → `moar.dll` |
+| **QRegex Surface** | `grammar`/`is`, `proto`/`:sym`, `\|`/`\|\|`, `EXPR` `%optable`, `%`/`%%`, `~`, lookarounds, `<[...]>` set algebra | Supported declaratively in `.raku` files |
+| **LTM Engine** | Compiled Thompson NFA state table for declarative prefixes | Direct multi-branch longest-match probing from cursor with capture rollback |
+| **Regex Backtracking** | Full `bstack` continuation cursor in `regex`; `:ratchet` in `token`/`rule` | `:ratchet` semantics with frugal lookahead (`*?`/`+?`/`??`) and branch snapshot/restore |
+| **Semantic Actions & Codegen** | NQP action classes + `QAST` AST nodes + ~400 `nqp::*` ops | Go `ActionHandler`/struct methods + `<HOST_name>` hatch + direct CompUnit v7 / 6Model emission |
+| **Omitted Inline Regex Code** | `{ code }`, `<?{ pred }>`, `:my($x)`, `<$rx>`, `:i`/`:m`, `<( )>`, `&` | Omitted so `.raku` grammars stay pure, declarative, and language-agnostic |

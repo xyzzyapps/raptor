@@ -174,7 +174,7 @@ func (in *Interp) registerBuiltins() {
 		var elements []*Value
 		for _, a := range args {
 			if a.Type == ValArray {
-				elements = append(elements, a.ArrayVal...)
+				elements = append(elements, a.materializeArray()...)
 			} else if a.Type == ValLazySeq && a.LazySeqVal != nil {
 				elements = append(elements, a.LazySeqVal.Items...)
 			} else {
@@ -188,7 +188,7 @@ func (in *Interp) registerBuiltins() {
 		var elements []*Value
 		for _, a := range args {
 			if a.Type == ValArray {
-				elements = append(elements, a.ArrayVal...)
+				elements = append(elements, a.materializeArray()...)
 			} else if a.Type == ValLazySeq && a.LazySeqVal != nil {
 				elements = append(elements, a.LazySeqVal.Items...)
 			} else {
@@ -202,7 +202,7 @@ func (in *Interp) registerBuiltins() {
 		var elements []*Value
 		for _, a := range args {
 			if a.Type == ValArray {
-				elements = append(elements, a.ArrayVal...)
+				elements = append(elements, a.materializeArray()...)
 			} else if a.Type == ValLazySeq && a.LazySeqVal != nil {
 				elements = append(elements, a.LazySeqVal.Items...)
 			} else {
@@ -216,7 +216,7 @@ func (in *Interp) registerBuiltins() {
 		var elements []*Value
 		for _, a := range args {
 			if a.Type == ValArray {
-				elements = append(elements, a.ArrayVal...)
+				elements = append(elements, a.materializeArray()...)
 			} else if a.Type == ValLazySeq && a.LazySeqVal != nil {
 				elements = append(elements, a.LazySeqVal.Items...)
 			} else {
@@ -342,10 +342,16 @@ func (in *Interp) registerBuiltins() {
 	}
 
 	in.Builtins["pop"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValArray || len(args[0].ArrayVal) == 0 {
+		if len(args) < 1 || args[0].Type != ValArray || args[0].arrayLen() == 0 {
 			return NilValue(), nil
 		}
 		arr := args[0]
+		if arr.Ints != nil && arr.ArrayVal == nil {
+			lastIdx := len(arr.Ints) - 1
+			val := IntValue(arr.Ints[lastIdx])
+			arr.Ints = arr.Ints[:lastIdx]
+			return val, nil
+		}
 		lastIdx := len(arr.ArrayVal) - 1
 		val := arr.ArrayVal[lastIdx]
 		arr.ArrayVal = arr.ArrayVal[:lastIdx]
@@ -353,10 +359,15 @@ func (in *Interp) registerBuiltins() {
 	}
 
 	in.Builtins["shift"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValArray || len(args[0].ArrayVal) == 0 {
+		if len(args) < 1 || args[0].Type != ValArray || args[0].arrayLen() == 0 {
 			return NilValue(), nil
 		}
 		arr := args[0]
+		if arr.Ints != nil && arr.ArrayVal == nil {
+			val := IntValue(arr.Ints[0])
+			arr.Ints = arr.Ints[1:]
+			return val, nil
+		}
 		val := arr.ArrayVal[0]
 		arr.ArrayVal = arr.ArrayVal[1:]
 		return val, nil
@@ -367,7 +378,8 @@ func (in *Interp) registerBuiltins() {
 			return nil, fmt.Errorf("unshift requires array and elements")
 		}
 		arr := args[0]
-		arr.ArrayVal = append(args[1:], arr.ArrayVal...)
+		arr.materializeArray()
+		arr.ArrayVal = append(append([]*Value(nil), args[1:]...), arr.ArrayVal...)
 		return IntValue(int64(len(arr.ArrayVal))), nil
 	}
 
@@ -425,8 +437,14 @@ func (in *Interp) registerBuiltins() {
 		delim := args[0].String()
 		var parts []string
 		if args[1].Type == ValArray {
-			for _, item := range args[1].ArrayVal {
-				parts = append(parts, item.String())
+			if args[1].Ints != nil && args[1].ArrayVal == nil {
+				for _, n := range args[1].Ints {
+					parts = append(parts, fmt.Sprintf("%d", n))
+				}
+			} else {
+				for _, item := range args[1].ArrayVal {
+					parts = append(parts, item.String())
+				}
 			}
 		} else {
 			for _, item := range args[1:] {
@@ -509,7 +527,7 @@ func (in *Interp) registerBuiltins() {
 			return ArrayValue(nil), nil
 		}
 		var result []*Value
-		for _, elem := range list.ArrayVal {
+		for _, elem := range list.materializeArray() {
 			val, err := in.InvokeCallable(callable, []*Value{elem})
 			if err != nil {
 				return nil, err
@@ -537,7 +555,7 @@ func (in *Interp) registerBuiltins() {
 			return ArrayValue(nil), nil
 		}
 		var result []*Value
-		for _, elem := range list.ArrayVal {
+		for _, elem := range list.materializeArray() {
 			val, err := in.InvokeCallable(callable, []*Value{elem})
 			if err != nil {
 				return nil, err
@@ -588,6 +606,14 @@ func (in *Interp) registerBuiltins() {
 		if len(args) < 1 || args[0].Type != ValArray {
 			return ArrayValue(nil), nil
 		}
+		if args[0].Ints != nil && args[0].ArrayVal == nil {
+			src := args[0].Ints
+			res := make([]int64, len(src))
+			for i, n := range src {
+				res[len(src)-1-i] = n
+			}
+			return IntArrayValue(res), nil
+		}
 		src := args[0].ArrayVal
 		result := make([]*Value, len(src))
 		for i, v := range src {
@@ -610,12 +636,13 @@ func (in *Interp) registerBuiltins() {
 			callable = args[0]
 			list = args[1]
 		}
-		if list.Type != ValArray || len(list.ArrayVal) == 0 {
+		if list.Type != ValArray || list.arrayLen() == 0 {
 			return NilValue(), nil
 		}
-		acc := list.ArrayVal[0]
-		for i := 1; i < len(list.ArrayVal); i++ {
-			val, err := in.InvokeCallable(callable, []*Value{acc, list.ArrayVal[i]})
+		elems := list.materializeArray()
+		acc := elems[0]
+		for i := 1; i < len(elems); i++ {
+			val, err := in.InvokeCallable(callable, []*Value{acc, elems[i]})
 			if err != nil {
 				return nil, err
 			}
@@ -1121,6 +1148,13 @@ func (in *Interp) registerBuiltins() {
 			return StringValue(""), nil
 		}
 		sep := args[0].String()
+		if args[1].Type == ValArray && args[1].Ints != nil && args[1].ArrayVal == nil {
+			strParts := make([]string, len(args[1].Ints))
+			for i, n := range args[1].Ints {
+				strParts[i] = fmt.Sprintf("%d", n)
+			}
+			return StringValue(strings.Join(strParts, sep)), nil
+		}
 		var list []*Value
 		if args[1].Type == ValArray {
 			list = args[1].ArrayVal
@@ -1204,20 +1238,33 @@ func (in *Interp) registerBuiltins() {
 	}
 
 	in.Builtins["pop"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValArray || len(args[0].ArrayVal) == 0 {
+		if len(args) < 1 || args[0].Type != ValArray || args[0].arrayLen() == 0 {
 			return NilValue(), nil
 		}
-		last := args[0].ArrayVal[len(args[0].ArrayVal)-1]
-		args[0].ArrayVal = args[0].ArrayVal[:len(args[0].ArrayVal)-1]
+		arr := args[0]
+		if arr.Ints != nil && arr.ArrayVal == nil {
+			lastIdx := len(arr.Ints) - 1
+			last := IntValue(arr.Ints[lastIdx])
+			arr.Ints = arr.Ints[:lastIdx]
+			return last, nil
+		}
+		last := arr.ArrayVal[len(arr.ArrayVal)-1]
+		arr.ArrayVal = arr.ArrayVal[:len(arr.ArrayVal)-1]
 		return last, nil
 	}
 
 	in.Builtins["shift"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValArray || len(args[0].ArrayVal) == 0 {
+		if len(args) < 1 || args[0].Type != ValArray || args[0].arrayLen() == 0 {
 			return NilValue(), nil
 		}
-		first := args[0].ArrayVal[0]
-		args[0].ArrayVal = args[0].ArrayVal[1:]
+		arr := args[0]
+		if arr.Ints != nil && arr.ArrayVal == nil {
+			first := IntValue(arr.Ints[0])
+			arr.Ints = arr.Ints[1:]
+			return first, nil
+		}
+		first := arr.ArrayVal[0]
+		arr.ArrayVal = arr.ArrayVal[1:]
 		return first, nil
 	}
 
@@ -1225,7 +1272,8 @@ func (in *Interp) registerBuiltins() {
 		if len(args) < 2 || args[0].Type != ValArray {
 			return NilValue(), nil
 		}
-		items := args[1:]
+		args[0].materializeArray()
+		items := append([]*Value(nil), args[1:]...)
 		args[0].ArrayVal = append(items, args[0].ArrayVal...)
 		return IntValue(int64(len(args[0].ArrayVal))), nil
 	}
@@ -1234,7 +1282,7 @@ func (in *Interp) registerBuiltins() {
 		if len(args) < 1 || args[0].Type != ValArray {
 			return ArrayValue(nil), nil
 		}
-		arr := args[0].ArrayVal
+		arr := args[0].materializeArray()
 		start := 0
 		if len(args) >= 2 {
 			start = int(in.toInt(args[1]))
@@ -1266,13 +1314,13 @@ func (in *Interp) registerBuiltins() {
 		var replacements []*Value
 		if len(args) >= 4 {
 			if args[3].Type == ValArray {
-				replacements = args[3].ArrayVal
+				replacements = args[3].materializeArray()
 			} else {
 				replacements = args[3:]
 			}
 		}
 
-		newArr := append(arr[:start], append(replacements, arr[start+length:]...)...)
+		newArr := append(append([]*Value(nil), arr[:start]...), append(replacements, arr[start+length:]...)...)
 		args[0].ArrayVal = newArr
 		return ArrayValue(removed), nil
 	}
@@ -1291,17 +1339,22 @@ func (in *Interp) registerBuiltins() {
 	}
 
 	in.Builtins["head"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValArray || len(args[0].ArrayVal) == 0 {
+		if len(args) < 1 || args[0].Type != ValArray || args[0].arrayLen() == 0 {
 			return NilValue(), nil
 		}
-		return args[0].ArrayVal[0], nil
+		return args[0].arrayAt(0), nil
 	}
 
 	in.Builtins["tail"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValArray || len(args[0].ArrayVal) == 0 {
+		if len(args) < 1 || args[0].Type != ValArray || args[0].arrayLen() == 0 {
 			return ArrayValue(nil), nil
 		}
-		return ArrayValue(args[0].ArrayVal[1:]), nil
+		if args[0].Ints != nil && args[0].ArrayVal == nil {
+			cp := make([]int64, len(args[0].Ints)-1)
+			copy(cp, args[0].Ints[1:])
+			return IntArrayValue(cp), nil
+		}
+		return ArrayValue(append([]*Value(nil), args[0].ArrayVal[1:]...)), nil
 	}
 
 	in.Builtins["first"] = func(in *Interp, args []*Value) (*Value, error) {
@@ -1320,7 +1373,7 @@ func (in *Interp) registerBuiltins() {
 		if list.Type != ValArray {
 			return NilValue(), nil
 		}
-		for _, item := range list.ArrayVal {
+		for _, item := range list.materializeArray() {
 			res, err := in.InvokeCallable(callable, []*Value{item})
 			if err == nil && res.IsTrue() {
 				return item, nil
@@ -1334,7 +1387,7 @@ func (in *Interp) registerBuiltins() {
 		var flatten func(v *Value)
 		flatten = func(v *Value) {
 			if v.Type == ValArray {
-				for _, it := range v.ArrayVal {
+				for _, it := range v.materializeArray() {
 					flatten(it)
 				}
 			} else {
@@ -1353,7 +1406,7 @@ func (in *Interp) registerBuiltins() {
 		}
 		seen := make(map[string]bool)
 		var uniqueList []*Value
-		for _, v := range args[0].ArrayVal {
+		for _, v := range args[0].materializeArray() {
 			s := v.String()
 			if !seen[s] {
 				seen[s] = true
@@ -1367,8 +1420,8 @@ func (in *Interp) registerBuiltins() {
 		if len(args) < 2 || args[0].Type != ValArray || args[1].Type != ValArray {
 			return ArrayValue(nil), nil
 		}
-		a := args[0].ArrayVal
-		b := args[1].ArrayVal
+		a := args[0].materializeArray()
+		b := args[1].materializeArray()
 		minLen := len(a)
 		if len(b) < minLen {
 			minLen = len(b)

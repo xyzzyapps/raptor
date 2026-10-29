@@ -402,20 +402,6 @@ func ggmlComputeTensor(t *ggmlTensor) {
 	}
 }
 
-func ggmlLookup(ctxID, tensorID int64) (*ggmlContext, *ggmlTensor, error) {
-	ggmlState.mu.Lock()
-	defer ggmlState.mu.Unlock()
-	c := ggmlState.ctx(ctxID)
-	if c == nil {
-		return nil, nil, fmt.Errorf("ggml: unknown context %d", ctxID)
-	}
-	t := c.tensor(tensorID)
-	if t == nil {
-		return nil, nil, fmt.Errorf("ggml: unknown tensor %d", tensorID)
-	}
-	return c, t, nil
-}
-
 func ggmlRequireCtx(args []*Value, n int, name string) (*ggmlContext, error) {
 	if len(args) < n {
 		return nil, fmt.Errorf("%s: expected at least %d args", name, n)

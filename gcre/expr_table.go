@@ -1,6 +1,8 @@
 package gcre
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -25,10 +27,12 @@ const (
 
 // Operator defines metadata for an operator.
 type Operator struct {
-	Symbol string
-	Fixity Fixity
-	Prec   int
-	Assoc  Assoc
+	Symbol   string
+	Fixity   Fixity
+	Prec     int
+	Assoc    Assoc
+	RuleName string // Optional grammar rule (e.g. "infix:sym<and>") for custom token matching
+	Order    int    // Declaration order tie-breaker
 }
 
 // OpTable stores operators for the EXPR precedence parser.
@@ -36,6 +40,7 @@ type OpTable struct {
 	Prefix  map[string]*Operator
 	Infix   map[string]*Operator
 	Postfix map[string]*Operator
+	seq     int
 }
 
 func NewOpTable() *OpTable {
@@ -46,30 +51,57 @@ func NewOpTable() *OpTable {
 	}
 }
 
+func (t *OpTable) Clone() *OpTable {
+	if t == nil {
+		return NewOpTable()
+	}
+	c := NewOpTable()
+	c.seq = t.seq
+	for k, v := range t.Prefix {
+		cp := *v
+		c.Prefix[k] = &cp
+	}
+	for k, v := range t.Infix {
+		cp := *v
+		c.Infix[k] = &cp
+	}
+	for k, v := range t.Postfix {
+		cp := *v
+		c.Postfix[k] = &cp
+	}
+	return c
+}
+
 func (t *OpTable) AddPrefix(symbol string, prec int) {
+	t.seq++
 	t.Prefix[symbol] = &Operator{
 		Symbol: symbol,
 		Fixity: FixityPrefix,
 		Prec:   prec,
 		Assoc:  AssocRight,
+		Order:  t.seq,
 	}
 }
 
 func (t *OpTable) AddInfix(symbol string, prec int, assoc Assoc) {
+	t.seq++
 	t.Infix[symbol] = &Operator{
 		Symbol: symbol,
 		Fixity: FixityInfix,
 		Prec:   prec,
 		Assoc:  assoc,
+		Order:  t.seq,
 	}
 }
 
 func (t *OpTable) AddPostfix(symbol string, prec int) {
+	t.seq++
 	t.Postfix[symbol] = &Operator{
 		Symbol: symbol,
 		Fixity: FixityPostfix,
 		Prec:   prec,
 		Assoc:  AssocLeft,
+		Order:  t.seq,
 	}
 }
 
@@ -80,16 +112,16 @@ func DefaultRakuOpTable() *OpTable {
 	// Exponentiation
 	t.AddInfix("**", 100, AssocRight)
 
+	// Postfix unary
+	t.AddPostfix("++", 95)
+	t.AddPostfix("--", 95)
+
 	// Prefix unary
 	t.AddPrefix("+", 90)
 	t.AddPrefix("-", 90)
 	t.AddPrefix("!", 90)
 	t.AddPrefix("~", 90)
 	t.AddPrefix("?", 90)
-
-	// Postfix unary
-	t.AddPostfix("++", 95)
-	t.AddPostfix("--", 95)
 
 	// Multiplicative
 	t.AddInfix("*", 80, AssocLeft)
@@ -132,96 +164,168 @@ func DefaultRakuOpTable() *OpTable {
 	return t
 }
 
+func sortedOps(m map[string]*Operator) []*Operator {
+	ops := make([]*Operator, 0, len(m))
+	for _, op := range m {
+		ops = append(ops, op)
+	}
+	sort.Slice(ops, func(i, j int) bool {
+		ri := len([]rune(ops[i].Symbol))
+		rj := len([]rune(ops[j].Symbol))
+		if ri != rj {
+			return ri > rj
+		}
+		if ops[i].Order != ops[j].Order {
+			return ops[i].Order < ops[j].Order
+		}
+		return ops[i].Symbol < ops[j].Symbol
+	})
+	return ops
+}
+
+func (g *Grammar) matchBestOp(ctx *Context, ops map[string]*Operator) (*Operator, *Match) {
+	if len(ops) == 0 || ctx.Pos >= len(ctx.Src) {
+		return nil, nil
+	}
+	savedPos := ctx.Pos
+	savedActions := ctx.Actions
+	// Suppress action side effects during speculative LTM operator probing;
+	// ParseEXPR invokes the winning operator's action once combined.
+	ctx.Actions = nil
+	defer func() { ctx.Actions = savedActions }()
+
+	var bestOp *Operator
+	var bestMatch *Match
+	bestLen := -1
+
+	for _, op := range sortedOps(ops) {
+		ctx.Pos = savedPos
+		var m *Match
+		if op.RuleName != "" {
+			if fn, ok := g.Rules[op.RuleName]; ok {
+				prevSym := ctx.SymVal
+				ctx.SymVal = op.Symbol
+				m = fn(g, ctx)
+				ctx.SymVal = prevSym
+			} else {
+				m = g.ExactLit(op.Symbol, ctx)
+			}
+		} else {
+			m = g.ExactLit(op.Symbol, ctx)
+		}
+		if m != nil && m.Ok {
+			mlen := m.To - m.From
+			if mlen > bestLen {
+				bestLen = mlen
+				bestOp = op
+				bestMatch = m
+			}
+		}
+	}
+	ctx.Pos = savedPos
+	return bestOp, bestMatch
+}
+
 // ParseEXPR parses expressions using Precedence-Climbing / Pratt parsing.
 func (g *Grammar) ParseEXPR(ctx *Context, termRule string, table *OpTable, minPrec int) *Match {
+	if table == nil {
+		if g.OpTable != nil {
+			table = g.OpTable
+		} else {
+			table = DefaultRakuOpTable()
+		}
+	}
 	ctx.SkipWS()
 	start := ctx.Pos
 
-	// 1. Check for Prefix operators
-	var prefixOps []*Operator
-	for {
-		ctx.SkipWS()
-		matchedPrefix := false
-		for sym, op := range table.Prefix {
-			pMatch := g.ExactLit(sym, ctx)
-			if pMatch.Ok {
-				prefixOps = append(prefixOps, op)
-				matchedPrefix = true
-				break
+	var left *Match
+
+	// 1. Check for a Prefix operator (LTM) and bind its operand at prefix precedence.
+	if prefOp, prefMatch := g.matchBestOp(ctx, table.Prefix); prefOp != nil {
+		ctx.Pos = prefMatch.To
+		operand := g.ParseEXPR(ctx, termRule, table, prefOp.Prec)
+		if !operand.Ok {
+			ctx.Pos = start
+			return NewMatch("", start, start, false)
+		}
+		m := NewMatch(strings.TrimSpace(string(ctx.Src[start:ctx.Pos])), start, ctx.Pos, true)
+		m.AddNamed("op", prefMatch)
+		m.AddNamed("sym", NewMatch(prefOp.Symbol, prefMatch.From, prefMatch.To, true))
+		m.AddNamed("term", operand)
+		if ctx.Actions != nil {
+			g.callAction("prefix:sym<"+prefOp.Symbol+">", m, ctx.Actions)
+			if m.Made == nil {
+				g.callAction("EXPR", m, ctx.Actions)
+			}
+			if m.Made == nil {
+				g.callAction("expr", m, ctx.Actions)
 			}
 		}
-		if !matchedPrefix {
-			break
-		}
-	}
-
-	// 2. Parse Base Term
-	left := g.Subrule(termRule, ctx)
-	if !left.Ok {
-		ctx.Pos = start
-		return NewMatch("", start, start, false)
-	}
-
-	// Wrap prefix operators around term if any
-	for i := len(prefixOps) - 1; i >= 0; i-- {
-		op := prefixOps[i]
-		m := NewMatch(op.Symbol+left.Str, start, ctx.Pos, true)
-		m.AddNamed("op", NewMatch(op.Symbol, start, start+len(op.Symbol), true))
-		m.AddNamed("term", left)
 		left = m
+	} else {
+		// 2. Parse Base Term
+		left = g.Subrule(termRule, ctx)
+		if !left.Ok {
+			ctx.Pos = start
+			return NewMatch("", start, start, false)
+		}
 	}
 
 	// 3. Check for Postfix operators
 	for {
+		saved := ctx.Pos
 		ctx.SkipWS()
-		matchedPostfix := false
-		for sym, op := range table.Postfix {
-			pMatch := g.ExactLit(sym, ctx)
-			if pMatch.Ok {
-				m := NewMatch(left.Str+op.Symbol, left.From, ctx.Pos, true)
-				m.AddNamed("op", pMatch)
-				m.AddNamed("term", left)
-				left = m
-				matchedPostfix = true
-				break
-			}
-		}
-		if !matchedPostfix {
+		postOp, postMatch := g.matchBestOp(ctx, table.Postfix)
+		if postOp == nil || postOp.Prec < minPrec {
+			ctx.Pos = saved
 			break
 		}
+		ctx.Pos = postMatch.To
+		m := NewMatch(strings.TrimSpace(string(ctx.Src[left.From:ctx.Pos])), left.From, ctx.Pos, true)
+		m.AddNamed("op", postMatch)
+		m.AddNamed("sym", NewMatch(postOp.Symbol, postMatch.From, postMatch.To, true))
+		m.AddNamed("term", left)
+		if ctx.Actions != nil {
+			g.callAction("postfix:sym<"+postOp.Symbol+">", m, ctx.Actions)
+			if m.Made == nil {
+				g.callAction("EXPR", m, ctx.Actions)
+			}
+			if m.Made == nil {
+				g.callAction("expr", m, ctx.Actions)
+			}
+		}
+		left = m
 	}
 
 	// 4. Infix Operator Precedence Loop
+	var prevInfix *Operator
 	for ctx.Pos < len(ctx.Src) {
 		saved := ctx.Pos
 		ctx.SkipWS()
-		if ctx.Pos >= len(ctx.Src) || ctx.Src[ctx.Pos] == ';' || ctx.Src[ctx.Pos] == ')' || ctx.Src[ctx.Pos] == '}' || ctx.Src[ctx.Pos] == ']' || ctx.Src[ctx.Pos] == ',' {
+		if ctx.Pos >= len(ctx.Src) {
 			ctx.Pos = saved
 			break
 		}
 
-		// Find best matching infix operator (longer matches first)
-		var bestOp *Operator
-		var bestMatch *Match
-		for sym, op := range table.Infix {
-			checkPos := ctx.Pos
-			match := g.ExactLit(sym, ctx)
-			if match.Ok {
-				if bestOp == nil || len(sym) > len(bestOp.Symbol) {
-					bestOp = op
-					bestMatch = match
-				}
-			}
-			ctx.Pos = checkPos
-		}
-
-		if bestOp == nil || bestOp.Prec < minPrec {
+		bestOp, bestMatch := g.matchBestOp(ctx, table.Infix)
+		if bestOp == nil {
 			ctx.Pos = saved
 			break
 		}
 
-		// Advance past the operator
-		ctx.Pos += len(bestOp.Symbol)
+		if prevInfix != nil && prevInfix.Assoc == AssocNon && bestOp.Assoc == AssocNon && prevInfix.Prec == bestOp.Prec {
+			ctx.GoalErr = fmt.Sprintf("operators %q and %q are non-associative and cannot be chained", prevInfix.Symbol, bestOp.Symbol)
+			ctx.Pos = start
+			return NewMatch("", start, start, false)
+		}
+
+		if bestOp.Prec < minPrec {
+			ctx.Pos = saved
+			break
+		}
+
+		// Advance past the matched operator runes
+		ctx.Pos = bestMatch.To
 
 		// Determine precedence threshold for right-hand side based on associativity
 		nextMinPrec := bestOp.Prec + 1
@@ -231,6 +335,10 @@ func (g *Grammar) ParseEXPR(ctx *Context, termRule string, table *OpTable, minPr
 
 		right := g.ParseEXPR(ctx, termRule, table, nextMinPrec)
 		if !right.Ok {
+			if ctx.GoalErr != "" {
+				ctx.Pos = start
+				return NewMatch("", start, start, false)
+			}
 			ctx.Pos = saved
 			break
 		}
@@ -239,8 +347,19 @@ func (g *Grammar) ParseEXPR(ctx *Context, termRule string, table *OpTable, minPr
 		combined := NewMatch(strings.TrimSpace(string(ctx.Src[left.From:ctx.Pos])), left.From, ctx.Pos, true)
 		combined.AddNamed("left", left)
 		combined.AddNamed("op", bestMatch)
+		combined.AddNamed("sym", NewMatch(bestOp.Symbol, bestMatch.From, bestMatch.To, true))
 		combined.AddNamed("right", right)
+		if ctx.Actions != nil {
+			g.callAction("infix:sym<"+bestOp.Symbol+">", combined, ctx.Actions)
+			if combined.Made == nil {
+				g.callAction("EXPR", combined, ctx.Actions)
+			}
+			if combined.Made == nil {
+				g.callAction("expr", combined, ctx.Actions)
+			}
+		}
 		left = combined
+		prevInfix = bestOp
 	}
 
 	return left

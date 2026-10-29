@@ -1025,11 +1025,6 @@ func (c *Compiler) emitWordAsStr(w Word, dest uint16) error {
 	return nil
 }
 
-func mustParseInt(s string) int64 {
-	n, _ := strconv.ParseInt(s, 0, 64)
-	return n
-}
-
 func (c *Compiler) emitBindLex(lex uint16, outers uint16, src uint16) {
 	c.frame.EmitOp(moargo.OpBindLex)
 	c.frame.EmitReg(lex)

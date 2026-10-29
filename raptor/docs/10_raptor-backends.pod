@@ -19,7 +19,7 @@ Emits CompUnit v7 and executes it on C<moar.dll> (same opcode family
 as the Tcl frontend in F<../moarvm-go>). There is B<no Go fallback>.
 If the compiler cannot emit valid bytecode, it errors.
 
-Native today: scalars, arrays (C<@a[$i]>, C<elems>/C<push>/C<pop>/
+Native today: scalars, logical ops including C<xor>, arrays (C<@a[$i]>, C<elems>/C<push>/C<pop>/
 C<shift>, C<xx>), hashes (C<%h{"k"}>, C<exists>/C<delete>), C<for>
 (including postfix), C<given>/C<when>, C<~~>, C<goto LABEL>, C<enum>,
 named subs and closures, UFCS, C<last>/C<next>/C<redo>, C<subset>/C<multi>, C<struct> fields as

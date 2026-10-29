@@ -333,7 +333,7 @@ func (v *Value) IsTrue() bool {
 	case ValString:
 		return v.StrVal != "" && v.StrVal != "0"
 	case ValArray:
-		return len(v.ArrayVal) > 0
+		return v.arrayLen() > 0
 	case ValHash:
 		return len(v.HashVal) > 0
 	case ValClosure, ValMultiSub, ValNativePtr, ValCStruct, ValPromise, ValChannel, ValRef:
@@ -626,7 +626,14 @@ func (v *Value) ToInterface() any {
 	case ValString:
 		return v.StrVal
 	case ValArray:
-		var list []any
+		if v.Ints != nil && v.ArrayVal == nil {
+			list := make([]any, len(v.Ints))
+			for i, n := range v.Ints {
+				list[i] = n
+			}
+			return list
+		}
+		list := make([]any, 0, len(v.ArrayVal))
 		for _, item := range v.ArrayVal {
 			list = append(list, item.ToInterface())
 		}

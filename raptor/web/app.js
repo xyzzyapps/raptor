@@ -1280,16 +1280,33 @@ say MathUtil::nope(7);
   {
     title: "16. Grammars (gcre)",
     desc: `
-      <p>Declarative <code>grammar</code> / <code>rule</code> / <code>token</code> objects. The language itself is parsed by <strong>gcre</strong> (a PEG-compatible Raku subset) with <code>&lt;HOST_stmt&gt;</code> calling the Pratt parser.</p>
+      <p>Declarative NQP / QRegex <code>grammar</code> blocks compiled by <strong>gcre</strong>: grammar inheritance (<code>is</code>), protoregexes (<code>proto</code> / <code>:sym&lt;...&gt;</code>), LTM (<code>|</code>) vs sequential (<code>||</code>) alternation, <code>is optable</code> precedence, separated lists (<code>%</code>), and goal matching (<code>~</code>). Raptor itself is parsed by <strong>gcre</strong> with <code>&lt;HOST_stmt&gt;</code> calling the Pratt parser.</p>
     `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
-    code: `grammar PointGrammar {
-    token TOP { <num> ',' <num> }
-    token num { \\d+ }
+    code: `grammar ExprBase {
+    token EXPR is optable { <term> }
+    proto token term { * }
+    token term:sym<int>   { \\d+ }
+    token term:sym<group> { '(' ~ ')' [ <.ws> <EXPR> <.ws> ] }
+
+    proto token infix { * }
+    token infix:sym<+>  { <sym> }
+    token infix:sym<*>  is tighter<+> { <sym> }
+    token infix:sym<**> is tighter<*> is assoc<right> { <sym> }
 }
-say "grammar name: ", PointGrammar{"name"};
-say "TOP pattern stored: ", PointGrammar{"TOP"};
+
+grammar MiniCalc is ExprBase {
+    rule TOP { ^ <stmt>+ % ';' ';'? $ }
+    proto rule stmt { * }
+    rule stmt:sym<let> { <sym> <lhs=ident> '=' <rhs=EXPR> }
+}
+
+my $m = MiniCalc.parse("let total = 2 + 3 * 2 ** 3;");
+say "matched rule: ", $m{"stmt"}{"rule"};
+say "lhs variable: ", $m{"stmt"}{"lhs"}{"str"};
+say "outer EXPR op: ", $m{"stmt"}{"rhs"}{"sym"}{"str"};
+say "\\$/ full match: ", $/{"str"};
 `
   },
 

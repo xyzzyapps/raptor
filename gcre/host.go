@@ -28,37 +28,38 @@ func lookupHost(name string) HostFunc {
 
 type rxHost struct {
 	name    string
+	alias   string
 	capture bool
-	quant   byte
 }
 
 func (r *rxHost) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
-	once := func() bool {
-		if !token {
-			ctx.SkipWS()
-		}
-		fn := lookupHost(r.name)
-		if fn == nil {
-			return false
-		}
-		start := ctx.Pos
-		m := NewMatch("", start, start, true)
-		if !fn(g, ctx, m) {
-			ctx.Pos = start
-			return false
-		}
-		m.To = ctx.Pos
-		m.Ok = true
-		if m.Str == "" {
-			m.Str = string(ctx.Src[start:ctx.Pos])
-		}
-		if r.capture && cap != nil {
-			cap.AddNamed("HOST_"+r.name, m)
-			if m.Made != nil {
-				cap.Make(m.Made)
-			}
-		}
-		return true
+	if !token {
+		ctx.SkipWS()
 	}
-	return applyQuant(r.quant, ctx, once)
+	fn := lookupHost(r.name)
+	if fn == nil {
+		return false
+	}
+	start := ctx.Pos
+	m := NewMatch("", start, start, true)
+	if !fn(g, ctx, m) {
+		ctx.Pos = start
+		return false
+	}
+	m.To = ctx.Pos
+	m.Ok = true
+	if m.Str == "" {
+		m.Str = string(ctx.Src[start:ctx.Pos])
+	}
+	if r.capture && cap != nil {
+		capName := "HOST_" + r.name
+		if r.alias != "" {
+			capName = r.alias
+		}
+		cap.AddNamed(capName, m)
+		if m.Made != nil {
+			cap.Make(m.Made)
+		}
+	}
+	return true
 }

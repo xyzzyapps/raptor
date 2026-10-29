@@ -1,10 +1,15 @@
-# Dynamic Grammar Example in Raptor Syntax
-# This grammar can be loaded and executed directly by the runtime engine
+# Dynamic NQP Grammar Example in Raptor
+# Demonstrates compiling a declarative grammar and inspecting `$/` captures.
 
 grammar PointGrammar {
-    rule TOP { <point> }
-    rule point { '(' <number> ',' <number> ')' }
-    token number { \d+ }
+    rule TOP { ^ <point> $ }
+    rule point { '(' ~ ')' [ <x=coord> ',' <y=coord> ] }
+    token coord { '-'? \d+ [ '.' \d+ ]? }
 }
 
-say "PointGrammar schema loaded successfully.";
+my $m = PointGrammar.parse("(12, -45.5)");
+if $m {
+    my $pt = $m{"point"};
+    say "Parsed point: x=" ~ $pt{"x"}{"str"} ~ ", y=" ~ $pt{"y"}{"str"};
+    say "\$/ matched: " ~ $/{"str"};
+}

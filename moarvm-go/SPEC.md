@@ -71,9 +71,69 @@ Execution is native: `FindMoarDLL` + `MVM_vm_run_bytecode` (in-process). `moar.e
 
 In-Go KnowHOW / class / role tables. **Not** serialized into the CompUnit SC, so native MoarVM never sees these objects.
 
-### 3.6 Grammar (`../gcre`)
+### 3.6 Grammar (`../gcre`) & Formal Grammar Specifications
 
-**gcre** (Grammar Compatible Regular Expressions) is a sibling Go module: a **subset of Raku** grammar/regex notation that is **PEG-compatible**. Authors write `.raku` (no semantic actions). Tcl’s only grammar in this repo is [`tcl/tcl.raku`](tcl/tcl.raku). Other sample grammars live under [`../gcre/examples`](../gcre/examples). Parsing does **not** run on `moar.dll`.
+**gcre** (Grammar Compatible Regular Expressions) is a sibling Go module implementing an **NQP (Not Quite Perl / QRegex) + PEG** grammar engine for `.raku` grammar files without embedded target-language code blocks. Parsing runs natively in Go; semantic compilation emits MoarVM CompUnit v7 bytecode.
+
+#### 3.6.1 `gcre` NQP / QRegex Meta-Grammar Specification
+
+`gcre` (`../gcre/raku.peg`) formally accepts the following grammar declarations and regular-expression constructs:
+
+```ebnf
+GrammarFile    ::= GrammarDecl+
+GrammarDecl    ::= 'grammar' Name ('is' Name)? '{' GrammarMember* '}'
+GrammarMember  ::= ProtoDecl | RuleDecl | ';'
+ProtoDecl      ::= 'proto' RuleKind Name RuleTrait* '{' ('{*}' | '*' | '<...>' | '...' | '') '}'
+RuleDecl       ::= 'multi'? RuleKind Name (':sym' SymDelim)? RuleTrait* '{' RxAlt? '}'
+RuleKind       ::= 'token' | 'rule' | 'regex'
+RuleTrait      ::= 'is' ('optable' | 'parsed' | 'ltm'
+                       | ('tighter' | 'looser' | 'equiv' | 'assoc') TraitArg)
+
+RxAlt          ::= '||'? RxLTMAlt ('||' RxLTMAlt)*
+RxLTMAlt       ::= '|'?  RxSeq    ('|'  RxSeq)*
+RxSeq          ::= RxItem+
+RxItem         ::= '$<' Name '>=' PlainAtom
+                 | PlainAtom ('~' PlainAtom RxItem)?
+PlainAtom      ::= RxPrimary QuantSpec? (('%%' | '%') RxPrimary QuantSpec?)?
+QuantSpec      ::= '**' (Digits ('..' ('*' | Digits))?) '?'?
+                 | '*?' | '+?' | '??' | '*' | '+' | '?'
+RxPrimary      ::= '{*}' | '[' RxAlt? ']' | '(' RxAlt? ')'
+                 | '<?before' RxAlt '>' | '<!before' RxAlt '>'
+                 | '<?after'  RxAlt '>' | '<!after'  RxAlt '>'
+                 | '<' ('?' | '!' | '.')? (CharClassExpr | Name '=' Target | 'HOST_' Name | Name) '>'
+                 | SingleQuoted | DoubleQuoted | RegexEscape
+                 | '^^' | '$$' | '<<' | '>>' | '«' | '»' | '^' | '$' | '.'
+```
+
+Key semantic rules:
+1. **`token` / `regex` vs `rule`**: `token` and `regex` match exact rune streams under `:ratchet`; `rule` skips inter-atom whitespace while preserving exact boundary positions for `^`, `^^`, `$$`, `>>`, `<?wb>`, `<!wb>`, and lookbehinds.
+2. **Protoregexes & `:sym<...>` LTM**: `proto token foo { * }` dispatches across all `foo:sym<...>` candidates using **Longest-Token Matching (LTM)** (ties broken by declaration order), binding `<sym>` / `<.sym>` to the candidate's symbol and recording `Match.Rule` + `Match.Named["sym"]`.
+3. **`|` vs `||`**: `|` binds tighter than `||`. `||` evaluates sequentially (first match wins); `|` performs LTM across declarative branches and in `is ltm` rules. Failed branches roll back all named and positional captures on `Match`.
+4. **Declarative `is optable`**: Rules marked `is optable` invoke Pratt precedence climbing over `prefix:sym<...>`, `infix:sym<...>`, and `postfix:sym<...>` operators ordered by `is tighter`, `is looser`, `is equiv`, and `is assoc<left|right|non|chain>` (rejecting chained `AssocNon` operators at the same precedence).
+
+#### 3.6.2 Tcl Frontend Grammar (`tcl/tcl.raku`)
+
+Tcl source is parsed exclusively through [`tcl/tcl.raku`](tcl/tcl.raku) (`ParseTclAST`):
+
+```raku
+grammar Tcl {
+    token TOP            { <.sep>* [ <command_line> <.sep>* ]* }
+    token sep            { [ ';' | \n | \r | ' ' | \t ]+ }
+    token command_line   { | <comment> | <command> }
+    token comment        { '#' <-[\n]>* }
+    token command        { <word> [ [ ' ' | \t ]+ <word> ]* }
+    token word           { | <braced_word> | <quoted_word> | <cmd_subst> | <var_subst> | <bare_word> }
+    token braced_word    { '{' <braced_content>* '}' }
+    token braced_content { | <-[\{\}]>+ | '{' <braced_content>* '}' }
+    token quoted_word    { '"' <quoted_content>* '"' }
+    token quoted_content { | <cmd_subst> | <var_subst> | <escape_seq> | <-["\\\$\[]>+ }
+    token cmd_subst      { '[' <command_line>* ']' }
+    token var_subst      { '$' [ <ident> | '{' <ident> '}' | <ident> '(' <ident> ')' ] }
+    token escape_seq     { '\\' . }
+    token bare_word      { <-[\s;\[\]\{\}"\$]>+ }
+    token ident          { <[a..zA..Z0..9_:\-]>+ }
+}
+```
 
 ---
 

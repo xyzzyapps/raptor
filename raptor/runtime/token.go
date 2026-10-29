@@ -54,6 +54,8 @@ const (
 	TokAssign
 	TokAddAssign
 	TokSubAssign
+	TokMulAssign
+	TokDivAssign
 	TokConcatAssign
 	TokDefinedOrAssign // //=
 
@@ -68,10 +70,14 @@ const (
 	TokNeStr // ne
 	TokLtStr // lt
 	TokGtStr // gt
+	TokLeStr // le
+	TokGeStr // ge
 
 	// Operators - Logic & String & Bitwise & Perl5/Raku
 	TokAnd
 	TokOr
+	TokXor    // xor
+	TokOrElse // orelse
 	TokNot
 	TokConcat // ~
 	TokRepeat // x
@@ -96,10 +102,9 @@ const (
 	TokFileTest // -e, -f, -d, -s, -r, -w
 	TokFatArrow    // =>
 	TokArrow       // ->
-	TokSmartMatch  // ~~
-	TokDotDot      // ..
-	TokCaretDotDot // ^..
-	TokEllipsis    // ... (yada-yada / stub operator)
+	TokSmartMatch // ~~
+	TokDotDot     // ..
+	TokEllipsis   // ... (yada-yada / stub operator)
 	TokElem        // ∈
 	TokNotElem     // ∉
 	TokIntersect   // ∩
@@ -136,10 +141,9 @@ const (
 	TokToken   // token
 	TokRegex   // regex
 
-	// Literals - Interpolated & Heredoc & Backtick
-	TokInterpString // double-quoted string with interpolation markers
-	TokHeredoc      // heredoc multiline string
-	TokBacktick     // backtick raw command string
+	// Literals - Interpolated & Backtick
+	TokInterpString   // double-quoted string with interpolation markers
+	TokBacktick       // backtick raw command string
 	TokInterpBacktick // backtick interpolated command string
 
 	// Delimiters

@@ -169,8 +169,8 @@ Comprehensive manuals in `docs/` (`raptor doc 01` … `raptor doc 18`):
 
 ## 7. Verification & Test Metrics
 
-- **Unit Test Suite**: 58 test suites in `runtime/` pass with 100% success rate.
-- **TAP Test Suite**: 6 test scripts in `t/` (47 assertions) pass with 100% success rate (`raptor test t/`).
+- **Unit Test Suite**: Go unit & audit test suites in `runtime/` pass with 100% success rate (`go test -mod=mod ./...`).
+- **TAP Test Suite**: 24 test scripts in `t/` (152 assertions) pass with 100% success rate (`raptor test t/`).
 - **Standalone Binary Packager & DLLs**: `raptor pack <script> -o <bin.exe>` produces self-contained executables; `bin/` contains `libraylib.dll`, `moar.dll`, and `sqlite3.dll` for zero-dependency distribution.
 
 ---
@@ -952,22 +952,25 @@ my $output3 = qx/uptime/;
 
 ## 32. Dynamic Grammars & Rule Declarations
 
-Raptor includes declarative parsing grammar declarations inspired by Raku and MoarVM compunit grammars:
+Raptor includes first-class declarative NQP / QRegex parsing grammars powered by `gcre`:
 
 ```raptor
 grammar PointGrammar {
     rule TOP { <point> }
-    rule point { '(' <number> ',' <number> ')' }
+    rule point { '(' ~ ')' [ <number>+ % ',' ] }
     token number { \d+ }
 }
+
+my $m = PointGrammar.parse("(10, 20)");
+say $m<point><number>[0]<Str>; # 10
+say $/<point><Str>;            # (10, 20)
 ```
 
-- `grammar <Name> { ... }`: Defines a dynamic grammar schema object registered in the lexical and global namespaces.
-- `rule <Name> { <pattern> }`: Declares a parsing rule with whitespace-agnostic pattern matching.
-- `token <Name> { <pattern> }`: Declares a lexical token rule with exact whitespace matching.
-- `regex <Name> { <pattern> }`: Declares a regular expression pattern rule.
-
-Grammar objects are first-class instances exposing rule definitions for parsing structured text and AST generation.
+- `grammar <Name> [is <Parent>] { ... }`: Compiles a `gcre` grammar registered in the lexical and global namespaces, supporting inheritance of rules, `proto` multi-dispatch tables, and `is optable` precedence tables.
+- `proto token|rule|regex <Name> { * }` and `<Name>:sym<...>`: Longest-Token Matching (LTM) protoregex dispatch with `<sym>` binding.
+- `token EXPR is optable { <term> }`: Declarative operator-precedence parsing using `is tighter`, `is looser`, `is equiv`, and `is assoc<left|right|non|chain>`.
+- `<Grammar>.parse($input, [$rule])`: Matches `$input` (default rule `"TOP"`), requiring full input consumption; populates `$/` and returns a Match hash (`Str`, `from`, `to`, `ok`, `rule`, `pos`, and named subcaptures) or `Nil` on failure.
+- `<Grammar>.subparse($input, [$rule])`: Prefix/partial parse without requiring full input consumption.
 
 ---
 
@@ -1433,5 +1436,137 @@ func main() {
     fmt.Printf("MoarVM execution completed: %v\n", result)
 }
 ```
+
+---
+
+## 37. Formal Grammar Specification
+
+Raptor's concrete syntax is defined by [`runtime/raptor.raku`](runtime/raptor.raku) (loaded by `gcre`) paired with the host lexical/Pratt hooks `<HOST_stmt>` and `<HOST_expr>` in [`runtime/lexer.go`](runtime/lexer.go) and [`runtime/parser.go`](runtime/parser.go).
+
+### 37.1 Lexical Grammar
+
+```ebnf
+Program        ::= (Whitespace | Comment | PodBlock | Statement)* EOF
+Comment        ::= '#' [^\n]*
+PodBlock       ::= '=begin' Ident .*? '=end' Ident      (* stripped/woven by PodLit preprocessor *)
+
+Ident          ::= (Letter | '_') (Letter | Digit | '_')* ('-' (Letter | '_'))*
+ColonName      ::= Ident ('::' Ident)*
+Sigil          ::= '$' | '@' | '%' | '&'
+Twigil         ::= '*'
+Variable       ::= Sigil Twigil? ColonName
+                 | '$$' | '$/' | '$?' | '$!' | '$_' | '$0' .. '$9'
+
+IntLit         ::= '0' [xX] [0-9a-fA-F_]+
+                 | '0' [bB] [01_]+
+                 | '0' [oO] [0-7_]+
+                 | [0-9] [0-9_]*
+FloatLit       ::= [0-9] [0-9_]* '.' [0-9] [0-9_]* ([eE] [+-]? [0-9]+)?
+                 | [0-9] [0-9_]* [eE] [+-]? [0-9]+
+
+StringLit      ::= "'" ( '\\' . | [^'] )* "'"
+                 | '"' ( '\\' . | InterpExpr | [^"\\] )* '"'
+                 | 'q['  [^\]]* ']'
+                 | 'qq[' [^\]]* ']'
+                 | Heredoc
+Heredoc        ::= '<<' '~'? ("'" Ident "'" | '"' Ident '"' | Ident) '\n' .*? Ident
+BacktickLit    ::= '`' ( '\\' . | [^`] )* '`'
+                 | 'qx' DelimOpen .*? DelimClose
+RegexLit       ::= ('m' | 'rx')? '/' ( '\\' . | [^/] )+ '/' [igmsx]*
+SubstLit       ::= 's/' ( '\\' . | [^/] )* '/' ( '\\' . | [^/] )* '/' [igmsx]*
+```
+
+Inside double-quoted strings (`"..."`), `$var`, `@arr`, `{$expr}` interpolate, while escaped `\$` and `\{` produce literal `$` and `{`, and `$$` followed by an identifier (`"$$sref"`) interpolates `"$" ~ $sref` rather than `$*PID`.
+
+### 37.2 Syntactic Grammar (Statements & Declarations)
+
+```ebnf
+Statement      ::= PackageDecl
+                 | UseStmt
+                 | GrammarDecl
+                 | SubDecl
+                 | NativeSubDecl
+                 | SubsetDecl
+                 | StructDecl
+                 | EnumDecl
+                 | AdviceStmt
+                 | VarDecl
+                 | IfStmt | UnlessStmt | WhileStmt | UntilStmt | ForStmt | LoopStmt | GivenStmt
+                 | VerifyStmt | TapStmt
+                 | ReturnStmt | LastStmt | NextStmt | RedoStmt | GotoStmt | TakeStmt
+                 | LabelStmt | Block
+                 | ExprStmt
+
+PackageDecl    ::= 'unit'? ('package' | 'module') ColonName (Block | ';')
+UseStmt        ::= 'use' ColonName (':from<' Ident '>')? ';'?
+GrammarDecl    ::= 'grammar' Ident ('is' Ident)? '{' GcreGrammarMember* '}' ';'?
+
+SubDecl        ::= 'multi'? 'sub' SubName Signature? ('returns' TypeName)? WhereClause? Block
+NativeSubDecl  ::= 'sub' Ident Signature ('returns' TypeName)? 'is' 'native' '(' Expr? ')' ';'?
+Signature      ::= '(' (Param (',' Param)*)? ')'
+Param          ::= TypeName? (Variable | ArrayDestruct | HashDestruct) '?'? ('=' Expr)? WhereClause?
+WhereClause    ::= 'where' Block
+
+SubsetDecl     ::= 'subset' Ident ('of' TypeName)? WhereClause ';'?
+StructDecl     ::= ('struct' | 'union') Ident '{' (TypeName Variable ';'?)* '}'
+EnumDecl       ::= 'enum' Ident ('<' Ident+ '>' | '(' PairList ')') ';'?
+AdviceStmt     ::= ('before' | 'after' | 'around') Ident Signature? Block
+
+VarDecl        ::= ('my' | 'our' | 'state') TypeName? (Variable | '(' VarList ')')
+                   WhereClause? (AssignOp Expr)? StmtModifier? ';'?
+
+IfStmt         ::= 'if' Expr Block ('elsif' Expr Block)* ('else' Block)?
+UnlessStmt     ::= 'unless' Expr Block ('else' Block)?
+WhileStmt      ::= 'while' Expr Block
+UntilStmt      ::= 'until' Expr Block
+ForStmt        ::= 'for' Expr ('->' Param (',' Param)*)? Block
+LoopStmt       ::= 'loop' ('(' Stmt? ';' Expr? ';' Expr? ')')? Block
+GivenStmt      ::= 'given' Expr '{' ('when' Expr Block | 'default' Block | Statement)* '}'
+
+VerifyStmt     ::= ('PRE' | 'POST' | 'INVARIANT' | 'CHECK' | 'ASSERT') (Expr (',' Expr)? | Block) ';'?
+                 | 'TEST' Expr? Block
+                 | 'PROPERTY' Expr? Signature Block
+                 | 'SUBTEST' Expr Block
+
+ReturnStmt     ::= 'return' Expr? StmtModifier? ';'?
+LastStmt       ::= 'last' Ident? StmtModifier? ';'?
+NextStmt       ::= 'next' Ident? StmtModifier? ';'?
+RedoStmt       ::= 'redo' Ident? StmtModifier? ';'?
+GotoStmt       ::= 'goto' ('&' Ident | Ident) ';'?
+TakeStmt       ::= 'take' Expr StmtModifier? ';'?
+StmtModifier   ::= ('if' | 'unless' | 'while' | 'until' | 'for') Expr
+ExprStmt       ::= Expr StmtModifier? ';'?
+```
+
+> [!IMPORTANT]
+> Verification contract keywords (`PRE`, `POST`, `INVARIANT`, `CHECK`, `ASSERT`, `TEST`, `PROPERTY`, `SUBTEST`) are **strictly uppercase** so lowercase identifiers such as `sub post(...)` or `assert(...)` remain valid user symbols. When followed immediately by an adjacent `(`, e.g. `PRE($b != 0, "msg")`, contract checks also accept function-call form.
+
+### 37.3 Expressions, Precedence & Call Disambiguation
+
+#### Call vs Grouping Whitespace Disambiguation
+
+1. **Adjacent `(` (`callee(args...)`)**: Always parsed as a direct invocation of `callee`.
+2. **Whitespace ` (` (`callee (expr)`)**:
+   - Inside `(...)`, if the leading token is a callable identifier followed by prefix arguments (`say (pair 5, 6)`), `(pair 5, 6)` parses as a parenthesized prefix call unless an adjacent postfix operator (`(fib($n - 1) + 1)`) follows the inner call.
+   - Outside `(...)`, `callee (a, b)` parses as a multi-argument call if `,` separates arguments at top level; `callee (1 + 2) * 3` leaves `(1 + 2)` as a grouped subexpression so `* 3` binds to `(1 + 2)` before passing `9` to `callee`.
+3. **Sigil Dereferencing**: Bare `$$sref`, `@$aref`, `%$href`, `&$cref` and braced `${$sref}`, `@{$aref}`, `%{$href}` dereference references at unary precedence (`len(tok) == 1` sigil tokens are never misparsed as prefix callees).
+
+#### Complete Operator Precedence & Associativity Table (Tightest to Loosest)
+
+| Level | Category | Operators | Associativity |
+| :---: | :--- | :--- | :--- |
+| **11** | Terms & Circumfix | Literals, Variables, `(expr)`, `[...]`, `{...}`, `do {...}`, `gather {...}`, `try {...}` | — |
+| **10** | Postfix / Method / Index | `f(...)`, `.method(...)`, `->method(...)`, `[idx]`, `{key}`, `<word>`, `->[...]`, `->{...}`, `->(...)`, `++`, `--` | Left |
+| **9** | Prefix Unary | `+`, `-`, `!`, `?`, `~`, `\`, `√`, `not`, `so`, `∑`, `∏`, prefix `++` / `--` | Right |
+| **8** | Exponentiation | `**` | **Right** (`2 ** 3 ** 2 == 512`) |
+| **7** | Multiplicative & Set Product | `*`, `/`, `%`, `div`, `mod`, `x`, `xx`, `∩` | Left |
+| **6** | Additive, Concat & Set Union | `+`, `-`, `~`, `∪` | Left |
+| **5** | Range & Pair Construction | `..`, `..^`, `^..`, `^..^`, `=>` | Left / Pair |
+| **4** | Comparison, Smartmatch & Extremum | `==`, `!=`, `<`, `<=`, `>`, `>=`, `<=>`, `eq`, `ne`, `lt`, `gt`, `le`, `ge`, `cmp`, `=~`, `!~`, `~~`, `∈`, `∉`, `min`, `max` | Chained (`1 < $x < 10`) / Left |
+| **3** | Tight Logical / Defined-OR | `&&`, `//` | Left (short-circuit) |
+| **2** | Loose Logical | `\|\|`, `orelse` | Left (short-circuit) |
+| **1** | Low-Precedence Word Logical | `and`, `or`, `xor` | Left |
+| **0.5** | Conditional Ternary | `cond ?? then !! else`, `cond ? then : else` | Right |
+| **0** | Assignment & Compound Mutation | `=`, `+=`, `-=`, `*=`, `/=`, `~=`, `//=` | **Right** (enforces `Type` & `where` invariants) |
 
 ---

@@ -124,7 +124,7 @@ func CompileToWASM(outPath string) error {
 	if err != nil {
 		return err
 	}
-	if werr := writeWASMStubs(root, filepath.Dir(outPath)); werr != nil {
+	if werr := writeWASMStubs(root, filepath.Dir(outPath), compiler); werr != nil {
 		fmt.Fprintf(os.Stderr, "wasm stubs: %v\n", werr)
 	}
 	fmt.Fprintf(os.Stderr, "wasm compiler: %s -> %s\n", compiler, outPath)
@@ -132,20 +132,31 @@ func CompileToWASM(outPath string) error {
 }
 
 func runTinyGoWASM(root, outPath string) error {
-	cmd := exec.Command("tinygo", "build", "-target=wasm", "-no-debug", "-o", outPath, filepath.Join(root, "cmd", "wasm"))
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "RAPTOR_WASM=1")
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("tinygo wasm: %w\n%s", err, buf.String())
+	run := func(extraArgs ...string) (string, error) {
+		args := []string{"build", "-target=wasm", "-no-debug"}
+		args = append(args, extraArgs...)
+		args = append(args, "-o", outPath, filepath.Join(root, "cmd", "wasm"))
+		cmd := exec.Command("tinygo", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "RAPTOR_WASM=1")
+		var buf bytes.Buffer
+		cmd.Stdout = &buf
+		cmd.Stderr = &buf
+		err := cmd.Run()
+		return buf.String(), err
+	}
+	out, err := run()
+	if err != nil && strings.Contains(out, "wasm-opt") {
+		out, err = run("-opt=2")
+	}
+	if err != nil {
+		return fmt.Errorf("tinygo wasm: %w\n%s", err, out)
 	}
 	return nil
 }
 
 func runGoWASM(root, outPath string) error {
-	cmd := exec.Command("go", "build", "-o", outPath, filepath.Join(root, "cmd", "wasm"))
+	cmd := exec.Command("go", "build", "-mod=mod", "-ldflags=-s -w", "-o", outPath, filepath.Join(root, "cmd", "wasm"))
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GOOS=js", "GOARCH=wasm", "RAPTOR_WASM=1")
 	var buf bytes.Buffer
@@ -157,7 +168,7 @@ func runGoWASM(root, outPath string) error {
 	return nil
 }
 
-func writeWASMStubs(root, destDir string) error {
+func writeWASMStubs(root, destDir, compiler string) error {
 	if destDir == "" || destDir == "." {
 		destDir = filepath.Join(root, "web")
 	}
@@ -168,9 +179,15 @@ func writeWASMStubs(root, destDir string) error {
 	if b, err := os.ReadFile(bridgeSrc); err == nil {
 		_ = os.WriteFile(filepath.Join(destDir, "raptor_bridge.js"), b, 0644)
 	}
-	// Prefer the project's wasm_exec.js; fall back to GOROOT.
-	execSrc := filepath.Join(root, "web", "wasm_exec.js")
-	if _, err := os.Stat(execSrc); err != nil {
+	var execSrc string
+	if compiler == "tinygo" {
+		if out, e := exec.Command("tinygo", "env", "TINYGOROOT").Output(); e == nil {
+			cand := filepath.Join(strings.TrimSpace(string(out)), "targets", "wasm_exec.js")
+			if _, se := os.Stat(cand); se == nil {
+				execSrc = cand
+			}
+		}
+	} else {
 		goroot := os.Getenv("GOROOT")
 		if goroot == "" {
 			if out, e := exec.Command("go", "env", "GOROOT").Output(); e == nil {
@@ -186,6 +203,9 @@ func writeWASMStubs(root, destDir string) error {
 				break
 			}
 		}
+	}
+	if execSrc == "" {
+		execSrc = filepath.Join(root, "web", "wasm_exec.js")
 	}
 	if b, err := os.ReadFile(execSrc); err == nil {
 		_ = os.WriteFile(filepath.Join(destDir, "wasm_exec.js"), b, 0644)

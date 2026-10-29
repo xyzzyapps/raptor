@@ -136,10 +136,6 @@ func (c *Compiler) tempKind(kind uint16) (uint16, error) {
 	return reg, nil
 }
 
-func (c *Compiler) tempReg() (uint16, error) {
-	return c.tempKind(moargo.RegInt64)
-}
-
 func (c *Compiler) kindOf(reg uint16) uint16 {
 	if int(reg) < len(c.frame.LocalTypes) {
 		return c.frame.LocalTypes[reg]
@@ -1134,6 +1130,8 @@ func (c *Compiler) compileBinary(e *BinaryExpr) (mval, error) {
 		return c.compileAnd(e)
 	case "||", "or":
 		return c.compileOr(e)
+	case "xor":
+		return c.compileXor(e)
 	case "//", "orelse":
 		return c.compileDefinedOr(e)
 	}
@@ -1407,6 +1405,52 @@ func (c *Compiler) compileOr(e *BinaryExpr) (mval, error) {
 		return mval{}, err
 	}
 	c.patchU32(skip, uint32(c.frame.CurrentOffset()))
+	return c.definedVal(dst, moargo.RegInt64)
+}
+
+func (c *Compiler) compileXor(e *BinaryExpr) (mval, error) {
+	l, err := c.compileVal(e.Left)
+	if err != nil {
+		return mval{}, err
+	}
+	r, err := c.compileVal(e.Right)
+	if err != nil {
+		return mval{}, err
+	}
+	lb, err := c.tempKind(moargo.RegInt64)
+	if err != nil {
+		return mval{}, err
+	}
+	rb, err := c.tempKind(moargo.RegInt64)
+	if err != nil {
+		return mval{}, err
+	}
+	c.frame.EmitOp(moargo.OpConstI64)
+	c.frame.EmitReg(lb)
+	c.frame.EmitInt64(1)
+	lTrue := c.emitIf(l.reg)
+	c.frame.EmitOp(moargo.OpConstI64)
+	c.frame.EmitReg(lb)
+	c.frame.EmitInt64(0)
+	c.patchU32(lTrue, uint32(c.frame.CurrentOffset()))
+
+	c.frame.EmitOp(moargo.OpConstI64)
+	c.frame.EmitReg(rb)
+	c.frame.EmitInt64(1)
+	rTrue := c.emitIf(r.reg)
+	c.frame.EmitOp(moargo.OpConstI64)
+	c.frame.EmitReg(rb)
+	c.frame.EmitInt64(0)
+	c.patchU32(rTrue, uint32(c.frame.CurrentOffset()))
+
+	dst, err := c.tempKind(moargo.RegInt64)
+	if err != nil {
+		return mval{}, err
+	}
+	c.frame.EmitOp(moargo.OpNeI)
+	c.frame.EmitReg(dst)
+	c.frame.EmitReg(lb)
+	c.frame.EmitReg(rb)
 	return c.definedVal(dst, moargo.RegInt64)
 }
 

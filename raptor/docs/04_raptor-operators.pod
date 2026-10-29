@@ -40,10 +40,10 @@ Chained: C<0 <= $x <= 10>. C<~~> is smartmatch (subsets, regex, ranges).
 
 =head1 LOGICAL
 
-    && || //    and or orelse
+    && || //    and or xor orelse
     ?? !!       ?:
 
-C<//> is defined-or. C<//=> assigns only when the left is undefined.
+C<//> and C<orelse> are defined-or. C<//=> assigns only when the left is undefined.
 
 =head1 BITWISE (numeric)
 

@@ -1,6 +1,6 @@
 # moarvm-go
 
-A Go host and FFI binding for **MoarVM** (the 6model 64-bit virtual machine) with a CompUnit v7 bytecode emitter, 6Model types, **[gcre](../gcre)** grammars (Raku subset, PEG-compatible), and a **Tcl** frontend. Pipeline:
+A Go host and FFI binding for **MoarVM** (the 6model 64-bit virtual machine) with a CompUnit v7 bytecode emitter, 6Model types, **[gcre](../gcre)** declarative NQP / QRegex grammars, and a **Tcl** frontend. Pipeline:
 
 **grammar parse → Go compiler emits CompUnit v7 → `moar.exe` / `moar.dll` runs it.**
 
@@ -27,31 +27,33 @@ Parsing is not “evaluate as you tokenize.” The grammar only builds an AST. S
 
 ## Quick Start
 
+Pass `-mod=mod` when running `go` commands from source (`vendor/MoarVM` contains C sources rather than Go modules).
+
 ### Interactive shell
 ```powershell
-go run ./cmd/tcl
+go run -mod=mod ./cmd/tcl
 ```
 
 ### Run a script (parse → bytecode → interpret)
 ```powershell
-go run ./cmd/tcl examples/demo_tcl.tcl
+go run -mod=mod ./cmd/tcl examples/demo_tcl.tcl
 ```
 
 ### Emit a `.moarvm` file
 ```powershell
-go run ./cmd/tcl -emit-only -o build/demo.moarvm examples/demo_tcl.tcl
+go run -mod=mod ./cmd/tcl -emit-only -o build/demo.moarvm examples/demo_tcl.tcl
 ```
 
 ### Run via bundled `moar.dll`
 ```powershell
 # DLL next to the binary, or:
-go run ./cmd/tcl -dll bin/moar.dll examples/demo_tcl.tcl
+go run -mod=mod ./cmd/tcl -dll bin/moar.dll examples/demo_tcl.tcl
 ```
 
 ### Other samples
 ```powershell
-go run ./cmd/tcl examples/test_ffi.tcl
-go run ./cmd/tcl examples/test_bridge.tcl
+go run -mod=mod ./cmd/tcl examples/test_ffi.tcl
+go run -mod=mod ./cmd/tcl examples/test_bridge.tcl
 ```
 
 Native execution needs a complete CompUnit (serialization context, code objects). Homemade units from this emitter are valid enough for the **software interpreter**; `moar.dll` may reject or ignore frames that lack SC data. That is a known binding gap (see SPEC.md).
@@ -100,16 +102,16 @@ out, err := moargo.RunNative(bc) // loads moar.dll from the exe dir / MOAR_DLL /
 ## Tests
 
 ```powershell
-go test -v ./...
+go test -mod=mod -v ./...
 ```
 
 ---
 
 ## Documentation
 
-- **[SPEC.md](SPEC.md)** — architecture, binding audit, CompUnit layout, gaps.
-- **[TUTORIAL.md](TUTORIAL.md)** — Tcl frontend, grammar, compiler ops, running bytecode.
-- **[TODO.md](TODO.md)**: Development roadmap and milestones.
+- **[SPEC.md](SPEC.md)** — architecture, binding audit, NQP / QRegex grammar specification, CompUnit v7 layout.
+- **[TUTORIAL.md](TUTORIAL.md)** — Tcl frontend, authoring NQP / QRegex grammars with `gcre`, compiler ops, running bytecode.
+- **[../gcre/README.md](../gcre/README.md)** — `gcre` NQP / QRegex metagrammar, API, and comparison with upstream Raku NQP.
 
 ## AI credit
 

@@ -27,7 +27,7 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `=~` `!~` | same; also smartmatch `~~` |
 | `? :` | `?? !!` (also `?:`) |
 | `& \| ^ << >>` bitwise | `+&` `+\|` `+^` `+<` `+>` |
-| `**` `&&` `\|\|` `and` `or` `not` | same |
+| `**` `&&` `\|\|` `and` `or` `xor` `not` | same (+ `orelse`) |
 | `1 .. 10` | same |
 | `1 < $x < 10` | same (chained) |
 | `if` `elsif` `else` `unless` | same |
@@ -57,7 +57,7 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `length` `uc` `lc` `substr` `index` `ord` `chr` `sprintf` | same; also `chars` `trim` `tc` `fc` |
 | `chomp` / `chop` | return a new string (do not mutate) |
 | `qw(a b c)` | `[ "a", "b", "c" ]` |
-| `m//` | `=~` / `~~`; `regex_engine("samre")` |
+| `m//` | `=~` / `~~`; `regex_engine("samre")`; declarative `grammar` (`G.parse` / `$/`) |
 | `open my $fh, "<", $p` | `$fh = open($p, "r")` (`<` `>` `>>` ok) |
 | `<>` / `readline` | `readline($fh)`; `slurp` / `spurt` for whole files |
 | `-e -f -d -s -r -w` | same |
@@ -109,7 +109,7 @@ This tree is three siblings:
 | Path | What |
 | :--- | :--- |
 | **[raptor/](raptor/README.md)** | Language, runtime, TAP, PodLit, WASM tour, RaptorHP, pack |
-| **[gcre/](gcre/README.md)** | Grammar Compatible Regular Expressions (Raku ⊂ PEG; `<HOST_name>`) |
+| **[gcre/](gcre/README.md)** | Grammar Compatible Regular Expressions (NQP / QRegex declarative engine + `<HOST_name>`) |
 | **[moarvm-go/](moarvm-go/README.md)** | MoarVM embed + Tcl frontend (same CompUnit v7 family) |
 
 Parse is **gcre** (`raptor/runtime/raptor.raku`, `moarvm-go/tcl/tcl.raku`). Pratt runs only where the grammar writes `<HOST_stmt>` / `<HOST_expr>`.

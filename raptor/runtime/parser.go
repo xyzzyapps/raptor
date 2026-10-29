@@ -18,39 +18,6 @@ func NewParser(tokens []Token) *Parser {
 	return &Parser{tokens: tokens, pos: 0}
 }
 
-// Parse parses the token stream into a Program AST.
-func (p *Parser) Parse() (*Program, error) {
-	var stmts []Stmt
-	for !p.isAtEnd() {
-		stmt, err := p.parseStatement()
-		if err != nil {
-			return nil, err
-		}
-		if stmt != nil {
-			stmts = append(stmts, stmt)
-		}
-	}
-	return &Program{Stmts: stmts}, nil
-}
-
-// ParseProgramLegacy is the Go Pratt parser used by HOST_stmt / HOST_expr.
-func ParseProgramLegacy(source string) (*Program, error) {
-	lexer := NewLexer(source)
-	var tokens []Token
-	for {
-		tok := lexer.NextToken()
-		if tok.Type == TokError {
-			return nil, fmt.Errorf("lex error at line %d, col %d: %s", tok.Line, tok.Col, tok.Literal)
-		}
-		tokens = append(tokens, tok)
-		if tok.Type == TokEOF {
-			break
-		}
-	}
-	parser := NewParser(tokens)
-	return parser.Parse()
-}
-
 // lexAll tokenizes source and records the rune end offset of each token.
 func lexAll(source string) ([]Token, error) {
 	lexer := NewLexer(source)
@@ -261,22 +228,21 @@ func (p *Parser) parseStatement() (Stmt, error) {
 	case TokStruct, TokUnion:
 		return p.parseStructDecl()
 
-	case TokAssert:
-		return p.parseVerify("ASSERT")
-	case TokPRE:
-		return p.parseVerify("PRE")
-	case TokPOST:
-		return p.parseVerify("POST")
-	case TokINVARIANT:
-		return p.parseVerify("INVARIANT")
-	case TokCHECK:
-		return p.parseVerify("CHECK")
-	case TokTEST:
-		return p.parseVerify("TEST")
-	case TokPROPERTY:
-		return p.parseVerify("PROPERTY")
-	case TokSUBTEST:
-		return p.parseVerify("SUBTEST")
+	case TokAssert, TokPRE, TokPOST, TokINVARIANT, TokCHECK, TokTEST, TokPROPERTY, TokSUBTEST:
+		if p.peekNext().Type != TokLParen || (tok.To > 0 && p.peekNext().From > tok.To) {
+			return p.parseVerify(tok.Literal)
+		}
+		expr, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		var stmt Stmt = &ExprStmt{Expr: expr}
+		stmt, err = p.checkModifier(stmt)
+		if err != nil {
+			return nil, err
+		}
+		p.match(TokSemicolon)
+		return stmt, nil
 
 	case TokBefore, TokAfter, TokAround:
 		return p.parseAdviceHook()
@@ -322,10 +288,10 @@ func (p *Parser) parseStatement() (Stmt, error) {
 			return &LabelStmt{Name: name, Stmt: nil}, nil
 		}
 
-		if p.peek().Type == TokIdent && isVerifyWord(p.peek().Literal) && p.peekNext().Type != TokLParen {
+		if p.peek().Type == TokIdent && isVerifyWord(p.peek().Literal) && (p.peekNext().Type != TokLParen || (p.peek().To > 0 && p.peekNext().From > p.peek().To)) {
 			return p.parseVerify(p.peek().Literal)
 		}
-		if p.peek().Type == TokIdent && isTapWord(p.peek().Literal) && p.peekNext().Type != TokLParen {
+		if p.peek().Type == TokIdent && isTapWord(p.peek().Literal) && (p.peekNext().Type != TokLParen || (p.peek().To > 0 && p.peekNext().From > p.peek().To)) {
 			return p.parseTapStmt()
 		}
 
@@ -804,13 +770,33 @@ func (p *Parser) parsePackageDecl() (Stmt, error) {
 }
 
 func (p *Parser) parseGrammarDecl() (Stmt, error) {
+	gTok := p.peek()
 	p.consume(TokGrammar)
+	if strings.Contains(gTok.Literal, "{") {
+		stmt, err := parseRawGrammarDecl(gTok.Literal, gTok.Line)
+		if err != nil {
+			return nil, err
+		}
+		if p.peek().Type == TokSemicolon {
+			p.advance()
+		}
+		return stmt, nil
+	}
+
 	nameTok := p.peek()
 	if nameTok.Type != TokIdent {
 		return nil, fmt.Errorf("line %d: expected grammar name, got %s", nameTok.Line, nameTok.Literal)
 	}
 	p.advance()
 	name := nameTok.Literal
+
+	parent := ""
+	if p.peek().Type == TokIdent && p.peek().Literal == "is" {
+		p.advance()
+		if p.peek().Type == TokIdent {
+			parent = p.advance().Literal
+		}
+	}
 
 	if err := p.consume(TokLBrace); err != nil {
 		return nil, err
@@ -866,8 +852,9 @@ func (p *Parser) parseGrammarDecl() (Stmt, error) {
 	}
 
 	return &GrammarDeclStmt{
-		Name:  name,
-		Rules: rules,
+		Name:   name,
+		Parent: parent,
+		Rules:  rules,
 	}, nil
 }
 
@@ -921,8 +908,8 @@ func (p *Parser) parseExpression(minPrec int) (Expr, error) {
 	for {
 		tok := p.peek()
 
-		// Assignment operators: =, +=, -=, ~=, //=
-		if tok.Type == TokAssign || tok.Type == TokAddAssign || tok.Type == TokSubAssign || tok.Type == TokConcatAssign || tok.Type == TokDefinedOrAssign {
+		// Assignment operators: =, +=, -=, *=, /=, ~=, //=
+		if tok.Type == TokAssign || tok.Type == TokAddAssign || tok.Type == TokSubAssign || tok.Type == TokMulAssign || tok.Type == TokDivAssign || tok.Type == TokConcatAssign || tok.Type == TokDefinedOrAssign {
 			if minPrec > 1 {
 				break
 			}
@@ -992,14 +979,18 @@ func (p *Parser) parseExpression(minPrec int) (Expr, error) {
 
 		// Function call: foo($a, $b)  or  foo (bar $a, $b) as foo(bar($a, $b))
 		if tok.Type == TokLParen {
-			p.advance()
-			if inner, ok, err := p.tryPrefixCallInParens(); ok {
-				if err != nil {
-					return nil, err
+			hasSpace := p.pos > 0 && p.tokens[p.pos-1].To > 0 && tok.From > p.tokens[p.pos-1].To
+			if hasSpace && minPrec == 0 {
+				if vn, isNamed := left.(*VarExpr); isNamed && !strings.HasPrefix(vn.Name, "@") && !strings.HasPrefix(vn.Name, "%") {
+					savedPos := p.pos
+					if args, err := p.parseCallArgs(false); err == nil && len(args) > 0 {
+						left = &CallExpr{Callee: left, Args: args}
+						continue
+					}
+					p.pos = savedPos
 				}
-				left = &CallExpr{Callee: left, Args: []Expr{inner}}
-				continue
 			}
+			p.advance()
 			args, err := p.parseCallArgs(true)
 			if err != nil {
 				return nil, err
@@ -1122,35 +1113,46 @@ func (p *Parser) parseExpression(minPrec int) (Expr, error) {
 			}
 		}
 
-		// Hash access %h{"key"} or %h{$k} or $h[0]{"key"}
+		// Hash access %h{"key"}, $h{"key"}, $/{"str"}, $h[0]{"key"}, fn(){"key"}
 		if tok.Type == TokLBrace {
-			isHashTarget := false
-			switch v := left.(type) {
-			case *VarExpr:
-				if strings.HasPrefix(v.Name, "%") {
-					isHashTarget = true
-				}
-			case *IndexExpr, *HashAccessExpr:
-				isHashTarget = true
+			isPercentVar := false
+			if v, ok := left.(*VarExpr); ok && strings.HasPrefix(v.Name, "%") {
+				isPercentVar = true
 			}
-
-			if isHashTarget {
+			_, isChain := left.(*IndexExpr)
+			if !isChain {
+				_, isChain = left.(*HashAccessExpr)
+			}
+			adjacentBrace := p.pos > 0 && p.tokens[p.pos-1].To > 0 && tok.From == p.tokens[p.pos-1].To
+			if isPercentVar || isChain || adjacentBrace {
+				savedPos := p.pos
 				p.advance()
 				keyExpr, err := p.parseExpression(0)
-				if err != nil {
-					return nil, err
+				if err == nil && p.peek().Type == TokRBrace {
+					p.advance()
+					left = &HashAccessExpr{Hash: left, Key: keyExpr}
+					continue
 				}
-				p.consume(TokRBrace)
-				left = &HashAccessExpr{Hash: left, Key: keyExpr}
-				continue
+				if isPercentVar || isChain {
+					if err != nil {
+						return nil, err
+					}
+					if cerr := p.consume(TokRBrace); cerr != nil {
+						return nil, cerr
+					}
+				}
+				p.pos = savedPos
 			}
 		}
 
 
 		// Smart match operator ~~
 		if tok.Type == TokSmartMatch {
+			if minPrec >= 4 {
+				break
+			}
 			p.advance()
-			right, err := p.parseExpression(1)
+			right, err := p.parseExpression(4)
 			if err != nil {
 				return nil, err
 			}
@@ -1165,7 +1167,11 @@ func (p *Parser) parseExpression(minPrec int) (Expr, error) {
 
 		p.advance()
 		op := tok.Literal
-		right, err := p.parseExpression(prec)
+		nextMinPrec := prec
+		if tok.Type == TokPower {
+			nextMinPrec = prec - 1
+		}
+		right, err := p.parseExpression(nextMinPrec)
 		if err != nil {
 			return nil, err
 		}
@@ -1598,8 +1604,16 @@ func (p *Parser) parsePrimary() (Expr, error) {
 
 func isCallNameTok(t Token) bool {
 	switch t.Type {
-	case TokIdent, TokMin, TokMax, TokDiv, TokMod, TokCmp, TokScalar:
+	case TokIdent:
+		switch t.Literal {
+		case "True", "False", "Nil", "true", "false":
+			return false
+		}
 		return true
+	case TokMin, TokMax, TokDiv, TokMod, TokCmp:
+		return true
+	case TokScalar, TokSubRef:
+		return len(t.Literal) > 1
 	}
 	return false
 }
@@ -1646,17 +1660,23 @@ func (p *Parser) parseCallArgs(inParens bool) ([]Expr, error) {
 // tryPrefixCallInParens parses (func $a, $b) after '(' is consumed.
 // Grouping is unchanged for (1 + 2), (10 min 20), ($x), (func).
 func (p *Parser) tryPrefixCallInParens() (Expr, bool, error) {
-	if !isCallNameTok(p.peek()) || !canStartCallArg(p.peekNext()) {
+	calTok := p.peek()
+	nextTok := p.peekNext()
+	if !isCallNameTok(calTok) || !canStartCallArg(nextTok) {
 		return nil, false, nil
 	}
-	calTok := p.advance()
+	if (nextTok.Type == TokLParen || nextTok.Type == TokLBracket || nextTok.Type == TokLBrace || nextTok.Type == TokAngleL) &&
+		calTok.To > 0 && nextTok.From == calTok.To {
+		return nil, false, nil
+	}
+	savedPos := p.pos
+	p.advance()
 	args, err := p.parseCallArgs(true)
-	if err != nil {
-		return nil, true, err
+	if err != nil || p.peek().Type != TokRParen {
+		p.pos = savedPos
+		return nil, false, nil
 	}
-	if err := p.consume(TokRParen); err != nil {
-		return nil, true, err
-	}
+	p.advance()
 	return &CallExpr{Callee: &VarExpr{Name: calTok.Literal}, Args: args}, true, nil
 }
 
@@ -1762,27 +1782,60 @@ func (p *Parser) parseInterpString(raw string) (Expr, error) {
 	for i < len(runes) {
 		ch := runes[i]
 
-		if ch == '$' && i+1 < len(runes) && (isIdentStart(runes[i+1]) || runes[i+1] == '*' || runes[i+1] == '!') {
-			// Flush text buffer
-			if len(buf) > 0 {
-				parts = append(parts, &LiteralExpr{Type: TokString, Value: string(buf)})
-				buf = nil
-			}
-			// Scan variable name
-			i++ // skip $
-			var varName []rune
-			varName = append(varName, '$')
-			// Twigil
-			if i < len(runes) && (runes[i] == '*' || runes[i] == '!') {
-				varName = append(varName, runes[i])
-				i++
-			}
-			for i < len(runes) && isIdentContinue(runes[i]) {
-				varName = append(varName, runes[i])
-				i++
-			}
-			parts = append(parts, &VarExpr{Name: string(varName)})
+		if ch == '\\' && i+1 < len(runes) && (runes[i+1] == '$' || runes[i+1] == '{') {
+			buf = append(buf, runes[i+1])
+			i += 2
 			continue
+		}
+
+		if ch == '$' && i+1 < len(runes) {
+			next := runes[i+1]
+			if next == '/' || (next == '$' && (i+2 >= len(runes) || (!isIdentContinue(runes[i+2]) && runes[i+2] != '{' && runes[i+2] != '$'))) {
+				if len(buf) > 0 {
+					parts = append(parts, &LiteralExpr{Type: TokString, Value: string(buf)})
+					buf = nil
+				}
+				parts = append(parts, &VarExpr{Name: "$" + string(next)})
+				i += 2
+				continue
+			}
+			if next >= '0' && next <= '9' {
+				if len(buf) > 0 {
+					parts = append(parts, &LiteralExpr{Type: TokString, Value: string(buf)})
+					buf = nil
+				}
+				i++ // skip $
+				var varName []rune
+				varName = append(varName, '$')
+				for i < len(runes) && runes[i] >= '0' && runes[i] <= '9' {
+					varName = append(varName, runes[i])
+					i++
+				}
+				parts = append(parts, &VarExpr{Name: string(varName)})
+				continue
+			}
+			if isIdentStart(next) || next == '*' || next == '!' || next == '?' {
+				// Flush text buffer
+				if len(buf) > 0 {
+					parts = append(parts, &LiteralExpr{Type: TokString, Value: string(buf)})
+					buf = nil
+				}
+				// Scan variable name
+				i++ // skip $
+				var varName []rune
+				varName = append(varName, '$')
+				// Twigil or punctuation variable ($?, $!)
+				if i < len(runes) && (runes[i] == '*' || runes[i] == '!' || runes[i] == '?') {
+					varName = append(varName, runes[i])
+					i++
+				}
+				for i < len(runes) && (isIdentContinue(runes[i]) || (runes[i] == '-' && i+1 < len(runes) && isIdentStart(runes[i+1]))) {
+					varName = append(varName, runes[i])
+					i++
+				}
+				parts = append(parts, &VarExpr{Name: string(varName)})
+				continue
+			}
 		}
 
 		if ch == '{' {
@@ -1860,15 +1913,12 @@ func isIdentContinue(r rune) bool {
 }
 
 func getPrecedence(tok Token) int {
-	if tok.Type == TokIdent && (tok.Literal == "xor" || tok.Literal == "div" || tok.Literal == "mod") {
-		return 1
-	}
 	switch tok.Type {
-	case TokOr, TokDefinedOr:
+	case TokOr, TokXor, TokDefinedOr, TokOrElse:
 		return 1
 	case TokAnd:
 		return 2
-	case TokEqual, TokNotEqual, TokLess, TokLessEq, TokGreater, TokGreaterEq, TokEqStr, TokNeStr, TokLtStr, TokGtStr, TokAngleL, TokAngleR, TokElem, TokNotElem, TokDivisible, TokSmartMatch, TokRegexMatch, TokRegexNotMatch, TokMin, TokMax, TokCmp:
+	case TokEqual, TokNotEqual, TokLess, TokLessEq, TokGreater, TokGreaterEq, TokEqStr, TokNeStr, TokLtStr, TokGtStr, TokLeStr, TokGeStr, TokAngleL, TokAngleR, TokElem, TokNotElem, TokDivisible, TokSmartMatch, TokRegexMatch, TokRegexNotMatch, TokMin, TokMax, TokCmp:
 		return 4
 	case TokConcat, TokRepeat, TokListRepeat, TokDotDot, TokIntersect, TokUnionOp, TokBitAnd, TokBitOr, TokBitXor, TokBitShiftL, TokBitShiftR:
 		return 5
@@ -1899,7 +1949,7 @@ func (p *Parser) isTypeToken(t TokenType) bool {
 }
 
 func (p *Parser) isBinaryOp(t Token) bool {
-	return getPrecedence(t) > 0 || t.Type == TokAssign || t.Type == TokAddAssign || t.Type == TokSubAssign || t.Type == TokConcatAssign || t.Type == TokDefinedOrAssign
+	return getPrecedence(t) > 0 || t.Type == TokAssign || t.Type == TokAddAssign || t.Type == TokSubAssign || t.Type == TokMulAssign || t.Type == TokDivAssign || t.Type == TokConcatAssign || t.Type == TokDefinedOrAssign
 }
 
 // isUnaryPrefixTok reports whether t may begin a unary expression. This covers
@@ -2097,19 +2147,6 @@ func getCFieldSizeAndAlign(typeName string) (int, int) {
 	}
 }
 
-// parseAssert parses: assert <condition> [, <message>];
-func (p *Parser) parseAssert() (Stmt, error) {
-	return p.parseVerify("ASSERT")
-}
-
-func verifyKind(lit string) string {
-	switch lit {
-	case "PRE", "POST", "INVARIANT", "CHECK", "ASSERT", "TEST", "PROPERTY", "SUBTEST":
-		return lit
-	}
-	return lit
-}
-
 // parseVerify parses statement-form contracts:
 //
 //	PRE $b != 0;
@@ -2119,7 +2156,6 @@ func verifyKind(lit string) string {
 //	PROPERTY "name" ($a, $b) { ... }
 func (p *Parser) parseVerify(kind string) (Stmt, error) {
 	p.advance()
-	kind = verifyKind(kind)
 	needsName := kind == "TEST" || kind == "PROPERTY" || kind == "SUBTEST"
 
 	var name Expr

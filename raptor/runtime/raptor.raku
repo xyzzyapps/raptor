@@ -1,50 +1,41 @@
 # Raptor language grammar — gcre (Grammar Compatible Regular Expressions).
-# A PEG-compatible subset of Raku. Valid Raku spelling, 1-to-1 PEG reading.
+# NQP / QRegex + PEG grammar loaded via gcre.LoadGrammarFromString.
 #
 # ---------------------------------------------------------------------------
-# Not written in this file — gcre cannot express them
+# gcre NQP / QRegex capabilities vs omitted Raku constructs
 # ---------------------------------------------------------------------------
-# These are real Raku grammar/regex features. They are omitted on purpose
-# because gcre's .raku subset has no translation for them (see gcre/README.md
-# and gcre/raku.peg). Do not add them here; the loader will reject or ignore
-# the construct.
+# gcre natively supports NQP / QRegex declarative constructs (see gcre/README.md
+# and gcre/raku.peg), including:
+#   - Protoregexes & LTM :sym<...>  proto token infix { * } / token infix:sym<+> { <sym> }
+#   - Alternation                   '|' (LTM) vs '||' (sequential first-match)
+#   - Declarative optables          is optable, is tighter, is looser, is equiv, is assoc<...>
+#   - Quantifiers & separators      ** N..M, frugal *?/+?/??, '%' and '%%' separated lists
+#   - Goal matching                 '(' ~ ')' <expr>
+#   - Captures & aliases            $<lhs>=<expr>, <lhs=expr>, positional ( ... )
+#   - Assertions & anchors          <?before ...>, <!before ...>, <?after ...>, <!after ...>,
+#                                   ^, $, ^^, $$, <<, >>, <?wb>, <!wb>, <?ww>, <!ww>
+#   - Character class set algebra   <[a..z] + :Digit - [x]>, <:Lu>, \h, \v, \D, \S, \W, \x[...]
+#   - Grammar inheritance & stubs   grammar Child is Parent { ... }, {*}
 #
-#   Action blocks          { make $/.ast }   { *code* }   <?{ ... }>
-#   Protoregexes           proto token infix {*}
-#                          token infix:sym<+> { <sym> }
-#   LTM                    Raku '|' is longest-token; gcre '|' is PEG
-#                          ordered choice (first alternative wins)
-#   '||' vs '|'            no separate sequential-alternation operator
-#   Predicates             &e  !e  <?before …>  <!before …>  <?after …>
-#   Counted quantifiers    ** 1..3   ** 2   {n,m}
-#   Separators             <expr>+ % ','    <expr>* %% ','
-#   Tilde / goal matching  '(' ~ ')' <expr>
-#   Optable decls          is tighter / is looser / is assoc<right>
-#   Named captures         $<foo>=<bar>   $0 / $1 backrefs
-#   Interpolation          <$var>   <{ code }>
-#   Adverbs                :ratchet  :sigspace  :P5  :my  :dba
-#   Unicode properties     <:Lu>  <:Digit>   (only <[a..z]> / <-[…]>)
-#   rule vs token          :sigspace is only approximated (rule skips
-#                          whitespace; it is not full Raku :sigspace)
+# Still omitted from .raku files (actions live in Go, not embedded Raku code):
+#   - Inline Raku code blocks       { make $/.ast }   <?{ ... }>   <{ code }>
+#   - Runtime variable interp       <$var>
+#   - Regex adverbs                 :P5  :my  :dba
 #
 # ---------------------------------------------------------------------------
-# Raptor syntax that therefore stays on HOST (Go lexer + Pratt)
+# Raptor syntax handled via <HOST_stmt> / <HOST_expr> (Go lexer + Pratt)
 # ---------------------------------------------------------------------------
-# <HOST_stmt> / <HOST_expr> are gcre's hatch: the host consumes one
-# statement or expression. Pratt is not a second full-file parser.
-# These forms are implemented in runtime/lexer.go and runtime/parser.go
-# because a pure gcre rule would be wrong or impossible:
+# <HOST_stmt> / <HOST_expr> are gcre's organic host hatch: the host consumes one
+# statement or expression when lexer/AST state is required:
 #
-#   Heredocs               <<EOF  <<'EOF'  <<~EOF   (lexer state)
+#   Heredocs               <<EOF  <<'EOF'  <<~EOF   (line-oriented lexer state)
 #   Interpolated strings   "$x"  "a {$x} b"
 #   Interpolated qx        `echo $x`  qx{…} with vars
-#   Chained comparisons    1 < $x < 10   (must not re-evaluate $x)
-#   Longest operator lex   //= vs // vs /    ** vs *    ~~ vs ~
-#   Mixed assign/expr      $x = 1 vs $x == 1 vs $x += 1
-#   Tight postfix / UFCS   $x.foo(1) next to infix of the same dots
-#   Pod / PodLit           =begin pod …   (not part of this grammar)
+#   Chained comparisons    1 < $x < 10   (single evaluation of middle operand)
+#   Call disambiguation    foo(1) vs foo (1) * 2
+#   Pod / PodLit           =begin pod …   (preprocessed prior to grammar parse)
 #
-# PEG alternatives below run only when HOST does not consume at that point.
+# PEG alternatives below run when HOST does not consume at that point.
 
 grammar Raptor {
     rule TOP { <statement>* }
@@ -77,7 +68,6 @@ grammar Raptor {
         | <goto_stmt>
         | <take_stmt>
         | <verify_stmt>
-        | <assert_stmt>
         | <advice_stmt>
         | <label_stmt>
         | <block>
@@ -92,7 +82,6 @@ grammar Raptor {
     rule take_stmt { 'take' <expression> ';'? }
     rule goto_stmt { 'goto' <goto_target> ';'? }
     token goto_target { '&'? <name> }
-    rule assert_stmt { 'assert' <expression> [ ',' <expression> ]? ';'? }
     rule verify_stmt {
         | [ 'TEST' | 'PROPERTY' | 'SUBTEST' ]
           <expression> <sig>? <block> ';'?
@@ -171,8 +160,8 @@ grammar Raptor {
     rule struct_field { <name> <var> ';'? }
     rule enum_decl { 'enum' <name> [ '<' <name>+ '>' | '(' <hash_pair>+ ')' ] ';'? }
 
-    rule grammar_decl { 'grammar' <name> '{' <g_rule>* '}' }
-    rule g_rule { [ 'token' | 'rule' | 'regex' ] <name> '{' <-[\}]>* '}' }
+    rule grammar_decl { 'grammar' <name> [ 'is' <name> ]? '{' <g_body> '}' }
+    token g_body { [ <-[\{\}]>+ | '{' <g_body> '}' ]* }
 
     rule advice_stmt { [ 'before' | 'after' | 'around' ] <name> <sig>? <block> }
 
@@ -188,7 +177,7 @@ grammar Raptor {
     }
 
     rule or_expr { <and_expr> [ <or_op> <and_expr> ]* }
-    token or_op { '||' | 'or' | 'orelse' }
+    token or_op { '||' | 'or' | 'xor' | 'orelse' }
 
     rule and_expr { <cmp_expr> [ <and_op> <cmp_expr> ]* }
     token and_op { '&&' | 'and' }
@@ -271,7 +260,7 @@ grammar Raptor {
     }
     token call_name {
         | 'min' | 'max' | 'div' | 'mod' | 'cmp'
-        | <var>
+        | <sigil> <colon_name>
         | <name>
     }
 

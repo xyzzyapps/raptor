@@ -1,10 +1,10 @@
 =begin pod
 
-=TITLE raptorre - regex, smartmatch, grammars
+=TITLE raptorre - regex, smartmatch, and NQP grammars
 
 =head1 NAME
 
-raptorre - matching
+raptorre - matching and declarative NQP / QRegex grammars
 
 =head1 OPERATORS
 
@@ -21,22 +21,65 @@ Default is Go C<regexp>. Switch with:
 
     regex_engine("samre");
 
-=head1 GRAMMARS
+=head1 GRAMMARS (NQP / QRegex via gcre)
 
-Declarative C<grammar> / C<rule> / C<token> / C<regex> via gcre
-(Raku ⊂ PEG). Host parse of Raptor itself is
-F<runtime/raptor.raku> plus C<E<lt>HOST_stmtE<gt>> /
-C<E<lt>HOST_exprE<gt>>.
+Declarative C<grammar> declarations are compiled by B<gcre> with full
+NQP / QRegex declarative constructs:
 
-    grammar MiniCalc {
-        rule TOP { <statement> }
-        rule statement { <ident> '=' <number> ';' }
-        token ident { \w+ }
-        token number { \d+ }
-    }
+=over 4
+
+=item * Grammar inheritance: C<grammar Child is Parent { ... }>
+
+=item * Rule kinds: C<token> / C<regex> (exact characters) and C<rule> (C<:sigspace>)
+
+=item * Protoregexes & LTM C<:sym>: C<proto token op { * }> + C<token op:symE<lt>+E<gt> { E<lt>symE<gt> }>
+
+=item * Alternation: C<|> (Longest-Token Matching) vs C<||> (sequential first-match)
+
+=item * Declarative operator tables: C<token EXPR is optable { E<lt>termE<gt> }> with C<is tighter>, C<is looser>, C<is equiv>, C<is assocE<lt>left|right|non|chainE<gt>>
+
+=item * Quantifiers, separators & goals: C<** N..M>, frugal C<*?> / C<+?> / C<??>, C<%> / C<%%> separated lists, and C<'(' ~ ')' E<lt>EXPR_bodyE<gt>> goal matching
+
+=item * Assertions & character algebra: C<E<lt>?before ...E<gt>>, C<E<lt>!before ...E<gt>>, C<E<lt>?after ...E<gt>>, C<E<lt>!after ...E<gt>>, C<E<lt>[a..z] + :Digit - [aeiou]E<gt>>
+
+=back
+
+Invoke C<.parse($input, [$rule])> (requires full consumption) or
+C<.subparse($input, [$rule])> (prefix match). Successful matches bind
+C<$/> and return a Match hash with C<str>/C<Str>, C<from>, C<to>,
+C<rule>, C<pos>, and direct named capture keys:
+
+=begin code
+
+grammar BaseCalc {
+    token EXPR is optable { <term> }
+    proto token term { * }
+    token term:sym<int>   { \d+ }
+    token term:sym<group> { '(' ~ ')' [ <.ws> <EXPR> <.ws> ] }
+
+    proto token infix { * }
+    token infix:sym<+> { <sym> }
+    token infix:sym<*> is tighter<+> { <sym> }
+}
+
+grammar MiniCalc is BaseCalc {
+    rule TOP { ^ <stmt>+ % ';' ';'? $ }
+    proto rule stmt { * }
+    rule stmt:sym<let> { <sym> <lhs=ident> '=' <rhs=EXPR> }
+}
+
+my $m = MiniCalc.parse("let total = 2 + 3 * 4;");
+say $m{"stmt"}{"rule"};          # stmt:sym<let>
+say $m{"stmt"}{"lhs"}{"str"};    # total
+say $/{"str"};                   # let total = 2 + 3 * 4;
+
+=end code
+
+Host parse of Raptor itself is F<runtime/raptor.raku> plus
+C<E<lt>HOST_stmtE<gt>> / C<E<lt>HOST_exprE<gt>>.
 
 =head1 SEE ALSO
 
-L<04_raptor-operators>, L<03_raptor-syntax>
+L<04_raptor-operators>, L<03_raptor-syntax>, L<05_raptorvar>
 
 =end pod

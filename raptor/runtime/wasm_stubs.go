@@ -15,13 +15,6 @@ func wasmLog(prefix string, msg string) {
 	}
 }
 
-func wasmErr(prefix string, msg string) {
-	console := js.Global().Get("console")
-	if !console.IsNull() && !console.IsUndefined() {
-		console.Call("error", fmt.Sprintf("[Raptor WASM Error] [%s] %s", prefix, msg))
-	}
-}
-
 func (in *Interp) registerFFI() {
 	in.Builtins["ffi_load"] = func(in *Interp, args []*Value) (*Value, error) {
 		return nil, fmt.Errorf("native FFI is not supported in WebAssembly environment")
@@ -1426,17 +1419,4 @@ func toFloat(v *Value) float64 {
 		return float64(v.IntVal)
 	}
 	return 0
-}
-
-func toBool(v *Value) bool {
-	if v == nil {
-		return false
-	}
-	if v.Type == ValBool {
-		return v.BoolVal
-	}
-	if v.Type == ValInt {
-		return v.IntVal != 0
-	}
-	return false
 }

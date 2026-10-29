@@ -74,8 +74,9 @@ One hundred random trials by default.
 =head1 BACKENDS
 
 C<raptor --go test t/> is the full harness. C<raptor --moar test>
-only runs files the Moar subset compiler accepts (C<plan>/C<ok>/C<is>,
-no C<is_deeply> / arrays). See L<10_raptor-backends>.
+runs files accepted by the MoarVM CompUnit v7 compiler (including
+C<plan>, C<ok>, C<is>, C<isnt>, C<is_deeply>, C<like>, arrays, and
+hashes). See L<10_raptor-backends>.
 
 =head1 SEE ALSO
 

@@ -1,17 +1,20 @@
 ---
 name: moarvm-language-development
-description: Guide and architectural reference for AI agents to develop programming languages targeting MoarVM using the moarvm-go runtime, CompUnit v7 bytecode emitter, 6Model metamodel, and declarative Raku grammars.
+description: Guide and architectural reference for AI agents to develop programming languages targeting MoarVM using the moarvm-go runtime, CompUnit v7 bytecode emitter, 6Model metamodel, and declarative NQP / QRegex grammars via gcre.
 ---
 
-# Developing Programming Languages with MoarVM-Go
+# Developing Programming Languages with MoarVM-Go & gcre
 
-## 1. Overview of MoarVM & moarvm-go
+## 1. Overview of MoarVM, `moarvm-go`, and `gcre`
 
-MoarVM is a modern, 64-bit virtual machine built for dynamic and multi-paradigm languages. It features:
-- **6Model Object System**: A pluggable metamodel supporting multiple object representations (`P6opaque`, `MVMArray`, `MVMHash`).
-- **JIT Compilation**: Type-specializing dynamic JIT compiler targeting x86_64 machine code.
-- **Lock-Free Concurrency**: Native OS thread workers, channels, and atomic primitives.
-- **`moarvm-go`**: Go host package providing C FFI bindings (`moar.dll`), CompUnit v7 binary bytecode emitter, and declarative Perl 6 / Raku grammar parser.
+MoarVM is a 64-bit virtual machine built for dynamic and multi-paradigm languages. It features:
+- **6Model Object System**: Pluggable metamodel supporting representations such as `P6opaque`, `VMArray`, and `MVMHash`.
+- **JIT Compilation**: Dynamic type-specializing JIT targeting x86_64 machine code.
+- **Continuations & Concurrency**: Delimited continuations (`continuationreset` / `continuationcontrol` / `continuationinvoke`), native OS thread workers, and channels.
+- **`moarvm-go`**: Go host package providing C FFI bindings (`moar.dll`), CompUnit v7 binary bytecode emitter (`CompUnitEmitter`), and a Tcl compiler frontend.
+- **`gcre`**: Pure-Go declarative NQP / QRegex grammar engine (`grammar ... is Parent`, `proto` / `:sym<...>`, LTM `|` vs `||`, `is optable`, `%` / `%%`, `~` goal matching, lookarounds, character class set algebra).
+
+> **Note:** Always pass `-mod=mod` when running `go build`, `go run`, or `go test` in `moarvm-go/` and `raptor/` (`moarvm-go/vendor/MoarVM` contains C sources rather than Go vendor modules).
 
 ---
 
@@ -24,12 +27,10 @@ package main
 
 import (
     "context"
-    "fmt"
     "moarvm-go/engine"
 )
 
 func main() {
-    // 1. Configure engine with dynamic library path
     vm, err := moargo.New(moargo.Config{
         DLLPath:  "bin/moar.dll",
         ProgName: "mylang",
@@ -39,16 +40,15 @@ func main() {
         panic(err)
     }
 
-    // 2. Initialize runtime instance
     ctx := context.Background()
     if err := vm.Init(ctx); err != nil {
         panic(err)
     }
     defer vm.Destroy()
 
-    // 3. Execute bytecode buffer or file
-    // vm.RunBytecode(ctx, bytecodeBytes)
-    // vm.RunFile(ctx, "program.moarvm")
+    // Execute in-memory CompUnit v7 bytecode or .moarvm file:
+    // _ = vm.RunBytecode(ctx, bytecodeBytes)
+    // _ = vm.RunFile(ctx, "program.moarvm")
 }
 ```
 
@@ -59,125 +59,117 @@ func main() {
 ### 3.1 Binary Container Architecture
 
 A MoarVM Compilation Unit (`.moarvm` format, version 7) contains:
-1. **Header (96 bytes)**: Magic number `MOAR\r\n`, version 7, section offsets, and entrypoint frame index.
+1. **Header (96 bytes)**: Magic `MOARVM\r\n`, version 7, section counts/offsets, and entrypoint frame index.
 2. **Serialization Contexts (SC)**: Object graphs, symbols, and type definitions.
-3. **Frames Table**: Static descriptors for each subroutine / block.
-4. **Callsites Table**: Argument passing metadata for function calls.
-5. **String Heap**: Length-prefixed UTF-8 string table.
-6. **Bytecode Stream**: 16-bit opcodes and 16-bit register indices.
+3. **Frames Table**: Static descriptors, local register types, and lexical slots for each routine/closure.
+4. **Callsites Table**: Argument flags (`CallArgObj`, `CallArgInt`, `CallArgNum`, `CallArgStr`).
+5. **String Heap**: UTF-8 string table (index 0 is HLL name).
+6. **Bytecode Stream**: Official 16-bit MoarVM opcodes (`vendor/MoarVM/src/core/ops.h`).
 
 ### 3.2 Constructing a Compilation Unit in Go
 
 ```go
-import (
-    "moarvm-go/engine"
-)
+import "moarvm-go/engine"
 
-// 1. Create new Compilation Unit
-cu := moargo.NewCompUnit()
-
-// 2. Define Root Frame (Mainline)
-frame := moargo.NewFrame("main", 10) // 10 local registers
+cu := moargo.NewCompUnitEmitter("mylang")
+frame := cu.NewFrame("main", 3)
 frame.SetLocalType(0, moargo.RegInt64)
 frame.SetLocalType(1, moargo.RegInt64)
 frame.SetLocalType(2, moargo.RegInt64)
 
-// 3. Emit Opcodes
-// $0 = 42
+// r0 = 42; r1 = 100; r2 = r0 + r1; return r2
 frame.EmitOp(moargo.OpConstI64)
 frame.EmitReg(0)
 frame.EmitInt64(42)
 
-// $1 = 100
 frame.EmitOp(moargo.OpConstI64)
 frame.EmitReg(1)
 frame.EmitInt64(100)
 
-// $2 = $0 + $1
 frame.EmitOp(moargo.OpAddI)
-frame.EmitReg(2) // destination
-frame.EmitReg(0) // left
-frame.EmitReg(1) // right
+frame.EmitReg(2)
+frame.EmitReg(0)
+frame.EmitReg(1)
 
-// return $2
 frame.EmitOp(moargo.OpReturnI)
 frame.EmitReg(2)
 
-// 4. Register frame and serialize binary bytecode
-cu.AddFrame(frame)
-bytecodeBytes, err := cu.Serialize()
+bytecodeBytes, err := cu.Emit()
 ```
 
 ---
 
-## 4. Key Opcode Cheatsheet
+## 4. Official MoarVM Opcode Cheatsheet (`moarvm-go/engine/opcodes.go`)
 
-| Opcode Constant | Opcode ID | Format | Description |
+| Opcode Constant | Official ID | Format | Description |
 | :--- | :--- | :--- | :--- |
-| `OpNoop` | 0 | `noop` | No operation |
-| `OpConstI64` | 3 | `const_i64 $dst, int64` | Load 64-bit integer constant |
-| `OpConstN64` | 4 | `const_n64 $dst, float64` | Load 64-bit float constant |
-| `OpConstS` | 5 | `const_s $dst, str_idx` | Load string from heap |
-| `OpAddI` | 7 | `add_i $dst, $a, $b` | 64-bit integer addition |
-| `OpSubI` | 8 | `sub_i $dst, $a, $b` | 64-bit integer subtraction |
-| `OpMulI` | 9 | `mul_i $dst, $a, $b` | 64-bit integer multiplication |
-| `OpDivI` | 10 | `div_i $dst, $a, $b` | 64-bit integer division |
-| `OpModI` | 11 | `mod_i $dst, $a, $b` | Integer modulo |
-| `OpEqI` | 13 | `eq_i $dst, $a, $b` | Integer equality check ($dst = 1$ or $0$) |
-| `OpLtI` | 17 | `lt_i $dst, $a, $b` | Integer less-than check |
-| `OpGoto` | 23 | `goto int32_offset` | Unconditional jump |
-| `OpIfI` | 24 | `ifi $cond, int32_offset` | Jump if integer condition is non-zero |
-| `OpUnlessI` | 25 | `unlessi $cond, int32_offset`| Jump if integer condition is zero |
-| `OpPrepArgs` | 40 | `prepargs callsite_idx` | Prepare argument list for invocation |
-| `OpArgI` | 41 | `arg_i pos, $reg` | Push integer argument |
-| `OpInvoke` | 50 | `invoke $ret, $sub` | Invoke subroutine / frame |
-| `OpReturn` | 60 | `return` | Void return |
-| `OpReturnI` | 61 | `return_i $reg` | Return 64-bit integer |
-| `OpSay` | 80 | `say $reg` | Print value with trailing newline |
-| `OpPrint` | 81 | `print $reg` | Print value to stdout |
+| `OpNoOp` | 0 | `noop` | No operation |
+| `OpConstI64` | 4 | `const_i64 $dst, int64` | Load 64-bit integer constant |
+| `OpConstN64` | 6 | `const_n64 $dst, float64` | Load 64-bit float constant |
+| `OpConstS` | 7 | `const_s $dst, str_idx` | Load string from heap |
+| `OpGoto` | 23 | `goto uint32_offset` | Unconditional frame-offset jump |
+| `OpIfI` | 24 | `if_i $cond, uint32_offset` | Jump if integer condition is non-zero |
+| `OpUnlessI` | 25 | `unless_i $cond, uint32_offset` | Jump if integer condition is zero |
+| `OpGetLex` / `OpBindLex` | 35 / 36 | `getlex` / `bindlex` | Read / write lexical slot across outer frames |
+| `OpPrepArgs` / `OpInvoke` | 40 / 49 | `prepargs cs_idx` / `invoke` | Prepare callsite and invoke code object |
+| `OpReturnI` / `OpReturn` | 51 / 55 | `return_i $reg` / `return` | Return `int64` or void |
+| `OpEqI` / `OpLtI` | 56 / 58 | `eq_i` / `lt_i $dst, $a, $b` | 64-bit integer comparisons |
+| `OpAddI` / `OpSubI` / `OpMulI` / `OpDivI` | 63 / 64 / 65 / 66 | `add_i $dst, $a, $b` | 64-bit integer arithmetic |
+| `OpGetCode` / `OpTakeClosure` | 159 / 162 | `getcode` / `takeclosure` | Reference frame and instantiate closure |
+| `OpConcatS` | 208 | `concat_s $dst, $a, $b` | Concatenate strings |
+| `OpPrint` / `OpSay` | 494 / 495 | `print $reg` / `say $reg` | Write string to stdout (without / with newline) |
+| `OpDispatchV`..`OpDispatchO` | 826..830 | `dispatch_*` | Unified MoarVM boot-code / callsite dispatch |
 
 ---
 
-## 5. Declarative Raku Grammar Engine
+## 5. Declarative NQP / QRegex Grammar Engine (`gcre`)
 
-`moarvm-go/grammar/` provides a parsing engine for building ASTs from declarative `.raku` grammar files.
+`gcre` compiles declarative `.raku` grammar files into matcher combinators and Pratt operator tables.
 
 ### 5.1 Grammar Definition (`calc.raku`)
 
 ```raku
 grammar Calculator {
-    rule TOP { <expr> }
-    rule expr is optable { ... }
-    
-    proto token infix:<+> is tighter { <sym> }
-    proto token infix:<*> is tighter { <sym> }
-    
-    token integer { \d+ }
-    token term:sym<int> { <integer> }
+    rule TOP { ^ <EXPR> $ }
+    token EXPR is optable { <term> }
+
+    proto token term { * }
+    token term:sym<int>   { \d+ {*} }
+    token term:sym<group> { '(' ~ ')' [ <.ws> <EXPR> <.ws> ] {*} }
+
+    proto token prefix { * }
+    token prefix:sym<-> is tighter<*> { <sym> }
+
+    proto token infix { * }
+    token infix:sym<+>  { <sym> }
+    token infix:sym<*>  is tighter<+> { <sym> }
+    token infix:sym<**> is tighter<*> is assoc<right> { <sym> }
 }
 ```
 
-### 5.2 Parsing in Go
+### 5.2 Parsing & Reducing in Go
 
 ```go
 package main
 
-import (
-    "moarvm-go/grammar"
-)
+import "gcre"
+
+type CalcActions struct{}
+
+func (a *CalcActions) HandleAction(rule string, m *gcre.Match) {
+    // Reduce matched subtrees via m.Make(astNode)
+}
 
 func main() {
-    g, err := grammar.LoadGrammarFile("calc.raku")
+    g, err := gcre.LoadGrammarFromFile("calc.raku")
     if err != nil {
         panic(err)
     }
 
-    match := g.Parse("42 + 10 * 2", "TOP")
-    if !match.Success {
-        panic("Parse failed")
+    match, err := g.Parse("42 + 10 * 2 ** 3", &CalcActions{})
+    if err != nil || !match.Ok {
+        panic(err)
     }
-    
-    // Walk parse tree and generate MoarVM bytecode
 }
 ```
 
@@ -185,11 +177,11 @@ func main() {
 
 ## 6. Blueprint for Implementing a New Language
 
-1. **Syntax Definition**: Write a `.raku` grammar file in `grammar/` defining tokens, rules, and operator precedence tables.
-2. **AST Structures**: Create Go structs for AST Nodes (`Program`, `Stmt`, `Expr`, `FnDecl`, `Call`).
-3. **Parser / Actions**: Map grammar match reductions to your Go AST Nodes.
-4. **Bytecode Compiler**: Walk AST nodes and emit MoarVM Compilation Units (`moargo.NewCompUnit()`) with local register allocations and branch jump offsets.
-5. **Execution**: Load `bin/moar.dll` and execute the compiled bytecode.
+1. **Syntax Definition**: Write a declarative `.raku` grammar using `gcre` (`grammar`, `proto`/`:sym<...>`, `is optable`, `%`/`%%`, `~`, lookarounds).
+2. **AST Structures**: Define Go AST nodes (`Program`, `Stmt`, `Expr`, `FnDecl`, `Call`).
+3. **Actions / Host Hatch**: Map match reductions to Go AST nodes via `gcre.ActionHandler` (and optional `<HOST_name>` callbacks if stateful lexing is needed).
+4. **Bytecode Compiler**: Walk AST nodes and emit MoarVM Compilation Units (`moargo.NewCompUnitEmitter`) with typed local registers, lexical slots, and frame jump offsets.
+5. **Execution**: Execute in-process via `moargo.RunNative(bc)` / `vm.RunBytecode(ctx, bc)` on `moar.dll`.
 
 ## AI credit
 

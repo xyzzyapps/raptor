@@ -139,7 +139,7 @@ func TestAssertInvariants(t *testing.T) {
 	// Test passing assertion
 	_, err := in.Eval(`
 my $x = 100;
-assert $x > 50, "x must be greater than 50";
+ASSERT $x > 50, "x must be greater than 50";
 `)
 	if err != nil {
 		t.Fatalf("passing assert failed: %v", err)
@@ -148,7 +148,7 @@ assert $x > 50, "x must be greater than 50";
 	// Test failing assertion
 	_, err = in.Eval(`
 my $y = 10;
-assert $y > 50, "y must be greater than 50";
+ASSERT $y > 50, "y must be greater than 50";
 `)
 	if err == nil {
 		t.Fatalf("expected assertion failure, got nil error")

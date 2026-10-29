@@ -70,7 +70,7 @@ func (e *Env) DefineState(name string, cell *StateCell) {
 
 // Define declares a new variable in the current frame.
 func detachInt(v *Value) *Value {
-	if isInternedInt(v) {
+	if v != nil && v.Type == ValInt {
 		return &Value{Type: ValInt, IntVal: v.IntVal}
 	}
 	return v

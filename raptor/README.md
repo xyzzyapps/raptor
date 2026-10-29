@@ -33,7 +33,7 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `=~` `!~` | same; also smartmatch `~~` |
 | `? :` | `?? !!` (also `?:`) |
 | `& \| ^ << >>` bitwise | `+&` `+\|` `+^` `+<` `+>` |
-| `**` `&&` `\|\|` `and` `or` `not` | same |
+| `**` `&&` `\|\|` `and` `or` `xor` `not` | same (+ `orelse`) |
 | `1 .. 10` | same |
 | `1 < $x < 10` | same (chained) |
 | `if` `elsif` `else` `unless` | same |
@@ -63,7 +63,7 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `length` `uc` `lc` `substr` `index` `ord` `chr` `sprintf` | same; also `chars` `trim` `tc` `fc` |
 | `chomp` / `chop` | return a new string (do not mutate) |
 | `qw(a b c)` | `[ "a", "b", "c" ]` |
-| `m//` | `=~` / `~~`; `regex_engine("samre")` |
+| `m//` | `=~` / `~~`; `regex_engine("samre")`; declarative `grammar` (`G.parse` / `$/`) |
 | `open my $fh, "<", $p` | `$fh = open($p, "r")` (`<` `>` `>>` ok) |
 | `<>` / `readline` | `readline($fh)`; `slurp` / `spurt` for whole files |
 | `-e -f -d -s -r -w` | same |
@@ -114,7 +114,7 @@ Licensed under the **Artistic License 2.0**.
 12. **Packages & AUTOLOAD** — `package Foo;`, `%Foo::`, `package_symbols` / `package_set` / `package_get` / `package_delete`; `$AUTOLOAD`.
 13. **Contextual vars** — `@*ARGS`, `%*ENV`, `$*PROGRAM`, `$*RAPTOR`, `$*KERNEL`, `$*PID`, `$?`, `$!`, `$$`, `$0`.
 14. **Backticks** — `` `cmd` ``, `qx{cmd}`; `$?` / `$!`.
-15. **Grammars** — `grammar` / `rule` / `token` / `regex` (gcre). Language parse is gcre + HOST Pratt.
+15. **Grammars** — NQP / QRegex declarative `grammar Name [is Parent] { ... }`, `proto` / `:sym<...>`, `is optable`, LTM `|` vs `||`, `%` / `%%`, `~` goal matching; `Name.parse($s, [$rule])`, `Name.subparse($s, [$rule])`, `$/` ([examples/nqp_grammar_showcase.rp](examples/nqp_grammar_showcase.rp)). Language parse is gcre + HOST Pratt.
 16. **Regex / `samre`** — `regex_engine("samre")`.
 17. **Verification** — uppercase only: `PRE $cond;` / `PRE { … }` (also `POST`, `INVARIANT`, `CHECK`, `ASSERT`); `TEST` / `PROPERTY` / `SUBTEST` name+block. Prefix calls: `f($a,$b)` = `f $a, $b` = `(f $a, $b)`. TAP `plan 4;` / `ok 1+1==2, "msg"` / `ok { … }`. `raptor test t/` (like `prove`).
 18. **TUI (Charmbracelet)** — `tui_style`, `tui_box`, `tui_table`, `tui_progress`, `tui_markdown`, `tui_app_run`.
@@ -175,6 +175,16 @@ sub safe_divide($a, $b) {
 }
 PROPERTY "addition commutativity" ($x, $y) { return ($x + $y) == ($y + $x); }
 plan 1; ok 1 + 1 == 2, "math"; done_testing;
+```
+
+**NQP Grammars**
+```perl
+grammar Point {
+    rule TOP { ^ '(' ~ ')' [ <x=coord> ',' <y=coord> ] $ }
+    token coord { '-'? \d+ }
+}
+my $m = Point.parse("(12, -5)");
+say $m{"x"}{"str"} ~ ":" ~ $m{"y"}{"str"};
 ```
 
 **TUI**

@@ -541,8 +541,10 @@ type RuleDecl struct {
 
 // GrammarDeclStmt represents a grammar declaration: grammar PointGrammar { rule TOP { ... } ... }
 type GrammarDeclStmt struct {
-	Name  string
-	Rules []RuleDecl
+	Name   string
+	Parent string
+	Source string
+	Rules  []RuleDecl
 }
 
 func (g *GrammarDeclStmt) node() {}

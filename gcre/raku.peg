@@ -2,43 +2,148 @@
 package gcre
 }
 
-// Tiny Raku grammar syntax = PEG subset spelled as valid Raku.
+// NQP / Raku grammar syntax (QRegex + PEG + LTM protoregexes + optable).
 // No semantic actions here. Translation lives in raku_walk.go.
 
-GrammarFile <- _ GrammarDecl _ EOF
+GrammarFile <- _ GrammarDecl (_ GrammarDecl)* _ EOF
 
-GrammarDecl <- "grammar" _ NameTok _ "{" _ RuleDecl* _ "}"
+GrammarDecl <- "grammar" !NameCont _ NameTok ParentSpec? _ "{" _ GrammarMember* _ "}"
 
-RuleDecl <- RuleKind _ NameTok _ "{" _ RxAlt _ "}" _
+ParentSpec <- _ "is" !NameCont _ NameTok
 
-RuleKind <- "token" / "regex" / "rule"
+GrammarMember <- ProtoDecl / RuleDecl / SemiMember
 
-RxAlt <- (_ "|")? _ RxSeq (_ "|" _ RxSeq)*
+SemiMember <- ";" _
 
-RxSeq <- RxAtom (_ RxAtom)*
+ProtoDecl <- "proto" !NameCont _ RuleKind _ NameTok RuleTrait* _ "{" _ ProtoBody _ "}" _
 
-RxAtom <- RxPrimary Quant?
+ProtoBody <- "{" _ "*" _ "}" / "*" / "<...>" / "..." / ""
 
-Quant <- "*" / "+" / "?"
+RuleDecl <- MultiPrefix? RuleKind _ RuleName RuleTrait* _ "{" _ RxAlt? _ "}" _
 
-RxPrimary <- RxGroup / RxAngle / RxSq / RxDq / RxEsc / "." / "#" / ";" / "$"
+MultiPrefix <- "multi" !NameCont _
 
-RxGroup <- "[" _ RxAlt _ "]"
+RuleKind <- ("token" / "regex" / "rule") !NameCont
 
-RxAngle <- "<" DotOpt AngleBody ">"
+RuleName <- NameTok SymAdverb?
 
-DotOpt <- "." / ""
+SymAdverb <- ":sym" SymDelim
 
-AngleBody <- ClassSpec / HostName / NameTok
+SymDelim <- SymAngle / SymFrench / SymTexas / SymBracket
 
-# Organic host hatch. Still PEG. Spelled <HOST_name> in .raku.
+SymAngle <- "<" (!">" .)+ ">"
+
+SymFrench <- "«" (!"»" .)+ "»"
+
+SymTexas <- "<<" (!">>" .)+ ">>"
+
+SymBracket <- "[" (!"]" .)+ "]"
+
+RuleTrait <- _ "is" !NameCont _ NameTok TraitArg?
+
+TraitArg <- "(" (!")" .)* ")" / "«" (!"»" .)* "»" / "[" (!"]" .)* "]" / "<" (!">" .)* ">"
+
+RxAlt <- (_ "||")? _ RxLTMAlt (_ "||" _ RxLTMAlt)*
+
+RxLTMAlt <- (_ "|" !"|")? _ RxSeq (_ "|" !"|" _ RxSeq)*
+
+RxSeq <- RxItem (_ RxItem)*
+
+RxItem <- NamedCap / GoalOrAtom
+
+NamedCap <- "$<" NameTok ">" _ "=" _ PlainAtom
+
+GoalOrAtom <- PlainAtom GoalTail?
+
+GoalTail <- _ "~" _ PlainAtom _ RxItem
+
+PlainAtom <- RxPrimary QuantSpec? SepClause?
+
+QuantSpec <- StarStarQuant / SimpleQuant
+
+StarStarQuant <- _ "**" _ CountRange FrugalOpt
+
+FrugalOpt <- "?" / ""
+
+CountRange <- Digits _ ".." _ UpperBound / Digits
+
+UpperBound <- "*" / Digits
+
+Digits <- [0-9]+
+
+SepClause <- _ SepOp _ SepAtom
+
+SepOp <- "%%" / "%"
+
+SepAtom <- RxPrimary QuantSpec?
+
+RxPrimary <- ActionStub
+           / RxGroup
+           / RxCapture
+           / RxAngle
+           / RxSq
+           / RxDq
+           / RxEsc
+           / "^^"
+           / "$$"
+           / "<<"
+           / ">>"
+           / "«"
+           / "»"
+           / "^"
+           / "$"
+           / "."
+           / "#"
+           / ";"
+
+ActionStub <- "{" _ "*" _ "}"
+
+RxGroup <- "[" _ RxAlt? _ "]"
+
+RxCapture <- "(" _ RxAlt? _ ")"
+
+RxAngle <- LookaheadPos
+         / LookaheadNeg
+         / LookbehindPos
+         / LookbehindNeg
+         / StdAngle
+
+LookaheadPos <- "<?" _ "before" !NameCont _ RxAlt _ ">"
+
+LookaheadNeg <- "<!" _ "before" !NameCont _ RxAlt _ ">"
+
+LookbehindPos <- "<?" _ "after" !NameCont _ RxAlt _ ">"
+
+LookbehindNeg <- "<!" _ "after" !NameCont _ RxAlt _ ">"
+
+StdAngle <- "<" AnglePrefix AngleBody ">"
+
+AnglePrefix <- "?" / "!" / "." / ""
+
+AngleBody <- CharClassExpr / SubruleAlias / HostName / NameTok
+
+SubruleAlias <- NameTok "=" (HostName / NameTok)
+
+# Organic host hatch. Spelled <HOST_name> in .raku.
 HostName <- "HOST_" NameTok
 
-ClassSpec <- "-"? "[" ClassInner "]"
+# Character class algebra & Unicode properties:
+# <[a..z] + [0..9] - [x]>, <-[a..z]>, <:Lu>, <:!Digit>, <-:Space>
+CharClassExpr <- ClassFirstTerm (_ ClassSetOp _ ClassTerm)*
+
+ClassFirstTerm <- ClassSign? "[" ClassInner "]" / ClassSign PropSpec / PropSpec
+
+ClassSign <- "+" / "-"
+
+ClassSetOp <- "+" / "-"
+
+ClassTerm <- "[" ClassInner "]" / PropSpec
 
 ClassInner <- ClassPart*
 
-ClassPart <- "\\" . / !"]" .
+ClassPart <- HexEsc / "\\" . / !"]" .
+
+PropSpec <- ":" "!"? NameTok
 
 RxSq <- "'" SqChar* "'"
 
@@ -48,9 +153,17 @@ RxDq <- '"' DqChar* '"'
 
 DqChar <- "\\" . / !'"' .
 
-RxEsc <- "\\" [ntrsdwNTRSDW] / "\\" .
+RxEsc <- HexEsc / ClassEsc / AnyEsc
 
-NameTok <- [a-zA-Z_] [a-zA-Z0-9_-]*
+HexEsc <- "\\x[" [0-9a-fA-F, ]+ "]"
+
+ClassEsc <- "\\" [ntrsdwhvNTRSDWHV]
+
+AnyEsc <- "\\" .
+
+NameTok <- [a-zA-Z_] NameCont*
+
+NameCont <- [a-zA-Z0-9_-]
 
 _ <- ( [ \t\r\n]+ / Comment )*
 

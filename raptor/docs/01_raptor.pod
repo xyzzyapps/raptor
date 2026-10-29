@@ -29,9 +29,10 @@ C<struct>s. Types are optional refinements (C<subset>) checked on
 assignment.
 
 B<Parse.> B<gcre> (Grammar Compatible Regular Expressions) loads
-F<runtime/raptor.raku>. That subset is PEG-compatible Raku. The Go
-Pratt parser runs only where the grammar writes C<E<lt>HOST_stmtE<gt>>
-or C<E<lt>HOST_exprE<gt>> — not as a second full-file pass.
+F<runtime/raptor.raku>. That engine implements declarative NQP / QRegex
+grammars plus an organic host hatch: the Go Pratt parser runs only
+where the grammar writes C<E<lt>HOST_stmtE<gt>> or
+C<E<lt>HOST_exprE<gt>> — not as a second full-file pass.
 
 B<Run.> C<--go> (default) is the tree-walk interpreter and the full
 language. C<--moar> emits CompUnit v7 and runs it on C<moar.dll> with

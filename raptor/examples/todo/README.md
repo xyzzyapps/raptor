@@ -15,7 +15,7 @@ It ships with **two runnable full-stack modes** backed by the same SQLite schema
 
 ### Option 1: Standalone REST + SPA Microservice (`app.rp`)
 
-From the `gperl` workspace root:
+From the repository root:
 
 ```powershell
 ./raptor/bin/raptor.exe --go raptor/examples/todo/app.rp

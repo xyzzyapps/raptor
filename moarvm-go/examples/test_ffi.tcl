@@ -1,6 +1,6 @@
-# Example: Demonstrating C and Go FFI inside gperl Tcl interpreter
+# Example: Demonstrating C and Go FFI inside moarvm-go Tcl interpreter
 
-puts "=== Starting gperl Tcl C-FFI Demo ==="
+puts "=== Starting moarvm-go Tcl C-FFI Demo ==="
 
 # 1. Load Windows kernel32.dll dynamically
 puts "Loading kernel32.dll via C-FFI..."

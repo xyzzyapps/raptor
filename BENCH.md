@@ -2,7 +2,7 @@
 
 This document provides a comparative benchmark analysis of the **Raptor** language runtime against **C (`gcc -O3`)**, **Perl 5**, and **Perl 6 (Rakudo / MoarVM)**, as well as tracking speedups from **Raptor v1.2** through **Raptor `--go` (Superinstruction + AVX2 + Goose DataStacks)** and **Raptor Native (`raptor compile --cc` Goose-style Bump-Arena C11 + AVX2)**.
 
-For the full architectural deep dive (Memory, CPU, SIMD, and Multi-Core Threading) and reproduction commands, see [`raptor/BENCH.md`](file:///C:/Users/manic/Documents/GITHUB/gperl/raptor/BENCH.md).
+For the full architectural deep dive (Memory, CPU, SIMD, and Multi-Core Threading) and reproduction commands, see [`raptor/BENCH.md`](raptor/BENCH.md).
 
 ---
 
@@ -69,4 +69,4 @@ On sub-10 ms scripts, Windows `CreateProcess` overhead (~6.5–7.5 ms) dominates
 
 ## 5. How to Reproduce
 
-All benchmark sources live in [`raptor/examples/bench/`](file:///C:/Users/manic/Documents/GITHUB/gperl/raptor/examples/bench). See [`raptor/BENCH.md`](file:///C:/Users/manic/Documents/GITHUB/gperl/raptor/BENCH.md) for full reproduction commands.
+All benchmark sources live in [`raptor/examples/bench/`](raptor/examples/bench). See [`raptor/BENCH.md`](raptor/BENCH.md) for full reproduction commands.

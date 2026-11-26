@@ -167,7 +167,7 @@ func runTinyGoWASM(root, outPath string) error {
 }
 
 func runGoWASM(root, outPath string) error {
-	cmd := exec.Command("go", "build", "-mod=mod", "-ldflags=-s -w", "-o", outPath, filepath.Join(root, "cmd", "wasm"))
+	cmd := exec.Command("go", "build", "-mod=mod", "-trimpath", "-ldflags=-s -w", "-o", outPath, filepath.Join(root, "cmd", "wasm"))
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GOOS=js", "GOARCH=wasm", "RAPTOR_WASM=1")
 	var buf bytes.Buffer

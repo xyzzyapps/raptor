@@ -1,6 +1,6 @@
-# Example: Using MoarVM from Tcl inside gperl
+# Example: Using MoarVM from Tcl inside moarvm-go
 
-puts "=== Starting gperl Tcl & MoarVM Bridge Demo ==="
+puts "=== Starting moarvm-go Tcl & MoarVM Bridge Demo ==="
 
 # Define a pure Tcl helper proc
 proc calculate_load {items factor} {
@@ -20,7 +20,7 @@ puts "MoarVM Init Result: $init_status"
 puts "Current MoarVM State: [moar::state]"
 
 # Configure runtime properties
-moar::set_prog_name "gperl_tcl_demo"
+moar::set_prog_name "moarvm_tcl_demo"
 moar::set_args {--verbose --sample-mode}
 puts "Configured MoarVM program name and arguments."
 

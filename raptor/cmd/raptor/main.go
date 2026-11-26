@@ -486,7 +486,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	cmd := exec.Command("go", "build", "-mod=mod", "-o", absOut, ".")
+	cmd := exec.Command("go", "build", "-mod=mod", "-trimpath", "-o", absOut, ".")
 	cmd.Dir = tempDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

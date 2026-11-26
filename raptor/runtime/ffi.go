@@ -80,7 +80,7 @@ func (in *Interp) registerFFI() {
 		var pinnedByteSlices [][]byte
 
 		if len(args) >= 4 && args[3].Type == ValArray {
-			for _, a := range args[3].ArrayVal {
+			for _, a := range args[3].materializeArray() {
 				switch a.Type {
 				case ValInt:
 					callArgs = append(callArgs, uintptr(a.IntVal))

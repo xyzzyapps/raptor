@@ -132,6 +132,11 @@
     audioOscStop: function (id, t) { const n = this._audioNode(id); if (n && n.stop) try { n.stop(t || 0); } catch (e) {} },
 
     glInit: function (canvasId, w, h) {
+      if (this._glAnimId) {
+        cancelAnimationFrame(this._glAnimId);
+        this._glAnimId = null;
+      }
+      this._uMVLoc = -1;
       const canvas = document.getElementById(canvasId) || document.getElementById("wasmWebGLCanvas");
       if (!canvas) return;
       if (w) canvas.width = w; if (h) canvas.height = h;
@@ -157,6 +162,7 @@
     glGetUniformLocation: function (p, n) {
       if (!gl || !glPrograms[p]) return -1;
       glUniformLocs.push(gl.getUniformLocation(glPrograms[p], n));
+      if (n === "uMVMatrix") this._uMVLoc = glUniformLocs.length - 1;
       return glUniformLocs.length - 1;
     },
     glEnableVertexAttribArray: function (loc) { if (gl && loc >= 0) gl.enableVertexAttribArray(loc); },
@@ -173,7 +179,29 @@
       if (gl && glUniformLocs[id] && m) gl.uniformMatrix4fv(glUniformLocs[id], false, new Float32Array(Array.isArray(m) ? m : Array.from(m)));
     },
     glDrawElements: function (n) { if (gl) gl.drawElements(gl.TRIANGLES, n || 36, gl.UNSIGNED_SHORT, 0); },
-    glStartAnimation: function () {},
+    glStartAnimation: function () {
+      const self = this;
+      if (self._glAnimId) cancelAnimationFrame(self._glAnimId);
+      let rx = 25, ry = 45, rz = 15;
+      function tick() {
+        if (!gl) return;
+        rx += 0.8; ry += 1.2;
+        const ax = rx * Math.PI / 180, ay = ry * Math.PI / 180, az = rz * Math.PI / 180;
+        const cx = Math.cos(ax), sx = Math.sin(ax), cy = Math.cos(ay), sy = Math.sin(ay), cz = Math.cos(az), sz = Math.sin(az);
+        if (self._uMVLoc >= 0 && glUniformLocs[self._uMVLoc]) {
+          gl.uniformMatrix4fv(glUniformLocs[self._uMVLoc], false, new Float32Array([
+            cy * cz, cx * sz + sx * sy * cz, sx * sz - cx * sy * cz, 0,
+            -cy * sz, cx * cz - sx * sy * sz, sx * cz + cx * sy * sz, 0,
+            sy, -sx * cy, cx * cy, 0,
+            0, 0, -4.2, 1
+          ]));
+        }
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+        self._glAnimId = requestAnimationFrame(tick);
+      }
+      self._glAnimId = requestAnimationFrame(tick);
+    },
 
     webgpuReady: false,
     _gpu: null,

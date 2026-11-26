@@ -382,6 +382,13 @@ window.raptorBridge = {
 
   // --- Low-Level WebGL GPU Hardware Accelerated Bindings ---
   glInit: function(canvasId, width, height) {
+    if (webglAnimId) {
+      cancelAnimationFrame(webglAnimId);
+      webglAnimId = null;
+    }
+    isWebglAnimating = false;
+    currentUModelViewLoc = -1;
+
     const canvas = document.getElementById(canvasId) || document.getElementById('wasmWebGLCanvas');
     if (!canvas) {
       console.error("[raptorBridge] WebGL canvas not found:", canvasId);
@@ -1600,6 +1607,7 @@ my $vsSource = '
 ';
 
 my $fsSource = '
+  precision mediump float;
   varying lowp vec4 vColor;
   void main(void) {
     gl_FragColor = vColor;
@@ -1883,6 +1891,11 @@ function initTour() {
 
 function loadLesson(idx) {
   if (idx < 0 || idx >= tourLessons.length) return;
+  if (webglAnimId) {
+    cancelAnimationFrame(webglAnimId);
+    webglAnimId = null;
+    isWebglAnimating = false;
+  }
   currentLessonIdx = idx;
   const lesson = tourLessons[idx];
 

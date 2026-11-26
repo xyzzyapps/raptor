@@ -967,12 +967,16 @@ func (in *Interp) registerWebBuiltins() {
 		b.Call("audioConnect", filter, master)
 		b.Call("audioConnect", master, comp)
 		b.Call("audioConnectDestination", comp, ctx)
+		notes := valueFloatSlice(args[0])
+		var durs []float64
+		if len(args) > 1 && args[1].Type == ValArray {
+			durs = valueFloatSlice(args[1])
+		}
 		t := t0
-		for i, item := range args[0].ArrayVal {
-			freq := toFloat(item)
+		for i, freq := range notes {
 			dur := 0.18
-			if len(args) > 1 && args[1].Type == ValArray && i < len(args[1].ArrayVal) {
-				dur = toFloat(args[1].ArrayVal[i])
+			if i < len(durs) {
+				dur = durs[i]
 			}
 			osc := b.Call("audioCreateOscillator", ctx).Int()
 			env := b.Call("audioCreateGain", ctx).Int()
@@ -987,7 +991,7 @@ func (in *Interp) registerWebBuiltins() {
 			b.Call("audioOscStop", osc, t+dur+0.02)
 			t += dur
 		}
-		wasmLog("WebAudio", fmt.Sprintf("audio_play_melody(notes=%d) via node graph", len(args[0].ArrayVal)))
+		wasmLog("WebAudio", fmt.Sprintf("audio_play_melody(notes=%d) via node graph", len(notes)))
 		return BoolValue(true), nil
 	}
 
@@ -1207,15 +1211,18 @@ func (in *Interp) registerWebBuiltins() {
 			return BoolValue(false), nil
 		}
 		target := args[0].String()
-		jsArr := js.Global().Get("Array").New()
+		var elems []float64
 		if args[1].Type == ValArray {
-			for i, item := range args[1].ArrayVal {
-				jsArr.SetIndex(i, toFloat(item))
-			}
+			elems = valueFloatSlice(args[1])
 		} else {
+			elems = make([]float64, len(args)-1)
 			for i := 1; i < len(args); i++ {
-				jsArr.SetIndex(i-1, toFloat(args[i]))
+				elems[i-1] = toFloat(args[i])
 			}
+		}
+		jsArr := js.Global().Get("Array").New(len(elems))
+		for i, f := range elems {
+			jsArr.SetIndex(i, f)
 		}
 		bridge := js.Global().Get("raptorBridge")
 		if !bridge.IsNull() && !bridge.IsUndefined() {
@@ -1243,15 +1250,18 @@ func (in *Interp) registerWebBuiltins() {
 			return BoolValue(false), nil
 		}
 		loc := int(in.toInt(args[0]))
-		jsMat := js.Global().Get("Array").New()
+		var elems []float64
 		if args[1].Type == ValArray {
-			for i, item := range args[1].ArrayVal {
-				jsMat.SetIndex(i, toFloat(item))
-			}
+			elems = valueFloatSlice(args[1])
 		} else {
+			elems = make([]float64, len(args)-1)
 			for i := 1; i < len(args); i++ {
-				jsMat.SetIndex(i-1, toFloat(args[i]))
+				elems[i-1] = toFloat(args[i])
 			}
+		}
+		jsMat := js.Global().Get("Array").New(len(elems))
+		for i, f := range elems {
+			jsMat.SetIndex(i, f)
 		}
 		bridge := js.Global().Get("raptorBridge")
 		if !bridge.IsNull() && !bridge.IsUndefined() {
@@ -1377,14 +1387,8 @@ func registerWasmWebGPU(in *Interp) {
 		m := int(in.toInt(args[0]))
 		n := int(in.toInt(args[1]))
 		k := int(in.toInt(args[2]))
-		a := make([]float32, len(args[3].ArrayVal))
-		b := make([]float32, len(args[4].ArrayVal))
-		for i, v := range args[3].ArrayVal {
-			a[i] = float32(toFloat(v))
-		}
-		for i, v := range args[4].ArrayVal {
-			b[i] = float32(toFloat(v))
-		}
+		a := valueFloat32Slice(args[3])
+		b := valueFloat32Slice(args[4])
 		out := tinyLMMatmul(m, n, k, a, b)
 		res := make([]*Value, len(out))
 		for i, v := range out {
@@ -1396,16 +1400,46 @@ func registerWasmWebGPU(in *Interp) {
 	in.Builtins["webgpu_draw_logits"] = func(in *Interp, args []*Value) (*Value, error) {
 		var logits []float32
 		if len(args) > 0 && args[0].Type == ValArray {
-			logits = make([]float32, len(args[0].ArrayVal))
-			for i, v := range args[0].ArrayVal {
-				logits[i] = float32(toFloat(v))
-			}
+			logits = valueFloat32Slice(args[0])
 		}
 		if b, ok := wasmBridge(); ok {
 			b.Call("webgpuDrawLogits", toJSFloatArray(logits), tinyLMVocabSrc)
 		}
 		return BoolValue(true), nil
 	}
+}
+
+func valueFloatSlice(v *Value) []float64 {
+	if v == nil || v.Type != ValArray {
+		return nil
+	}
+	if floats := v.floatLane(); floats != nil {
+		return floats
+	}
+	if ints := v.intLane(); ints != nil {
+		out := make([]float64, len(ints))
+		for i, n := range ints {
+			out[i] = float64(n)
+		}
+		return out
+	}
+	out := make([]float64, len(v.ArrayVal))
+	for i, elem := range v.ArrayVal {
+		out[i] = toFloat(elem)
+	}
+	return out
+}
+
+func valueFloat32Slice(v *Value) []float32 {
+	fs := valueFloatSlice(v)
+	if fs == nil {
+		return nil
+	}
+	out := make([]float32, len(fs))
+	for i, f := range fs {
+		out[i] = float32(f)
+	}
+	return out
 }
 
 func toFloat(v *Value) float64 {

@@ -1,6 +1,6 @@
 =begin pod
 
-=TITLE raptor-backends - --go, --moar, --wasm
+=TITLE raptor-backends - --go, --cc, --moar, --wasm
 
 =head1 NAME
 
@@ -8,10 +8,24 @@ raptor-backends - how each backend runs a program
 
 =head1 --go (default)
 
-Tree-walk interpreter in F<runtime/eval.go>. This is the B<full
-language>: TAP, FFI, structs, SQLite, junctions, PodLit, RaptorHP
-helpers, concurrency, the lot. C<raptor test t/> and the examples
-run here.
+Go Superinstruction + Goose DataStack + AVX2 VM in F<runtime/eval.go>,
+F<runtime/supervm.go>, F<runtime/datastack.go>, and
+F<runtime/simd_amd64.s>. This is the B<full dynamic language>: TAP,
+FFI, structs, SQLite, grammars, junctions, PodLit, RaptorHP, SIMD,
+multi-core C<psum>/C<pmap>/C<psort>, the lot. C<raptor test t/> and all
+Cookbook, Algorithms, and Todo examples run here.
+
+=head1 --cc / -cc (Goose Native C11 + AVX2)
+
+Transpiles Raptor source in F<runtime/cc_backend.go> to a single
+self-contained C11 program backed by a 16 MB bump-pointer arena,
+length-prefixed C<RpStr> slices, O(n) counting/radix C<int64> sorting,
+open-addressing C<RpIntMap> tables, and 256-bit AVX2 intrinsics, then
+invokes C<gcc>, C<clang>, or C<zig cc> with C<-O3 -march=native>.
+
+    raptor -cc -o app.exe compile script.rp
+    raptor -cc -o app.c compile script.rp
+    raptor -cc script.rp
 
 =head1 --moar
 

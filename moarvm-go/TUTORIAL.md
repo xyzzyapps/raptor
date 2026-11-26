@@ -177,7 +177,7 @@ grammar MyLang is ExprCore {
 - **LTM (`|`) vs Sequential (`||`)**: `|` picks the longest match across declarative branches; `||` picks the first matching branch left-to-right (`|` binds tighter than `||`).
 - **Declarative Operator Tables (`is optable`)**: `token EXPR is optable { <term> }` builds a Pratt precedence parser from `prefix:sym<...>`, `infix:sym<...>`, and `postfix:sym<...>` rules annotated with `is tighter<...>`, `is looser<...>`, `is equiv<...>`, and `is assoc<left|right|non|chain>`.
 - **Quantifiers, Separators & Goals**: Counted `** N..M`, frugal `*?` / `+?` / `??`, separated lists `%` / `%%`, and goal matching `'(' ~ ')' <EXPR>` with structured goal error diagnostics.
-- **Lookarounds & Character Algebra**: `<?before ...>`, `<!before ...>`, `<?after ...>`, `<!after ...>`, anchors (`^`, `$`, `^^`, `$$`, `<<`, `>>`, `<?wb>`, `<!ww>`), and set algebra (`<[a..z] + :Digit - [aeiou]>`).
+- **Lookarounds, Adverbs, Cuts & Conjunction**: `<?before ...>`, `<!before ...>`, `<?after ...>`, `<!after ...>`, `:i`/`:ignorecase`, `:m`/`:ignoremark`, `:s`/`:!s`, `&` / `&&` conjunction, `<( ... )>` capture span markers, `:` / `::` / `:::` cuts, `<~~>` self-recursion, `$0` / `$<name>` backreferences, anchors (`^`, `$`, `^^`, `$$`, `<<`, `>>`, `<|w>`, `<!|w>`, `<?wb>`, `<!ww>`), and set algebra (`<[a..z] + :Digit - [aeiou]>`).
 
 ### Reducing Matches to ASTs in Go
 
@@ -207,4 +207,4 @@ match, err := g.Parse("let x = 2 + 3 * 4;", &Actions{})
 | **LTM Engine** | Compiled Thompson NFA state table for declarative prefixes | Direct multi-branch longest-match probing from cursor with capture rollback |
 | **Regex Backtracking** | Full `bstack` continuation cursor in `regex`; `:ratchet` in `token`/`rule` | `:ratchet` semantics with frugal lookahead (`*?`/`+?`/`??`) and branch snapshot/restore |
 | **Semantic Actions & Codegen** | NQP action classes + `QAST` AST nodes + ~400 `nqp::*` ops | Go `ActionHandler`/struct methods + `<HOST_name>` hatch + direct CompUnit v7 / 6Model emission |
-| **Omitted Inline Regex Code** | `{ code }`, `<?{ pred }>`, `:my($x)`, `<$rx>`, `:i`/`:m`, `<( )>`, `&` | Omitted so `.raku` grammars stay pure, declarative, and language-agnostic |
+| **Omitted Inline Regex Code** | `{ code }`, `<?{ pred }>`, `:my($x)`, `<$rx>` | Omitted so `.raku` grammars stay pure, declarative, and language-agnostic (`:i`/`:m`/`:s`, `<( )>`, `&`, `::`/`:::`, `<~~>`, and backrefs are supported) |

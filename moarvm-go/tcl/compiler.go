@@ -20,6 +20,7 @@ type frameCtx struct {
 	lastStr bool
 }
 
+// Compiler translates a grammar-parsed Tcl AST into a MoarVM CompUnit v7 compilation unit.
 type Compiler struct {
 	cu       *moargo.CompUnitEmitter
 	frame    *moargo.FrameEmitter
@@ -41,6 +42,7 @@ type Compiler struct {
 	varType    map[string]uint16
 }
 
+// NewCompiler initializes a Tcl-to-MoarVM bytecode compiler with preconfigured main frame registers.
 func NewCompiler() *Compiler {
 	cu := moargo.NewCompUnitEmitter("tcl")
 	f := cu.NewFrame("tcl_main", 256)
@@ -125,6 +127,7 @@ func (c *Compiler) tempReg() uint16 {
 	return c.allocReg("")
 }
 
+// CompUnit returns the underlying MoarVM compilation unit emitter.
 func (c *Compiler) CompUnit() *moargo.CompUnitEmitter {
 	return c.cu
 }

@@ -1,5 +1,6 @@
 //go:build unix
 
+// capture_posix.go captures file-descriptor 1 (stdout) output during native MoarVM execution on Unix hosts.
 package moargo
 
 import (
@@ -20,7 +21,7 @@ func captureStdout(fn func() error) (string, error) {
 		tmp.Close()
 		return "", err
 	}
-	if err := syscall.Dup2(int(tmp.Fd()), 1); err != nil {
+	if err := dupFD(int(tmp.Fd()), 1); err != nil {
 		tmp.Close()
 		_ = syscall.Close(saved)
 		return "", err
@@ -28,7 +29,7 @@ func captureStdout(fn func() error) (string, error) {
 
 	runErr := fn()
 
-	_ = syscall.Dup2(saved, 1)
+	_ = dupFD(saved, 1)
 	_ = syscall.Close(saved)
 	_ = tmp.Close()
 

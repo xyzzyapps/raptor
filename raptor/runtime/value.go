@@ -1,3 +1,5 @@
+// value.go defines Raptor's compact 64-byte tagged Value representation, pointerless
+// StrTape string arenas, unboxed columnar ArrayLanes, and value constructors/coercions.
 package raptor
 
 import (
@@ -55,6 +57,7 @@ const (
 	flagSlotBox    uint8 = 1 << 2 // Inline box in a persistent global slot
 )
 
+// JunctionKind identifies the autothreading combinator mode (all, any, one, none).
 type JunctionKind int
 
 const (
@@ -130,6 +133,7 @@ type StrTape struct {
 	Data    []byte
 }
 
+// NewStrTape allocates a pointerless contiguous string tape pre-sized for capElems strings and capBytes UTF-8 bytes.
 func NewStrTape(capElems, capBytes int) *StrTape {
 	offs := make([]uint32, 1, capElems+1)
 	offs[0] = 0
@@ -140,6 +144,7 @@ func NewStrTape(capElems, capBytes int) *StrTape {
 	return &StrTape{Offsets: offs, Data: data}
 }
 
+// Len returns the number of strings stored in the tape.
 func (st *StrTape) Len() int {
 	if st == nil || len(st.Offsets) == 0 {
 		return 0
@@ -147,6 +152,7 @@ func (st *StrTape) Len() int {
 	return len(st.Offsets) - 1
 }
 
+// At returns a zero-copy string view of element i in the tape.
 func (st *StrTape) At(i int) string {
 	start := st.Offsets[i]
 	end := st.Offsets[i+1]
@@ -156,11 +162,13 @@ func (st *StrTape) At(i int) string {
 	return unsafe.String(&st.Data[start], int(end-start))
 }
 
+// Append appends string s onto the contiguous byte tape and records its offset.
 func (st *StrTape) Append(s string) {
 	st.Data = append(st.Data, s...)
 	st.Offsets = append(st.Offsets, uint32(len(st.Data)))
 }
 
+// Clone returns an independent deep copy of the StrTape.
 func (st *StrTape) Clone() *StrTape {
 	if st == nil {
 		return nil
@@ -290,6 +298,7 @@ func escapeValues(vs []*Value) {
 
 // Rare-variant typed accessors backed by Value.ext.
 
+// Closure extracts the underlying *Closure when v is a ValClosure, or nil otherwise.
 func (v *Value) Closure() *Closure {
 	if v == nil || v.extKind != extClosure || v.ext == nil {
 		return nil
@@ -297,6 +306,7 @@ func (v *Value) Closure() *Closure {
 	return (*Closure)(v.ext)
 }
 
+// Candidates returns the ordered dispatch candidates when v is a ValMultiSub.
 func (v *Value) Candidates() []*Closure {
 	if v == nil || v.extKind != extMultiSub || v.ext == nil {
 		return nil
@@ -304,6 +314,7 @@ func (v *Value) Candidates() []*Closure {
 	return (*multiSubBox)(v.ext).candidates
 }
 
+// AppendCandidate registers an additional multi-dispatch candidate closure on v.
 func (v *Value) AppendCandidate(cand *Closure) {
 	if v == nil {
 		return
@@ -318,6 +329,7 @@ func (v *Value) AppendCandidate(cand *Closure) {
 	box.candidates = append(box.candidates, cand)
 }
 
+// CStruct extracts the underlying *CStructInstance when v is a ValCStruct, or nil otherwise.
 func (v *Value) CStruct() *CStructInstance {
 	if v == nil || v.extKind != extCStruct || v.ext == nil {
 		return nil
@@ -325,6 +337,7 @@ func (v *Value) CStruct() *CStructInstance {
 	return (*CStructInstance)(v.ext)
 }
 
+// Promise extracts the underlying *Promise when v is a ValPromise, or nil otherwise.
 func (v *Value) Promise() *Promise {
 	if v == nil || v.extKind != extPromise || v.ext == nil {
 		return nil
@@ -332,6 +345,7 @@ func (v *Value) Promise() *Promise {
 	return (*Promise)(v.ext)
 }
 
+// Channel extracts the underlying *Channel when v is a ValChannel, or nil otherwise.
 func (v *Value) Channel() *Channel {
 	if v == nil || v.extKind != extChannel || v.ext == nil {
 		return nil
@@ -339,6 +353,7 @@ func (v *Value) Channel() *Channel {
 	return (*Channel)(v.ext)
 }
 
+// Junction extracts the underlying *Junction when v is a ValJunction, or nil otherwise.
 func (v *Value) Junction() *Junction {
 	if v == nil || v.extKind != extJunction || v.ext == nil {
 		return nil
@@ -346,6 +361,7 @@ func (v *Value) Junction() *Junction {
 	return (*Junction)(v.ext)
 }
 
+// LazySeq extracts the underlying *LazySeq when v is a ValLazySeq, or nil otherwise.
 func (v *Value) LazySeq() *LazySeq {
 	if v == nil || v.extKind != extLazySeq || v.ext == nil {
 		return nil
@@ -353,6 +369,7 @@ func (v *Value) LazySeq() *LazySeq {
 	return (*LazySeq)(v.ext)
 }
 
+// Ref extracts the target *Value when v is a ValRef scalar/container reference, or nil otherwise.
 func (v *Value) Ref() *Value {
 	if v == nil || v.extKind != extRef || v.ext == nil {
 		return nil
@@ -398,6 +415,7 @@ func (v *Value) strLane() *StrTape {
 	return (*ArrayLane)(v.ext).Strs
 }
 
+// JunctionValue constructs an autothreading Junction Value over vals.
 func JunctionValue(kind JunctionKind, vals []*Value) *Value {
 	escapeValues(vals)
 	j := &Junction{Kind: kind, Values: vals}
@@ -408,6 +426,7 @@ func JunctionValue(kind JunctionKind, vals []*Value) *Value {
 	}
 }
 
+// LazySeqValue wraps yielded gather/take items into a ValLazySeq Value.
 func LazySeqValue(items []*Value) *Value {
 	escapeValues(items)
 	ls := &LazySeq{Items: items}
@@ -425,10 +444,12 @@ var (
 	valEmptyStr = &Value{Type: ValString, StrVal: ""}
 )
 
+// NilValue returns the singleton Nil Value.
 func NilValue() *Value {
 	return valNil
 }
 
+// BoolValue returns the singleton True or False Value for b.
 func BoolValue(b bool) *Value {
 	if b {
 		return valTrue
@@ -436,6 +457,7 @@ func BoolValue(b bool) *Value {
 	return valFalse
 }
 
+// IntValue returns an interned or heap-allocated ValInt Value for i.
 func IntValue(i int64) *Value {
 	if i >= intInternMin && i <= intInternMax {
 		return intIntern[i-intInternMin]
@@ -443,6 +465,7 @@ func IntValue(i int64) *Value {
 	return &Value{Type: ValInt, IntVal: i}
 }
 
+// IntArrayValue wraps a packed unboxed []int64 slice as a columnar ValArray.
 func IntArrayValue(ints []int64) *Value {
 	if ints == nil {
 		ints = []int64{}
@@ -451,6 +474,7 @@ func IntArrayValue(ints []int64) *Value {
 	return &Value{Type: ValArray, ext: unsafe.Pointer(l), extKind: extArrayLane}
 }
 
+// FloatArrayValue wraps a packed unboxed []float64 slice as a columnar ValArray.
 func FloatArrayValue(floats []float64) *Value {
 	if floats == nil {
 		floats = []float64{}
@@ -459,6 +483,7 @@ func FloatArrayValue(floats []float64) *Value {
 	return &Value{Type: ValArray, ext: unsafe.Pointer(l), extKind: extArrayLane}
 }
 
+// StrTapeArrayValue wraps a pointerless StrTape as a columnar ValArray.
 func StrTapeArrayValue(tape *StrTape) *Value {
 	if tape == nil {
 		tape = NewStrTape(0, 0)
@@ -632,10 +657,12 @@ func (v *Value) appendString(suffix string) *Value {
 	return v
 }
 
+// FloatValue constructs a ValFloat Value for f.
 func FloatValue(f float64) *Value {
 	return &Value{Type: ValFloat, FloatVal: f}
 }
 
+// StringValue returns the singleton empty string Value or allocates a ValString for s.
 func StringValue(s string) *Value {
 	if s == "" {
 		return valEmptyStr
@@ -643,11 +670,13 @@ func StringValue(s string) *Value {
 	return &Value{Type: ValString, StrVal: s}
 }
 
+// ArrayValue constructs a boxed heterogeneous ValArray escaping any stack/arena elements.
 func ArrayValue(elems []*Value) *Value {
 	escapeValues(elems)
 	return &Value{Type: ValArray, ArrayVal: elems}
 }
 
+// HashValue constructs a ValHash map Value escaping any stack/arena values.
 func HashValue(m map[string]*Value) *Value {
 	for k, v := range m {
 		if v != nil && v.flags != 0 {
@@ -657,6 +686,7 @@ func HashValue(m map[string]*Value) *Value {
 	return &Value{Type: ValHash, HashVal: m}
 }
 
+// MatchValue constructs a Raku-style grammar/regex Match Value ($/) stringifying to matchedStr.
 func MatchValue(matchedStr string, m map[string]*Value) *Value {
 	for k, v := range m {
 		if v != nil && v.flags != 0 {
@@ -666,19 +696,23 @@ func MatchValue(matchedStr string, m map[string]*Value) *Value {
 	return &Value{Type: ValHash, StrVal: matchedStr, HashVal: m, extKind: extMatchObj}
 }
 
+// ClosureValue wraps a callable *Closure into a ValClosure Value.
 func ClosureValue(c *Closure) *Value {
 	return &Value{Type: ValClosure, ext: unsafe.Pointer(c), extKind: extClosure}
 }
 
+// MultiSubValue wraps multiple dispatch candidates into a ValMultiSub Value.
 func MultiSubValue(candidates []*Closure) *Value {
 	box := &multiSubBox{candidates: candidates}
 	return &Value{Type: ValMultiSub, ext: unsafe.Pointer(box), extKind: extMultiSub}
 }
 
+// NativePtrValue wraps a raw C-ABI pointer uintptr into a ValNativePtr Value.
 func NativePtrValue(ptr uintptr) *Value {
 	return &Value{Type: ValNativePtr, PtrVal: ptr}
 }
 
+// CStructValue wraps a live CStructInstance into a ValCStruct Value.
 func CStructValue(inst *CStructInstance) *Value {
 	var ptr uintptr
 	if inst != nil {
@@ -687,14 +721,17 @@ func CStructValue(inst *CStructInstance) *Value {
 	return &Value{Type: ValCStruct, PtrVal: ptr, ext: unsafe.Pointer(inst), extKind: extCStruct}
 }
 
+// PromiseValue wraps an asynchronous *Promise into a ValPromise Value.
 func PromiseValue(p *Promise) *Value {
 	return &Value{Type: ValPromise, ext: unsafe.Pointer(p), extKind: extPromise}
 }
 
+// ChannelValue wraps a concurrent *Channel into a ValChannel Value.
 func ChannelValue(c *Channel) *Value {
 	return &Value{Type: ValChannel, ext: unsafe.Pointer(c), extKind: extChannel}
 }
 
+// RefValue creates a scalar/container reference Value (`\$x`, `\@a`, `\%h`) escaping target.
 func RefValue(target *Value) *Value {
 	target = escapeValue(target)
 	return &Value{Type: ValRef, ext: unsafe.Pointer(target), extKind: extRef}
@@ -866,6 +903,7 @@ func formatFloatRaku(f float64) string {
 	return strconv.FormatFloat(f, 'g', -1, 64)
 }
 
+// String formats v according to Raku/Raptor stringification rules (`~`).
 func (v *Value) String() string {
 	if v == nil {
 		return "(nil)"

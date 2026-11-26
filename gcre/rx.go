@@ -1,3 +1,5 @@
+// rx.go implements the compiled PEG combinator node hierarchy (alternation, LTM,
+// quantifiers, lookarounds, conjunctions, capture markers, cuts, and character classes).
 package gcre
 
 import (

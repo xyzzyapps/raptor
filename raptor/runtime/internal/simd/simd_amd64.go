@@ -1,6 +1,6 @@
 //go:build amd64 && !purego
 
-package raptor
+package simd
 
 func hasAVX2Asm() bool
 func avx2SumInt64(ptr *int64, n int) int64
@@ -15,16 +15,16 @@ func HasAVX2() bool {
 	return cpuHasAVX2
 }
 
-// SimdBackendName describes the active SIMD vector backend.
-func SimdBackendName() string {
+// BackendName describes the active SIMD vector backend.
+func BackendName() string {
 	if cpuHasAVX2 {
 		return "x86_64-AVX2-256bit"
 	}
 	return "x86_64-scalar"
 }
 
-// SimdSumInt64 reduces a packed int64 slice using 4x unrolled 256-bit VPADDQ when AVX2 is available.
-func SimdSumInt64(xs []int64) int64 {
+// SumInt64 reduces a packed int64 slice using 4x unrolled 256-bit VPADDQ when AVX2 is available.
+func SumInt64(xs []int64) int64 {
 	n := len(xs)
 	if n == 0 {
 		return 0
@@ -39,8 +39,8 @@ func SimdSumInt64(xs []int64) int64 {
 	return s
 }
 
-// SimdSumFloat64 reduces a packed float64 slice using 4x unrolled 256-bit VADDPD when AVX2 is available.
-func SimdSumFloat64(xs []float64) float64 {
+// SumFloat64 reduces a packed float64 slice using 4x unrolled 256-bit VADDPD when AVX2 is available.
+func SumFloat64(xs []float64) float64 {
 	n := len(xs)
 	if n == 0 {
 		return 0
@@ -55,8 +55,8 @@ func SimdSumFloat64(xs []float64) float64 {
 	return s
 }
 
-// SimdDotFloat64 computes the dot product of two float64 slices via AVX2 VMULPD + VADDPD.
-func SimdDotFloat64(a, b []float64) float64 {
+// DotFloat64 computes the dot product of two float64 slices via AVX2 VMULPD + VADDPD.
+func DotFloat64(a, b []float64) float64 {
 	n := len(a)
 	if len(b) < n {
 		n = len(b)
@@ -74,8 +74,8 @@ func SimdDotFloat64(a, b []float64) float64 {
 	return s
 }
 
-// SimdAddInt64 performs element-wise vector addition of two int64 slices via AVX2 VPADDQ.
-func SimdAddInt64(a, b []int64) []int64 {
+// AddInt64 performs element-wise vector addition of two int64 slices via AVX2 VPADDQ.
+func AddInt64(a, b []int64) []int64 {
 	n := len(a)
 	if len(b) < n {
 		n = len(b)

@@ -1,3 +1,4 @@
+// Command tcl runs Tcl 8.6 scripts or an interactive REPL compiled to MoarVM bytecode.
 package main
 
 import (

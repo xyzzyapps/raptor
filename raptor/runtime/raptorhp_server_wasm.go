@@ -11,6 +11,7 @@ type HPServerOptions struct {
 	Router  string
 }
 
+// ServeRaptorHP returns an unsupported error when invoked inside WebAssembly.
 func ServeRaptorHP(opts HPServerOptions) error {
 	return fmt.Errorf("RaptorHP server is not available in WebAssembly")
 }

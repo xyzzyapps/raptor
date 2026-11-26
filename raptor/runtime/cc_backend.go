@@ -1,5 +1,8 @@
 //go:build !js || !wasm
 
+// cc_backend.go implements the Goose-inspired native C11 + AVX2 + 8-bit LSD Radix Sort
+// compiler (`--cc` / `-cc`), translating Raptor ASTs into standalone native binaries
+// backed by a 16 MB pointerless bump arena via GCC, Clang, or `zig cc`.
 package raptor
 
 import (
@@ -15,20 +18,26 @@ import (
 	"strings"
 )
 
-// FindNativeCCompiler locates GCC or Clang on the host machine for the Goose-style C11 backend.
-func FindNativeCCompiler() (string, error) {
-	if cc := os.Getenv("RAPTOR_CC"); cc != "" {
-		if p, err := exec.LookPath(cc); err == nil {
-			return p, nil
-		}
-		if _, err := os.Stat(cc); err == nil {
-			return cc, nil
+// resolveNativeCCompiler locates GCC, Clang, or `zig cc` on the host machine for the Goose-style C11 backend.
+func resolveNativeCCompiler() (string, []string, error) {
+	if cc := strings.TrimSpace(os.Getenv("RAPTOR_CC")); cc != "" {
+		fields := strings.Fields(cc)
+		if len(fields) > 0 {
+			if p, err := exec.LookPath(fields[0]); err == nil {
+				return p, fields[1:], nil
+			}
+			if _, err := os.Stat(fields[0]); err == nil {
+				return fields[0], fields[1:], nil
+			}
 		}
 	}
 	for _, name := range []string{"gcc", "clang", "cc"} {
 		if p, err := exec.LookPath(name); err == nil {
-			return p, nil
+			return p, nil, nil
 		}
+	}
+	if zigPath, err := exec.LookPath("zig"); err == nil {
+		return zigPath, []string{"cc"}, nil
 	}
 	if goruntime.GOOS == "windows" {
 		for _, p := range []string{
@@ -37,15 +46,21 @@ func FindNativeCCompiler() (string, error) {
 			`C:\msys64\clang64\bin\clang.exe`,
 		} {
 			if _, err := os.Stat(p); err == nil {
-				return p, nil
+				return p, nil, nil
 			}
 		}
 	}
-	return "", fmt.Errorf("no C compiler (gcc/clang) found; set RAPTOR_CC or add gcc to PATH")
+	return "", nil, fmt.Errorf("no C compiler (gcc/clang/zig) found; set RAPTOR_CC or add gcc/zig to PATH")
+}
+
+// FindNativeCCompiler locates GCC, Clang, or Zig on the host machine for the Goose-style C11 backend.
+func FindNativeCCompiler() (string, error) {
+	bin, _, err := resolveNativeCCompiler()
+	return bin, err
 }
 
 // CompileScriptToNativeExe transpiles Raptor source to Goose-style arena-backed C11 with AVX2/radix-sort
-// and compiles it to a standalone native binary via gcc/clang -O3 -march=native.
+// and compiles it to a standalone native binary via gcc/clang/zig cc -O3 -march=native.
 func CompileScriptToNativeExe(source, outPath string) error {
 	prog, err := ParseProgram(source)
 	if err != nil {
@@ -58,7 +73,7 @@ func CompileScriptToNativeExe(source, outPath string) error {
 	if strings.HasSuffix(strings.ToLower(outPath), ".c") {
 		return os.WriteFile(outPath, []byte(cSrc), 0644)
 	}
-	cc, err := FindNativeCCompiler()
+	ccBin, ccPrefixArgs, err := resolveNativeCCompiler()
 	if err != nil {
 		return err
 	}
@@ -70,16 +85,17 @@ func CompileScriptToNativeExe(source, outPath string) error {
 	}
 	defer os.Remove(cFile)
 
-	args := []string{"-O3", "-march=native", "-std=c11", cFile, "-o", outPath}
+	args := append([]string{}, ccPrefixArgs...)
+	args = append(args, "-O3", "-march=native", "-std=c11", cFile, "-o", outPath)
 	if goruntime.GOOS != "windows" {
 		args = append(args, "-lm")
 	}
-	cmd := exec.Command(cc, args...)
-	cmd.Env = append(os.Environ(), "PATH="+os.Getenv("PATH")+string(os.PathListSeparator)+filepath.Dir(cc))
+	cmd := exec.Command(ccBin, args...)
+	cmd.Env = append(os.Environ(), "PATH="+os.Getenv("PATH")+string(os.PathListSeparator)+filepath.Dir(ccBin))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("cc build failed (%s): %w\n%s", cc, err, stderr.String())
+		return fmt.Errorf("cc build failed (%s): %w\n%s", ccBin, err, stderr.String())
 	}
 	return nil
 }

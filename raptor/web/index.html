@@ -7,8 +7,8 @@
   <!-- Primary Meta Tags -->
   <title>A Tour of Raptor — Post-LLM Dynamic Language Runtime in WebAssembly</title>
   <meta name="title" content="A Tour of Raptor — Post-LLM Dynamic Language Runtime in WebAssembly">
-  <meta name="description" content="Interactive in-browser WebAssembly playground and tour for Raptor — a high-performance, post-LLM dynamic language featuring continuous assignment predicate invariants, C-ABI structs, UFCS, Canvas 2D graphics, WebAudio synthesis, and PodLit literate programming.">
-  <meta name="keywords" content="Raptor, Raptor Language, WebAssembly, WASM, Post-LLM, Raku, Perl 5, MoarVM, Dynamic Language, Predicate Dispatch, Continuous Contracts, PodLit, Literate Programming, Go Tour, In-Browser IDE, Online Compiler, REPL">
+  <meta name="description" content="Interactive in-browser WebAssembly playground and 24-lesson tour for Raptor v1.3 — a high-performance procedural language featuring Raku PEG grammars, Goose-style Native C11+AVX2 (--cc) &amp; MoarVM backends, continuous assignment predicate invariants, C-ABI structs, UFCS, Canvas 2D, WebGL 3D, WebAudio, and PodLit literate programming.">
+  <meta name="keywords" content="Raptor, Raptor Language, WebAssembly, WASM, Post-LLM, Raku, Perl 5, Perl Cookbook, Algorithms, AVX2, SIMD, zig cc, MoarVM, Dynamic Language, Predicate Dispatch, Continuous Contracts, PodLit, Literate Programming, Go Tour, In-Browser IDE, Online Compiler, REPL">
   <meta name="author" content="Raptor Programming Language Team">
   <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#007d9c">
@@ -125,32 +125,33 @@
         <div class="stepper-dropdown-container">
           <select id="lessonSelect" class="header-lesson-select" aria-label="Table of Contents">
             <option value="0">1. Language Basics &amp; Operators</option>
-            <option value="1">2. Rich Control Flow &amp; Operators</option>
-            <option value="2">3. Dynamic Subsets &amp; Predicates</option>
-            <option value="3">4. C-ABI Structs &amp; Overloading</option>
-            <option value="4">5. Uniform Function Call Syntax (UFCS)</option>
-            <option value="5">6. Autothreading Quantum Junctions</option>
-            <option value="6">7. Signature Destructuring &amp; JSON</option>
-            <option value="7">8. Gather / Take Generators &amp; Lazy Lists</option>
-            <option value="8">9. Design-by-Contract &amp; Verification</option>
-            <option value="9">10. PodLit Literate Programming</option>
-            <option value="10">11. HTML5 Canvas 2D Graphics</option>
-            <option value="11">12. WebGL 3D Hardware Graphics</option>
-            <option value="12">13. WebAudio Node Graph &amp; Timeline</option>
-            <option value="13">14. Full-Stack In-Browser App</option>
-            <option value="14">15. Topic variable $_ and Unicode math</option>
-            <option value="15">16. Scoping: my, our, state</option>
-            <option value="16">17. Statement modifiers, labels, goto</option>
-            <option value="17">18. Contextual variables</option>
-            <option value="18">19. References</option>
-            <option value="19">20. Packages and AUTOLOAD</option>
-            <option value="20">21. Grammars (gcre)</option>
-            <option value="21">22. TAP tests</option>
-            <option value="22">23. Lists, hashes, and backends</option>
+            <option value="1">2. Rich Control Flow &amp; Decision Operators</option>
+            <option value="2">3. Topic variable $_ and Unicode math</option>
+            <option value="3">4. Scoping: my, our, state</option>
+            <option value="4">5. Statement modifiers, labels, goto</option>
+            <option value="5">6. Contextual variables</option>
+            <option value="6">7. References</option>
+            <option value="7">8. Uniform Function Call Syntax (UFCS)</option>
+            <option value="8">9. Lists, hashes, SIMD &amp; backends</option>
+            <option value="9">10. Dynamic Subsets &amp; Continuous Invariants</option>
+            <option value="10">11. C-ABI Struct Records &amp; Overloading</option>
+            <option value="11">12. Autothreading Quantum Junctions</option>
+            <option value="12">13. Signature Destructuring &amp; Fast JSON</option>
+            <option value="13">14. Gather / Take Generators &amp; Lazy Lists</option>
+            <option value="14">15. Packages and AUTOLOAD</option>
+            <option value="15">16. Grammars &amp; AST Actions (gcre)</option>
+            <option value="16">17. Design-by-Contract &amp; Verification</option>
+            <option value="17">18. TAP tests</option>
+            <option value="18">19. PodLit Literate Programming</option>
+            <option value="19">20. Raku / Perl 5 Subset &amp; Cookbook Idioms</option>
+            <option value="20">21. Algorithms, Data Structures &amp; SIMD</option>
+            <option value="21">22. HTML5 Canvas 2D Graphics Engine</option>
+            <option value="22">23. WebGL 3D Hardware Graphics</option>
+            <option value="23">24. WebAudio Node Graph &amp; Timeline</option>
           </select>
         </div>
         <button id="btnNextLesson" class="header-stepper-btn" title="Next Page (&rarr;)">&gt;</button>
-        <span id="pageIndicator" class="page-counter-label">1 / 14</span>
+        <span id="pageIndicator" class="page-counter-label">1 / 24</span>
       </div>
 
       <!-- Top Right Icons -->

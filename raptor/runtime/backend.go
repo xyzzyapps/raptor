@@ -1,3 +1,5 @@
+// backend.go dispatches script evaluation and binary compilation across Raptor's
+// execution backends (--go, --cc, --moar, and --wasm).
 package raptor
 
 import (
@@ -21,6 +23,7 @@ const (
 
 var defaultBackend = BackendGo
 
+// SetDefaultBackend selects the active execution backend ("go", "cc", "moar", or "wasm").
 func SetDefaultBackend(name string) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case BackendMoar, "moarvm":
@@ -34,6 +37,7 @@ func SetDefaultBackend(name string) {
 	}
 }
 
+// DefaultBackend returns the currently configured default execution backend name.
 func DefaultBackend() string { return defaultBackend }
 
 // EvalOnBackend runs source with the selected backend.
@@ -84,10 +88,12 @@ func (in *Interp) evalMoar(source string) (*Value, error) {
 // WASM compiler names: "tinygo", "go", or "" (auto: TinyGo if on PATH).
 var wasmCompiler = ""
 
+// SetWASMCompiler overrides the WebAssembly compiler driver ("tinygo", "go", or "" for auto).
 func SetWASMCompiler(name string) {
 	wasmCompiler = strings.ToLower(strings.TrimSpace(name))
 }
 
+// ResolveWASMCompiler returns the effective WebAssembly compiler ("tinygo" if available, else "go").
 func ResolveWASMCompiler() string {
 	switch wasmCompiler {
 	case "go", "gc":

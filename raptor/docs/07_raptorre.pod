@@ -40,7 +40,9 @@ NQP / QRegex declarative constructs:
 
 =item * Quantifiers, separators & goals: C<** N..M>, frugal C<*?> / C<+?> / C<??>, C<%> / C<%%> separated lists, and C<'(' ~ ')' E<lt>EXPR_bodyE<gt>> goal matching
 
-=item * Assertions & character algebra: C<E<lt>?before ...E<gt>>, C<E<lt>!before ...E<gt>>, C<E<lt>?after ...E<gt>>, C<E<lt>!after ...E<gt>>, C<E<lt>[a..z] + :Digit - [aeiou]E<gt>>
+=item * Assertions, adverbs & cuts: C<E<lt>?before ...E<gt>>, C<E<lt>!before ...E<gt>>, C<E<lt>?after ...E<gt>>, C<E<lt>!after ...E<gt>>, C<:i>/C<:ignorecase>, C<:m>/C<:ignoremark>, C<:s>/C<:!s>, C<&> conjunction, C<E<lt>( ... )E<gt>> capture markers, C<::>/C<:::> cuts, C<E<lt>~~E<gt>> self-recursion, C<$0>/C<$E<lt>nameE<gt>> backreferences, and C<E<lt>[a..z] + :Digit - [aeiou]E<gt>>
+
+=item * Action tables & AST reduction: pass C<%actions> to C<Grammar.parse($input, %actions)>; action subs call C<make($ast)> and read C<$mE<lt>subruleE<gt>E<lt>madeE<gt>> / C<$m.ast>
 
 =back
 

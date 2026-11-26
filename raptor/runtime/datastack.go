@@ -1,3 +1,5 @@
+// datastack.go implements Goose-inspired pointerless contiguous value slabs for
+// lexical call frames, temporary expression arenas, and persistent global slots.
 package raptor
 
 import (

@@ -139,7 +139,7 @@ Lowercase `post` is a normal identifier (`sub post`, HTTP helpers). `PRE`/`POST`
 
 ## 6. Embedded NQP / QRegex Declarative Grammars (`gcre`)
 
-Raptor compiles inline `grammar` blocks via `gcre`, supporting grammar inheritance (`is Parent`), protoregexes (`proto` + `:sym<...>`), LTM (`|`) vs sequential (`||`) alternation, declarative `is optable` Pratt precedence, `%` / `%%` separated lists, `'(' ~ ')'` goal matching, lookarounds, and character class set algebra:
+Raptor compiles inline `grammar` blocks via `gcre`, supporting grammar inheritance (`is Parent`), protoregexes (`proto` + `:sym<...>`), LTM (`|`) vs sequential (`||`) alternation, declarative `is optable` Pratt precedence, `%` / `%%` separated lists, `'(' ~ ')'` goal matching, lookarounds, character class set algebra, scoped adverbs (`:i`, `:m`, `:s`/`:!s`, `:r`), `&` conjunction, `<( ... )>` capture markers, `::`/`:::` cuts, `<~~>` self-recursion, `$0`/`$<name>` backreferences, and `%actions` tables with `make($ast)`:
 
 ```perl
 grammar BaseExpr {

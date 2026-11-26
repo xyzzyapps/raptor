@@ -9,7 +9,7 @@ A **Perl 5–shaped** dynamic language: the non-OO subset of Raku. No `class`, `
 
 **Parse:** [gcre](../gcre) loads [`runtime/raptor.raku`](runtime/raptor.raku). Pratt is only `<HOST_stmt>` / `<HOST_expr>` inside that grammar — not a second full-file parser.
 
-**Backends:** `--go` (default tree-walk), `--moar` (CompUnit v7 on `moar.dll` — no Go fallback; unsupported constructs error), `--wasm` (TinyGo if available, else `GOOS=js`; `--wasm-compiler=go|tinygo`).
+**Backends:** `--go` (default Go Superinstruction + Goose DataStack + AVX2 VM), `--cc` / `-cc` (Goose-style 16 MB Bump-Arena Native C11 + AVX2 + Radix Sort compiler via `gcc`/`clang`/`zig cc`), `--moar` (CompUnit v7 on `moar.dll` — no Go fallback; unsupported constructs error), `--wasm` (TinyGo if available, else `GOOS=js`; `--wasm-compiler=go|tinygo`).
 
 **Docs:** PodLit in `docs/00_`…`18_*.pod` — `raptor doc`, `raptor doc 01`, `raptor weave docs/00_raptor-index.pod`. `raptor pack` embeds gcre + the runtime (`replace gcre => ../gcre`).
 
@@ -62,10 +62,12 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `<<EOF` | same; `<<~EOF` strips indent |
 | `length` `uc` `lc` `substr` `index` `ord` `chr` `sprintf` | same; also `chars` `trim` `tc` `fc` |
 | `chomp` / `chop` | return a new string (do not mutate) |
-| `qw(a b c)` | `[ "a", "b", "c" ]` |
-| `m//` | `=~` / `~~`; `regex_engine("samre")`; declarative `grammar` (`G.parse` / `$/`) |
+| `qw(a b c)` | `qw(a b c)`, `<a b c>`, `[ "a", "b", "c" ]` |
+| `m//` | `=~` / `~~`; `match`, `match_all`, `subst`; declarative `grammar` (`G.parse($s, %actions)` / `make` / `$/` / `$<name>`) |
 | `open my $fh, "<", $p` | `$fh = open($p, "r")` (`<` `>` `>>` ok) |
-| `<>` / `readline` | `readline($fh)`; `slurp` / `spurt` for whole files |
+| `<>` / `readline` | `<$fh>` or `readline($fh)`; `slurp` / `spurt` for whole files |
+| `pack` / `unpack` | `pack("A10 n N", ...)` / `unpack(...)` |
+| `eval { }` / `eval STRING` | `try { ... } catch { ... }` (`$!`), `eval($code)` / `EVAL($code)` |
 | `-e -f -d -s -r -w` | same |
 | `` `cmd` `` / `qx` / `system` | same (`$?` / `$!`) |
 | `die` `warn` `exit` | same |
@@ -74,10 +76,10 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `use Foo;` / `require` | same (`lib/`, `raptor_modules/`, `@*INC`) |
 | TAP `ok` / `is` / `prove` | built in; `raptor test t/` |
 | XS / Inline::C | `is native('lib.dll')` NativeCall |
-| `threads` | `start` / `await` / `Channel` |
+| `threads` / SIMD | `start` / `await` / `Channel`, multi-core `pmap` / `psum` / `psort`, AVX2 `simd_sum` / `simd_dot` |
 | CGI / PSGI | RaptorHP `.phtml` — `raptor -S` (like `php -S`) |
 
-**Not implemented:** `local`, `eval STRING` / `eval { }`, `bless` / `@ISA` / Moose / `class` / `has`, prototypes, `wantarray` (no list/scalar context), `s///` / `tr///`.
+**Not implemented:** `local`, `bless` / `@ISA` / Moose / `class` / `has`, prototypes, `wantarray` (no list/scalar context), mutating `s///` / `tr///` (use `subst` / `replace`). Full compatibility details: [RAKU_PERL5_SUBSET.md](RAKU_PERL5_SUBSET.md). Benchmarks: [BENCH.md](BENCH.md). Complete example suites: [examples/cookbook/](examples/cookbook/), [examples/algorithms/](examples/algorithms/), [examples/todo/](examples/todo/).
 
 ```perl
 my $name = "Raptor";

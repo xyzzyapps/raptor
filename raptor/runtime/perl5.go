@@ -1,5 +1,6 @@
 //go:build !js || !wasm
 
+// perl5.go provides optional bidirectional Perl 5 subprocess interop (`eval_perl5`, `call_perl5`, `use_perl5`).
 package raptor
 
 import (

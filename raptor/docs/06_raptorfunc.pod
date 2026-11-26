@@ -13,15 +13,22 @@ C<sprintf>, C<warn>, C<die>, C<exit>.
 
 =head1 STRINGS
 
-C<chars>, C<codes>, C<length>, C<uc>, C<lc>, C<tc>, C<fc>, C<trim>,
-C<substr>, C<index>, C<rindex>, C<ord>, C<chr>, C<chomp>, C<chop>
-(chomp/chop return a new string), C<split>, C<join>, C<reverse>.
+C<chars>, C<codes>, C<length>, C<uc>, C<lc>, C<ucfirst>, C<lcfirst>,
+C<tc>, C<fc>, C<trim>, C<substr>, C<index>, C<rindex>, C<ord>, C<chr>,
+C<chomp>, C<chop> (chomp/chop return a new string), C<split>, C<join>,
+C<words>, C<lines>, C<comb>, C<flip>, C<reverse>, C<replace>, C<subst>,
+C<match>, C<match_all>, C<pack>, C<unpack>, C<hex>, C<oct>,
+C<html_escape>, C<uri_encode>, C<uri_decode>, C<base64_encode>,
+C<base64_decode>, C<sha256>, C<md5>, C<hmac_sha256>.
 
 =head1 LISTS AND HASHES
 
-C<elems>, C<push>, C<pop>, C<shift>, C<unshift>, C<splice>,
-C<keys>, C<values>, C<kv>, C<map>, C<grep>, C<sort>, C<reduce>,
-C<exists(%h, $k)>, C<delete(%h, $k)>. Also UFCS: C<@a.elems()>.
+C<elems>, C<push>, C<pop>, C<shift>, C<unshift>, C<splice>, C<flat>,
+C<unique>, C<sum>, C<prod>, C<keys>, C<values>, C<kv>, C<map>, C<grep>,
+C<sort>, C<reduce>, C<exists(%h, $k)>, C<delete(%h, $k)>.
+SIMD & multi-core vector ops: C<simd_info>, C<simd_sum>, C<simd_dot>,
+C<simd_add>, C<simd_scale>, C<psum>, C<pmap>, C<psort>.
+Also UFCS: C<@a.elems()>.
 
 =head1 NUMBERS
 

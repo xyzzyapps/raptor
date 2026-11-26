@@ -65,7 +65,7 @@ C-ABI C<struct>, operator overloads, NativeCall / FFI.
 
 =item L<10_raptor-backends>
 
-C<--go>, C<--moar>, C<--wasm>: what each actually runs.
+C<--go>, C<--cc>, C<--moar>, C<--wasm>: what each actually runs.
 
 =item L<11_raptor-io>
 

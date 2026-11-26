@@ -83,6 +83,7 @@ func detachInt(v *Value) *Value {
 	return v
 }
 
+// Define binds name in the current lexical scope, detaching temporary integer boxes if needed.
 func (e *Env) Define(name string, val *Value) {
 	val = detachInt(val)
 	e.bindings[name] = val

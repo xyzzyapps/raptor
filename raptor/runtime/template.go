@@ -1,3 +1,4 @@
+// template.go implements the RaptorHP (`<?raptor ... ?>` / `<?= ... ?>`) HTML template compiler.
 package raptor
 
 import (
@@ -18,6 +19,7 @@ type TemplateParser struct {
 	pos int
 }
 
+// NewTemplateParser creates a TemplateParser over raw `.phtml` / `.rhtml` template source.
 func NewTemplateParser(source string) *TemplateParser {
 	return &TemplateParser{
 		src: []rune(source),

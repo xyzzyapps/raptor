@@ -45,6 +45,7 @@ type ReturnSignal struct {
 	Value string
 }
 
+// Error implements the Go error interface for Tcl stack return unwinding.
 func (r *ReturnSignal) Error() string {
 	return "return signal"
 }

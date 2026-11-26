@@ -1,3 +1,5 @@
+// parse_gcre.go embeds the self-hosted `raptor.raku` grammar and lowers gcre parse
+// trees into Raptor AST nodes.
 package raptor
 
 import (

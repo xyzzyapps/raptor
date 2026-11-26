@@ -1,3 +1,7 @@
+// Command raptor is the unified CLI driver for the Raptor programming language:
+// script execution (--go, --cc, --moar), native binary & WASM compilation, TAP test
+// runner (`raptor test`), PodLit literate tools (`weave`, `tangle`, `stitch`),
+// package management (`pm`), interactive REPL, and local tour/RaptorHP web server.
 package main
 
 import (

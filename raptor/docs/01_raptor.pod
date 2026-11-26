@@ -10,6 +10,7 @@ raptor - a Perl 5–shaped language (the dynamic, non-OO subset of Raku)
 
     raptor script.rp
     raptor --go script.rp
+    raptor -cc -o app.exe compile script.rp
     raptor --moar script.rp
     raptor --wasm
     raptor -e 'say 42;'
@@ -34,27 +35,30 @@ grammars plus an organic host hatch: the Go Pratt parser runs only
 where the grammar writes C<E<lt>HOST_stmtE<gt>> or
 C<E<lt>HOST_exprE<gt>> — not as a second full-file pass.
 
-B<Run.> C<--go> (default) is the tree-walk interpreter and the full
-language. C<--moar> emits CompUnit v7 and runs it on C<moar.dll> with
-B<no Go fallback>; unsupported constructs error. C<--wasm> builds the
-browser engine (TinyGo if available, else C<GOOS=js>).
+B<Run.> C<--go> (default) is the Superinstruction + Goose DataStack +
+AVX2 VM and supports the full dynamic language. C<--cc> (or C<-cc>)
+transpiles scripts to Goose-style arena-backed C11 + AVX2 and compiles
+standalone native binaries via C<gcc>/C<clang>/C<zig cc>. C<--moar>
+emits CompUnit v7 and runs it on C<moar.dll> with B<no Go fallback>;
+unsupported constructs error. C<--wasm> builds the browser engine
+(TinyGo if available, else C<GOOS=js>).
 
 =head1 FOR PERL 5 USERS
 
 Where Perl 5 and Raku disagree, Raptor uses the B<Raku spelling>.
-The implemented table is in F<README.md> (repo root and F<raptor/README.md>).
+The implemented table is in F<README.md> and F<RAKU_PERL5_SUBSET.md>.
 
-    my $x = 1;              # same
-    my @a = [1, 2, 3];      # arrays are [ ] literals
+    my $x = 1;              # same (++ / -- supported)
+    my @a = [1, 2, 3];      # arrays are [ ] literals; qw(a b c) and <a b c> work
     $s ~ $t;                # concat (Perl's .)
     $obj.foo();             # UFCS
-    sub foo($a, $b) { }     # signatures
-    open($path, "r");
-    exists(%h, $k);
+    sub foo($a, $b = 10) {} # signatures, defaults, slurpy *@rest, and @_
+    my $ln = <$fh>;         # diamond readline or open/slurp/spurt
+    try { ... } catch { }   # structured exceptions ($!) and eval($code)
 
-B<Not implemented:> C<local>, C<eval STRING> / C<eval { }>,
-C<bless> / C<@ISA> / Moose / C<class> / C<has>, prototypes,
-C<wantarray>, C<s///> / C<tr///>.
+B<Not implemented:> C<local>, C<bless> / C<@ISA> / Moose / C<class> /
+C<has>, prototypes, C<wantarray>, mutating C<s///> / C<tr///> (use
+C<subst> / C<replace>).
 
 See L<03_raptor-syntax>, L<04_raptor-operators>, L<05_raptorvar>.
 

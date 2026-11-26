@@ -43,6 +43,7 @@ type OpTable struct {
 	seq     int
 }
 
+// NewOpTable creates an empty Pratt operator precedence table.
 func NewOpTable() *OpTable {
 	return &OpTable{
 		Prefix:  make(map[string]*Operator),
@@ -51,6 +52,7 @@ func NewOpTable() *OpTable {
 	}
 }
 
+// Clone returns a deep copy of the operator precedence table for child grammar inheritance.
 func (t *OpTable) Clone() *OpTable {
 	if t == nil {
 		return NewOpTable()
@@ -72,6 +74,7 @@ func (t *OpTable) Clone() *OpTable {
 	return c
 }
 
+// AddPrefix registers a unary prefix operator at precedence level prec.
 func (t *OpTable) AddPrefix(symbol string, prec int) {
 	t.seq++
 	t.Prefix[symbol] = &Operator{
@@ -83,6 +86,7 @@ func (t *OpTable) AddPrefix(symbol string, prec int) {
 	}
 }
 
+// AddInfix registers a binary infix operator with precedence prec and associativity assoc.
 func (t *OpTable) AddInfix(symbol string, prec int, assoc Assoc) {
 	t.seq++
 	t.Infix[symbol] = &Operator{
@@ -94,6 +98,7 @@ func (t *OpTable) AddInfix(symbol string, prec int, assoc Assoc) {
 	}
 }
 
+// AddPostfix registers a unary postfix operator at precedence level prec.
 func (t *OpTable) AddPostfix(symbol string, prec int) {
 	t.seq++
 	t.Postfix[symbol] = &Operator{

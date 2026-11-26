@@ -8,16 +8,16 @@ Raptor provides first-class support for client-side execution in all modern web 
 
 To build `raptor.wasm` from the Go runtime:
 
-```bash
+```powershell
 # Set WebAssembly target environment variables
 $env:GOOS = "js"
 $env:GOARCH = "wasm"
 
 # Compile standalone WebAssembly binary
-go build -o web/raptor.wasm ./cmd/raptor
+go build -mod=mod -ldflags="-s -w" -o web/raptor.wasm ./cmd/wasm
 ```
 
-The Go WebAssembly support library `wasm_exec.js` is included in `web/wasm_exec.js` (from `$(go env GOROOT)/misc/wasm/wasm_exec.js`).
+The matching Go WebAssembly support script `wasm_exec.js` is bundled in `web/wasm_exec.js` (from `$(go env GOROOT)/lib/wasm/wasm_exec.js` or `$(go env GOROOT)/misc/wasm/wasm_exec.js`). The `gh-pages` branch serves `web/` directly at `https://xyzzyapps.github.io/raptor/`.
 
 ---
 

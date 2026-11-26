@@ -44,20 +44,23 @@ calls. There is no C<local>.
 
 =head1 SUBROUTINES
 
-Signatures, not C<@_>. Slurpy rest params are allowed.
+Signatures support defaults, slurpy rest parameters (C<*@rest>,
+C<*%opts>), destructuring, and Perl 5's C<@_>.
 
 =begin code
 
-sub greet($user) { return "Hello, " ~ $user ~ "!"; }
+sub greet($user = "World") { return "Hello, " ~ $user ~ "!"; }
 
 my $double = sub ($x) { return $x * 2; };
 say $double(21);
 
-sub process_list($head, @tail) {
+sub process_list($head, *@tail) {
     say "Head: " ~ $head;
     say "Tail: " ~ @tail.elems();
 }
 process_list(10, 20, 30, 40);
+
+my ($first, $second, @rest) = [1, 2, 3, 4];
 
 =end code
 
@@ -76,13 +79,16 @@ say "  raptor  ".trim().uc();
 =head1 CONTROL
 
 C<if>/C<elsif>/C<else>/C<unless>, C<while>/C<until>,
-C<for @xs { }> / C<for @xs -> $x { }>, C<loop ( ; ; ) { }>,
+C<for @xs { }> / C<for @xs -> $x { }> / C<foreach my $x (@xs) { }>,
+C<loop ( ; ; ) { }> / C<for (my $i = 0; $i < 10; $i++) { }>,
 C<given>/C<when>/C<default>, C<last>/C<next>/C<redo>, C<goto LABEL>,
 C<goto &sub>. Statement modifiers: C<say 1 if $ok>.
 
 C<redo> restarts the current loop body without advancing the
 iterator or re-checking the condition (C<redo if $cond> works).
-No C<eval STRING>. C<die>, C<warn>, C<exit> exist.
+C<try { ... } catch { ... }> traps errors into C<$!> and returns
+C<Nil> on failure; C<eval($code)> evaluates dynamic code strings.
+C<die>, C<warn>, C<exit> exist.
 
 =head1 REFERENCES
 

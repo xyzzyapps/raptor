@@ -1,3 +1,5 @@
+// resolve.go performs static lexical slot resolution, superinstruction opcode fusion,
+// and unboxed int64 recursive subroutine specialization over parsed ASTs.
 package raptor
 
 import "strings"

@@ -1,3 +1,5 @@
+// builtins.go registers Raptor's core standard library builtins (strings, lists,
+// hashes, math, SIMD/parallel vector ops, pack/unpack, file I/O, OS, and contextuals).
 package raptor
 
 import (

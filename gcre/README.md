@@ -24,7 +24,10 @@ Authors write `.raku` grammar files with zero embedded target-language action co
 | **Unicode Properties** | `<:Lu>`, `<:Ll>`, `<:L>`, `<:Digit>`, `<:N>`, `<:Space>`, `<:Punct>`, `<:Hex>`, `<:!Digit>` | Unicode general categories and POSIX/Raku character properties |
 | **Regex Escapes** | `\d \D \s \S \w \W \h \H \v \V \n \N \t \T \r \R \x[NN]` | Positive and uppercase-negated character classes plus hex codepoints |
 | **Built-in NQP Subrules** | `<ident>`, `<ws>`, `<alpha>`, `<digit>`, `<alnum>`, `<xdigit>`, `<space>`, `<blank>`, `<wb>`, `<ww>` | Built-in QRegex rules when not overridden by the grammar (`<ws>` implements NQP `<!ww> \s*`) |
-| **Action Stubs** | `{*}` | NQP action-dispatch marker (no-op in `.raku`, dispatched via Go `Actions` / `ActionHandler`) |
+| **Adverbs** | `:i` / `:ignorecase`, `:m` / `:ignoremark`<br>`:s` / `:sigspace`, `:!s` / `:!sigspace`, `:r` / `:ratchet` | Rule-level and inline scoped adverbs (including sibling branch propagation `[ :i 'select' \| 'from' ]` and NFC/NFD mark stripping) |
+| **Conjunction & Cuts** | `pat1 & pat2`, `pat1 && pat2`<br>`:`, `::`, `:::` | Span-equal conjunction and Raku PEG backtracking/alternation/rule cut operators |
+| **Capture Markers & Recursion** | `<( inner )>`, `<~~>`, `<alias=~~>`<br>`$0`, `$1`, `$<name>` | Explicit capture span endpoints, current-rule self-recursion, and dynamic positional/named backreferences |
+| **Action Stubs & ASTs** | `{*}` | NQP action-dispatch marker (`m.Make(ast)` / `m.AST` via Go `ActionHandler` or Raptor `%actions` + `make()`) |
 | **Organic Host Hatch** | `<HOST_name>` / `<.HOST_name>` | Invokes a registered Go `HostFunc` (`RegisterHost("name", fn)`) at the current rune cursor |
 
 ## Go API
@@ -78,7 +81,7 @@ QuantSpec      <- _ "**" _ CountRange "?"? / "*?" / "+?" / "??" / "*" / "+" / "?
 | **Operator Precedence (`EXPR`)** | `HLL::Grammar::EXPR` + `%optable` (`is tighter`, `is looser`, `is equiv`, `is assoc`) | Declarative `is optable` + same traits compiled to a deterministic Pratt `OpTable` |
 | **Backtracking Model** | Full continuation stack (`bstack`) in `regex`; `:ratchet` in `token`/`rule` | `:ratchet` greedy/frugal quantifiers with `Match` capture snapshot/restore on branch failure |
 | **Semantic Actions** | NQP action classes (`method foo($/) { make ... }`) + inline `{ ... }` code blocks | Go `ActionHandler` or reflection methods (`func (a *Actions) Foo(m *Match)`) + `<HOST_name>` |
-| **Omitted Regex Features** | Inline `{ code }`, `<?{ pred }>`, `:my($x)`, `<$interp>`, `:i`/`:m`, `<( )>`, `&` | Intentionally omitted to keep `.raku` grammars declarative and host-agnostic |
+| **Omitted Regex Features** | Inline `{ code }`, `<?{ pred }>`, `:my($x)`, `<$interp>` | Intentionally omitted to keep `.raku` grammars declarative and host-agnostic (adverbs `:i`/`:m`/`:s`, `<( )>`, `&`, `::`/`:::`, `<~~>`, and `$0`/`$<name>` backrefs ARE supported) |
 
 ## Examples
 

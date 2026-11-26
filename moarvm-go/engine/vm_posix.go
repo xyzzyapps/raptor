@@ -1,3 +1,4 @@
+// vm_posix.go implements the MoarVM Engine lifecycle host on POSIX platforms (Linux and macOS).
 //go:build !windows
 
 package moargo
@@ -36,6 +37,7 @@ func New(cfg Config) (Engine, error) {
 	return NewNativeEngine(cfg)
 }
 
+// Init initializes the POSIX MoarVM host instance.
 func (vm *PosixMoarVM) Init(ctx context.Context) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -49,6 +51,7 @@ func (vm *PosixMoarVM) Init(ctx context.Context) error {
 	return nil
 }
 
+// Destroy releases resources associated with the POSIX MoarVM host instance.
 func (vm *PosixMoarVM) Destroy() error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -62,12 +65,14 @@ func (vm *PosixMoarVM) Destroy() error {
 	return nil
 }
 
+// State returns the current lifecycle state of the POSIX MoarVM instance.
 func (vm *PosixMoarVM) State() VMState {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	return vm.state
 }
 
+// RunFile executes a compiled `.moarvm` bytecode file on the POSIX host.
 func (vm *PosixMoarVM) RunFile(ctx context.Context, path string) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -87,6 +92,7 @@ func (vm *PosixMoarVM) RunFile(ctx context.Context, path string) error {
 	return nil
 }
 
+// RunBytecode executes an in-memory CompUnit v7 bytecode slice on the POSIX host.
 func (vm *PosixMoarVM) RunBytecode(ctx context.Context, bc []byte) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -106,6 +112,7 @@ func (vm *PosixMoarVM) RunBytecode(ctx context.Context, bc []byte) error {
 	return nil
 }
 
+// SetProgName configures the reported program name on the POSIX MoarVM host.
 func (vm *PosixMoarVM) SetProgName(name string) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -113,6 +120,7 @@ func (vm *PosixMoarVM) SetProgName(name string) error {
 	return nil
 }
 
+// SetExecName configures the executable path on the POSIX MoarVM host.
 func (vm *PosixMoarVM) SetExecName(name string) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -120,6 +128,7 @@ func (vm *PosixMoarVM) SetExecName(name string) error {
 	return nil
 }
 
+// SetArgs configures command-line arguments passed into MoarVM bytecode programs.
 func (vm *PosixMoarVM) SetArgs(args []string) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -127,6 +136,7 @@ func (vm *PosixMoarVM) SetArgs(args []string) error {
 	return nil
 }
 
+// SetLibPaths configures module search paths on the POSIX MoarVM host.
 func (vm *PosixMoarVM) SetLibPaths(paths []string) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()

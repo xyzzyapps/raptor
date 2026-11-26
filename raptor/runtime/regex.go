@@ -38,10 +38,12 @@ func GetRegexEngine() RegexEngine {
 // GoRegexpEngine implements RegexEngine using Go's standard regexp package.
 type GoRegexpEngine struct{}
 
+// Name returns the engine identifier ("GoRegexp").
 func (g *GoRegexpEngine) Name() string {
 	return "GoRegexp"
 }
 
+// Match reports whether pattern matches anywhere in text.
 func (g *GoRegexpEngine) Match(pattern, text string) (bool, error) {
 	re, err := getOrCompileGoRegex(pattern)
 	if err != nil {
@@ -50,6 +52,7 @@ func (g *GoRegexpEngine) Match(pattern, text string) (bool, error) {
 	return re.MatchString(text), nil
 }
 
+// FindAll returns all non-overlapping matches of pattern in text.
 func (g *GoRegexpEngine) FindAll(pattern, text string) ([]string, error) {
 	re, err := getOrCompileGoRegex(pattern)
 	if err != nil {
@@ -58,6 +61,7 @@ func (g *GoRegexpEngine) FindAll(pattern, text string) ([]string, error) {
 	return re.FindAllString(text, -1), nil
 }
 
+// Replace substitutes all matches of pattern in text with repl.
 func (g *GoRegexpEngine) Replace(pattern, repl, text string) (string, error) {
 	re, err := getOrCompileGoRegex(pattern)
 	if err != nil {
@@ -119,23 +123,28 @@ type SamreEngine struct {
 	LibraryPath string
 }
 
+// NewSamreEngine creates a SamreEngine configured with an optional native library path.
 func NewSamreEngine(libPath string) *SamreEngine {
 	return &SamreEngine{LibraryPath: libPath}
 }
 
+// Name returns the engine identifier ("samre").
 func (s *SamreEngine) Name() string {
 	return "samre"
 }
 
+// Match reports whether structural regex pattern matches text.
 func (s *SamreEngine) Match(pattern, text string) (bool, error) {
 	// Standard sam / structural regex interpreter
 	return samreMatch(pattern, text)
 }
 
+// FindAll returns all non-overlapping matches of structural regex pattern in text.
 func (s *SamreEngine) FindAll(pattern, text string) ([]string, error) {
 	return samreFindAll(pattern, text)
 }
 
+// Replace substitutes all matches of structural regex pattern in text with repl.
 func (s *SamreEngine) Replace(pattern, repl, text string) (string, error) {
 	return samreReplace(pattern, repl, text)
 }

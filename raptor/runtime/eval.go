@@ -1,3 +1,5 @@
+// eval.go implements the Raptor AST + fused superinstruction evaluator, unboxed
+// recursive call engine, dynamic subset invariants, grammar actions, and package stashes.
 package raptor
 
 import (
@@ -18,6 +20,7 @@ type ReturnSignal struct {
 	Value *Value
 }
 
+// Error formats the return unwind signal for Go's error interface.
 func (r *ReturnSignal) Error() string {
 	return fmt.Sprintf("return: %s", r.Value.String())
 }
@@ -25,16 +28,19 @@ func (r *ReturnSignal) Error() string {
 // BreakSignal unwinds loop execution on 'last'.
 type BreakSignal struct{}
 
+// Error formats the loop break signal.
 func (b *BreakSignal) Error() string { return "break" }
 
 // ContinueSignal unwinds loop iteration on 'next'.
 type ContinueSignal struct{}
 
+// Error formats the loop continue signal.
 func (c *ContinueSignal) Error() string { return "continue" }
 
 // RedoSignal restarts the current loop iteration on 'redo'.
 type RedoSignal struct{}
 
+// Error formats the loop redo signal.
 func (r *RedoSignal) Error() string { return "redo" }
 
 // GotoSignal unwinds stack on 'goto'.
@@ -43,6 +49,7 @@ type GotoSignal struct {
 	IsSub  bool
 }
 
+// Error formats the goto unwind signal.
 func (g *GotoSignal) Error() string {
 	return "goto: " + g.Target
 }
@@ -553,6 +560,7 @@ func isRedo(err error) bool {
 	return ok
 }
 
+// SetStdout redirects standard output (`say`, `print`) for this interpreter instance.
 func (in *Interp) SetStdout(w io.Writer) {
 	in.Stdout = w
 }
@@ -562,6 +570,7 @@ func (in *Interp) SetStderr(w io.Writer) {
 	in.Stderr = w
 }
 
+// GetPackage returns (creating if needed) the symbol table stash for package pkg.
 func (in *Interp) GetPackage(pkg string) map[string]*Value {
 	if pkg == "" {
 		pkg = "main"
@@ -577,6 +586,7 @@ func (in *Interp) GetPackage(pkg string) map[string]*Value {
 	return stash
 }
 
+// SetPackageSymbol binds a package-visible symbol (`our` / `pkg::name`) in pkg and GlobalEnv.
 func (in *Interp) SetPackageSymbol(pkg string, name string, val *Value) {
 	val = escapeValue(val)
 	stash := in.GetPackage(pkg)
@@ -599,6 +609,7 @@ func (in *Interp) SetPackageSymbol(pkg string, name string, val *Value) {
 	}
 }
 
+// GetPackageSymbol looks up name (with or without sigil) in package pkg's stash.
 func (in *Interp) GetPackageSymbol(pkg string, name string) (*Value, bool) {
 	if stash, ok := in.Packages[pkg]; ok {
 		if v, exists := stash[name]; exists {
@@ -4772,6 +4783,7 @@ type raptorActionAdapter struct {
 	err     error
 }
 
+// HandleAction dispatches a completed gcre grammar rule match to a Raptor %actions callback or closure.
 func (a *raptorActionAdapter) HandleAction(name string, m *gcre.Match) {
 	if a.err != nil || a.actions == nil || m == nil || !m.Ok {
 		return

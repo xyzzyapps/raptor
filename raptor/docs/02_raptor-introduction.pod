@@ -59,8 +59,9 @@ say "Factorial of 5: " ~ solve(5);
 
 =begin code
 
-raptor app.rp                 # --go interpreter
+raptor app.rp                 # --go Superinstruction + AVX2 VM
 raptor --go app.rp
+raptor -cc -o app.exe compile app.rp  # Goose Native C11 + AVX2 binary
 raptor --moar app.rp          # CompUnit v7; errors if not compilable
 raptor -e 'say 42;'
 raptor test t/                # TAP harness (like prove)

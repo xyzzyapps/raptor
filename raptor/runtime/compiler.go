@@ -1,3 +1,4 @@
+// compiler.go translates Raptor ASTs into MoarVM CompUnit v7 bytecode frames.
 package raptor
 
 import (

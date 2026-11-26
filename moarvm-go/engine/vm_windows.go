@@ -151,12 +151,14 @@ func (v *WindowsMoarVM) Destroy() error {
 	return nil
 }
 
+// State returns the current lifecycle state of the Windows MoarVM instance.
 func (v *WindowsMoarVM) State() VMState {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.state
 }
 
+// RunFile executes a `.moarvm` bytecode file through `MVM_vm_run_file` in `moar.dll`.
 func (v *WindowsMoarVM) RunFile(ctx context.Context, filePath string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -183,6 +185,7 @@ func (v *WindowsMoarVM) RunFile(ctx context.Context, filePath string) error {
 	return nil
 }
 
+// RunBytecode executes an in-memory CompUnit v7 bytecode slice via `moar.dll`.
 func (v *WindowsMoarVM) RunBytecode(ctx context.Context, bytecode []byte) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -229,6 +232,7 @@ func (v *WindowsMoarVM) RunBytecode(ctx context.Context, bytecode []byte) error 
 	return nil
 }
 
+// SetProgName configures the program name passed to `MVM_vm_set_prog_name`.
 func (v *WindowsMoarVM) SetProgName(name string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -247,10 +251,12 @@ func (v *WindowsMoarVM) setProgNameLocked(name string) error {
 	return nil
 }
 
+// SetExecName configures the executable name reported by the VM.
 func (v *WindowsMoarVM) SetExecName(name string) error {
 	return v.SetProgName(name)
 }
 
+// SetArgs configures command-line arguments passed to `MVM_vm_set_clargs`.
 func (v *WindowsMoarVM) SetArgs(args []string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -282,6 +288,7 @@ func (v *WindowsMoarVM) setArgsLocked(args []string) error {
 	return nil
 }
 
+// SetLibPaths configures library search paths passed to `MVM_vm_set_lib_path`.
 func (v *WindowsMoarVM) SetLibPaths(paths []string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()

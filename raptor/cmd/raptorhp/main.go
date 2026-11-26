@@ -1,3 +1,5 @@
+// Command raptorhp executes PHP-style `.phtml` / `.rhtml` templates and runs the
+// built-in RaptorHP development HTTP server (`raptorhp -S localhost:8080`).
 package main
 
 import (

@@ -1,19 +1,19 @@
 //go:build !amd64 || purego
 
-package raptor
+package simd
 
 // HasAVX2 reports false on non-amd64 / WASM targets.
 func HasAVX2() bool {
 	return false
 }
 
-// SimdBackendName describes the active SIMD vector backend.
-func SimdBackendName() string {
+// BackendName describes the active SIMD vector backend.
+func BackendName() string {
 	return "generic-unrolled"
 }
 
-// SimdSumInt64 reduces a packed int64 slice with 4-way scalar unrolling.
-func SimdSumInt64(xs []int64) int64 {
+// SumInt64 reduces a packed int64 slice with 4-way scalar unrolling.
+func SumInt64(xs []int64) int64 {
 	var s0, s1, s2, s3 int64
 	i := 0
 	n := len(xs)
@@ -30,8 +30,8 @@ func SimdSumInt64(xs []int64) int64 {
 	return sum
 }
 
-// SimdSumFloat64 reduces a packed float64 slice with 4-way scalar unrolling.
-func SimdSumFloat64(xs []float64) float64 {
+// SumFloat64 reduces a packed float64 slice with 4-way scalar unrolling.
+func SumFloat64(xs []float64) float64 {
 	var s0, s1, s2, s3 float64
 	i := 0
 	n := len(xs)
@@ -48,8 +48,8 @@ func SimdSumFloat64(xs []float64) float64 {
 	return sum
 }
 
-// SimdDotFloat64 computes dot product on generic targets.
-func SimdDotFloat64(a, b []float64) float64 {
+// DotFloat64 computes dot product on generic targets.
+func DotFloat64(a, b []float64) float64 {
 	n := len(a)
 	if len(b) < n {
 		n = len(b)
@@ -67,8 +67,8 @@ func SimdDotFloat64(a, b []float64) float64 {
 	return sum
 }
 
-// SimdAddInt64 computes element-wise int64 slice sum on generic targets.
-func SimdAddInt64(a, b []int64) []int64 {
+// AddInt64 computes element-wise int64 slice sum on generic targets.
+func AddInt64(a, b []int64) []int64 {
 	n := len(a)
 	if len(b) < n {
 		n = len(b)

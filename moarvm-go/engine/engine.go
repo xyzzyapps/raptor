@@ -18,6 +18,7 @@ const (
 	StateError
 )
 
+// String returns the human-readable lifecycle state name.
 func (s VMState) String() string {
 	switch s {
 	case StateUninitialized:

@@ -32,6 +32,7 @@ func NewMock(cfg Config) *MockEngine {
 	}
 }
 
+// Init transitions the mock VM instance to StateReady.
 func (m *MockEngine) Init(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -43,6 +44,7 @@ func (m *MockEngine) Init(ctx context.Context) error {
 	return nil
 }
 
+// Destroy transitions the mock VM instance to StateTerminated.
 func (m *MockEngine) Destroy() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -51,12 +53,14 @@ func (m *MockEngine) Destroy() error {
 	return nil
 }
 
+// State returns the current lifecycle state of the mock VM.
 func (m *MockEngine) State() VMState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.state
 }
 
+// RunFile records filePath as executed on the mock VM.
 func (m *MockEngine) RunFile(ctx context.Context, filePath string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -68,6 +72,7 @@ func (m *MockEngine) RunFile(ctx context.Context, filePath string) error {
 	return nil
 }
 
+// RunBytecode validates VM readiness and logs bytecode buffer execution on the mock VM.
 func (m *MockEngine) RunBytecode(ctx context.Context, bytecode []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -78,6 +83,7 @@ func (m *MockEngine) RunBytecode(ctx context.Context, bytecode []byte) error {
 	return nil
 }
 
+// SetProgName records the program name on the mock VM.
 func (m *MockEngine) SetProgName(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -85,6 +91,7 @@ func (m *MockEngine) SetProgName(name string) error {
 	return nil
 }
 
+// SetExecName records the executable path on the mock VM.
 func (m *MockEngine) SetExecName(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -92,6 +99,7 @@ func (m *MockEngine) SetExecName(name string) error {
 	return nil
 }
 
+// SetArgs records command-line arguments on the mock VM.
 func (m *MockEngine) SetArgs(args []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -99,6 +107,7 @@ func (m *MockEngine) SetArgs(args []string) error {
 	return nil
 }
 
+// SetLibPaths records module library search paths on the mock VM.
 func (m *MockEngine) SetLibPaths(paths []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -106,6 +115,7 @@ func (m *MockEngine) SetLibPaths(paths []string) error {
 	return nil
 }
 
+// GetExecutedFiles returns a copy of all bytecode file paths passed to RunFile.
 func (m *MockEngine) GetExecutedFiles() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -114,6 +124,7 @@ func (m *MockEngine) GetExecutedFiles() []string {
 	return res
 }
 
+// String formats a diagnostic summary of the mock VM state.
 func (m *MockEngine) String() string {
 	return fmt.Sprintf("MockEngine{state: %s, prog: %s}", m.State(), m.progName)
 }

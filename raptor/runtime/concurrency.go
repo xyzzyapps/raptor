@@ -1,3 +1,5 @@
+// concurrency.go implements Promises (`start`/`await`), thread-safe Channels, and
+// multi-core data-parallel array reductions/maps/sorts (`psum`, `pmap`, `psort`).
 package raptor
 
 import (

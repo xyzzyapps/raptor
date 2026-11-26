@@ -1,5 +1,7 @@
 //go:build embedded || tinygo || esp32 || (!js && !wasm)
 
+// Command esp32_raptor provides a compact serial REPL and boot-script runner
+// targeting microcontrollers (TinyGo / ESP32) and embedded hosts.
 package main
 
 import (

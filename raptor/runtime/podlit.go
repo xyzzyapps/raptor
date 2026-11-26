@@ -1,3 +1,5 @@
+// podlit.go implements the PodLit bidirectional literate programming engine
+// (`pod_weave`, `pod_tangle`, `pod_mangle`, and `pod_stitch`).
 package raptor
 
 import (

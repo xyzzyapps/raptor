@@ -15,6 +15,7 @@ const (
 	CallArgStr uint8 = 8
 )
 
+// CompUnitEmitter builds a valid MoarVM version 7 Compilation Unit (.moarvm binary).
 type CompUnitEmitter struct {
 	HLLName    string
 	strings    []string
@@ -51,6 +52,7 @@ type lexicalSlot struct {
 	Type uint16
 }
 
+// FrameEmitter builds bytecode, local register descriptors, and lexicals for an individual static frame.
 type FrameEmitter struct {
 	cu         *CompUnitEmitter
 	Index      int
@@ -145,53 +147,65 @@ func (cu *CompUnitEmitter) NewFrame(name string, numLocals int) *FrameEmitter {
 	return fe
 }
 
+// LexicalCount returns the number of lexical slots registered on this frame.
 func (fe *FrameEmitter) LexicalCount() int { return len(fe.Lexicals) }
 
+// AddLexical appends a typed lexical variable slot to the frame and returns its index.
 func (fe *FrameEmitter) AddLexical(name string, typ uint16) uint16 {
 	fe.cu.AddString(name)
 	fe.Lexicals = append(fe.Lexicals, lexicalSlot{Name: name, Type: typ})
 	return uint16(len(fe.Lexicals) - 1)
 }
 
+// SetOuter links this static frame to an enclosing outer lexical frame index.
 func (fe *FrameEmitter) SetOuter(frameIndex int) {
 	fe.Outer = frameIndex
 }
 
+// SetLocalType configures the register storage kind (`RegInt64`, `RegNum64`, `RegStr`, `RegObj`) for local idx.
 func (fe *FrameEmitter) SetLocalType(idx int, regKind uint16) {
 	if idx >= 0 && idx < len(fe.LocalTypes) {
 		fe.LocalTypes[idx] = regKind
 	}
 }
 
+// EmitOp appends a 16-bit little-endian MoarVM opcode to the frame bytecode buffer.
 func (fe *FrameEmitter) EmitOp(op uint16) {
 	binary.Write(fe.Bytecode, binary.LittleEndian, op)
 }
 
+// EmitReg appends a 16-bit little-endian local register index operand.
 func (fe *FrameEmitter) EmitReg(reg uint16) {
 	binary.Write(fe.Bytecode, binary.LittleEndian, reg)
 }
 
+// EmitInt8 appends an 8-bit signed integer immediate operand.
 func (fe *FrameEmitter) EmitInt8(val int8) {
 	binary.Write(fe.Bytecode, binary.LittleEndian, val)
 }
 
+// EmitInt16 appends a 16-bit little-endian signed integer immediate operand.
 func (fe *FrameEmitter) EmitInt16(val int16) {
 	binary.Write(fe.Bytecode, binary.LittleEndian, val)
 }
 
+// EmitInt32 appends a 32-bit little-endian signed integer immediate operand.
 func (fe *FrameEmitter) EmitInt32(val int32) {
 	binary.Write(fe.Bytecode, binary.LittleEndian, val)
 }
 
+// EmitInt64 appends a 64-bit little-endian signed integer immediate operand.
 func (fe *FrameEmitter) EmitInt64(val int64) {
 	binary.Write(fe.Bytecode, binary.LittleEndian, val)
 }
 
+// EmitString interns s in the compilation unit string heap and emits its 32-bit heap index.
 func (fe *FrameEmitter) EmitString(s string) {
 	idx := fe.cu.AddString(s)
 	binary.Write(fe.Bytecode, binary.LittleEndian, idx)
 }
 
+// CurrentOffset returns the current byte offset in the frame's bytecode stream for branch patching.
 func (fe *FrameEmitter) CurrentOffset() int32 {
 	return int32(fe.Bytecode.Len())
 }

@@ -5,7 +5,7 @@
 
 <img width="740" height="220" alt="image" src="https://github.com/user-attachments/assets/1f42aca0-e357-43ed-9daa-6e41a05be004" />
 
-A **Perl 5–shaped** language (the dynamic, non-OO subset of Raku): sigils, `$_`, `//`, UFCS, `struct`, `subset`, no `class` / `has`. Go host, optional **MoarVM** backend.
+A **Perl 5–shaped** language (the dynamic, non-OO subset of Raku): sigils, `$_`, `//`, UFCS, `struct`, `subset`, no `class` / `has`. Runs on the Go Superinstruction + AVX2 VM (`--go`), Goose-style Native C11 + AVX2 compiler (`--cc`), **MoarVM** (`--moar`), and **WebAssembly** (`--wasm`).
 
 If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Raptor uses the **Raku spelling**.
 
@@ -28,18 +28,19 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `? :` | `?? !!` (also `?:`) |
 | `& \| ^ << >>` bitwise | `+&` `+\|` `+^` `+<` `+>` |
 | `**` `&&` `\|\|` `and` `or` `xor` `not` | same (+ `orelse`) |
-| `1 .. 10` | same |
+| `1 .. 10` | `1..10`, `0..^10`, `0^..10`, `0^..^10`, `^10` |
+| `++` / `--` | prefix & postfix `++$i`, `$i++`, `%freq{$w}++` |
 | `1 < $x < 10` | same (chained) |
 | `if` `elsif` `else` `unless` | same |
 | `while` `until` | same |
-| `for` / `foreach (@xs)` | `for @xs { }` or `for @xs -> $x { }` |
-| C-style `for (;;)` | `loop (my $i = 0; $i < n; $i++) { }` |
+| `for` / `foreach (@xs)` | `for @xs { }`, `for @xs -> $x { }`, `foreach my $x (@xs) { }` |
+| C-style `for (;;)` | `loop (my $i = 0; $i < n; $i++) { }` and `for (my $i = 0; $i < n; $i++) { }` |
 | `say 1 if $ok` | same modifiers (`if` `unless` `while` `until` `for` `given`) |
 | `last` / `next` / `redo` | same |
 | `given` / `when` / `default` | same (`when` uses `~~`) |
 | `goto LABEL` / `goto &sub` | same |
-| `sub foo { my $a = shift; }` | `sub foo($a) { }` signatures |
-| `@_` | named / slurpy params (`$head, @tail`) |
+| `sub foo { my $a = shift; }` | `sub foo($a, $b = 10, *@rest) { }` (and `@_`) |
+| `my ($a, $b, @rest) = ...` | list destructuring & swaps `($a, $b) = ($b, $a)` |
 | `$obj->method($a)` | `$obj.method($a)` **UFCS** (any `sub method($obj, …)`) |
 | `sub { }` closures | same |
 | `AUTOLOAD` | same (`$AUTOLOAD`) |
@@ -56,10 +57,12 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `<<EOF` | same; `<<~EOF` strips indent |
 | `length` `uc` `lc` `substr` `index` `ord` `chr` `sprintf` | same; also `chars` `trim` `tc` `fc` |
 | `chomp` / `chop` | return a new string (do not mutate) |
-| `qw(a b c)` | `[ "a", "b", "c" ]` |
-| `m//` | `=~` / `~~`; `regex_engine("samre")`; declarative `grammar` (`G.parse` / `$/`) |
+| `qw(a b c)` | `qw(a b c)`, `<a b c>`, `[ "a", "b", "c" ]` |
+| `m//` | `=~` / `~~`; `match`, `match_all`, `subst`; declarative `grammar` (`G.parse($s, %actions)` / `make` / `$/` / `$<name>`) |
 | `open my $fh, "<", $p` | `$fh = open($p, "r")` (`<` `>` `>>` ok) |
-| `<>` / `readline` | `readline($fh)`; `slurp` / `spurt` for whole files |
+| `<>` / `readline` | `<$fh>` or `readline($fh)`; `slurp` / `spurt` for whole files |
+| `pack` / `unpack` | `pack("A10 n N", ...)` / `unpack(...)` |
+| `eval { }` / `eval STRING` | `try { ... } catch { ... }` (`$!`), `eval($code)` / `EVAL($code)` |
 | `-e -f -d -s -r -w` | same |
 | `` `cmd` `` / `qx` / `system` | same (`$?` / `$!`) |
 | `die` `warn` `exit` | same |
@@ -68,10 +71,10 @@ If you know Perl 5, you already know Raptor. Where Perl 5 and Raku disagree, Rap
 | `use Foo;` / `require` | same (`lib/`, `raptor_modules/`, `@*INC`) |
 | TAP `ok` / `is` / `prove` | built in; `raptor test t/` |
 | XS / Inline::C | `is native('lib.dll')` NativeCall |
-| `threads` | `start` / `await` / `Channel` |
+| `threads` / SIMD | `start` / `await` / `Channel`, multi-core `pmap` / `psum` / `psort`, AVX2 `simd_sum` / `simd_dot` |
 | CGI / PSGI | RaptorHP `.phtml` — `raptor -S` (like `php -S`) |
 
-**Not implemented:** `local`, `eval STRING` / `eval { }`, `bless` / `@ISA` / Moose / `class` / `has`, prototypes, `wantarray` (no list/scalar context), `s///` / `tr///`.
+**Not implemented:** `local`, `bless` / `@ISA` / Moose / `class` / `has`, prototypes, `wantarray` (no list/scalar context), mutating `s///` / `tr///` (use `subst` / `replace`). See **[raptor/RAKU_PERL5_SUBSET.md](raptor/RAKU_PERL5_SUBSET.md)** for the full Raku & Perl 5 compatibility matrix.
 
 Raptor is also engineered for the Post-LLM paradigm:
 
@@ -95,14 +98,15 @@ Raptor's predicate type, continuous contract, and literate programming systems a
 ```
 cd raptor
 go build -mod=mod -o bin/raptor.exe ./cmd/raptor
-raptor script.rp          # --go interpreter
-raptor --moar script.rp   # CompUnit v7 on moar.dll
+raptor script.rp                        # --go Superinstruction + AVX2 VM
+raptor -cc -o app.exe compile script.rp # Goose-style Native C11 + AVX2 binary
+raptor --moar script.rp                 # CompUnit v7 on moar.dll
 raptor test t/
-raptor serve              # WASM tour :8080
-raptor -S localhost:8000  # PHP-style RaptorHP
+raptor serve                            # WASM tour :8080
+raptor -S localhost:8000                # PHP-style RaptorHP
 ```
 
-Full language, CLI, FFI, WASM, and build notes: **[raptor/README.md](raptor/README.md)**.
+Full language, CLI, FFI, WASM, and build notes: **[raptor/README.md](raptor/README.md)** · Benchmarks vs C / Perl 5 / Raku: **[BENCH.md](BENCH.md)** · Example suites: **[Cookbook (20 ch)](raptor/examples/cookbook/)**, **[Algorithms (14 ch)](raptor/examples/algorithms/)**, **[Todo Web App](raptor/examples/todo/)**.
 
 This tree is three siblings:
 

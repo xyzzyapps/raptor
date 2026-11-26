@@ -102,7 +102,8 @@ Eval and the Moar compiler still consume the same AST.
 
 | Flag | Role |
 | :--- | :--- |
-| `--go` (default) | AST interpreter in `runtime/eval.go` |
+| `--go` (default) | Superinstruction + Goose DataStack + AVX2 VM in `runtime/eval.go`, `supervm.go`, `datastack.go`, `simd_amd64.s` |
+| `--cc` / `-cc` | Goose-style 16 MB Bump-Arena Native C11 + AVX2 + Radix Sort transpiler (`runtime/cc_backend.go`) producing standalone native binaries via `gcc` / `clang` / `zig cc` |
 | `--moar` | CompUnit v7 on `moar.dll`. No Go fallback — unsupported AST is an error. Scalars, `say`/`print`, control flow, TAP `plan`/`ok`/`is`, and the usual integer/string ops compile natively. |
 | `--wasm` | TinyGo or `GOOS=js GOARCH=wasm` build of `cmd/wasm`; enables browser FFI helpers |
 

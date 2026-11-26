@@ -1,5 +1,8 @@
 //go:build js && wasm
 
+// Command wasm compiles the Raptor runtime to `raptor.wasm` and exports JavaScript
+// bridge bindings (`raptorEval`, `raptorWeave`, `raptorTangle`, `raptorStitch`, `raptorVersion`)
+// for the interactive GitHub Pages Tour of Raptor.
 package main
 
 import (
@@ -26,7 +29,7 @@ func main() {
 }
 
 func versionHandler(this js.Value, args []js.Value) any {
-	return "Raptor v1.0.0 (WebAssembly 64-bit)"
+	return "Raptor v1.3 (WebAssembly 64-bit)"
 }
 
 func evalHandler(this js.Value, args []js.Value) any {

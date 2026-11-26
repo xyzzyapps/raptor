@@ -184,6 +184,7 @@ type Token struct {
 	To      int
 }
 
+// String formats the token's type, literal, and line:column span for diagnostics.
 func (t Token) String() string {
 	return fmt.Sprintf("Token(%d, %q, %d:%d)", t.Type, t.Literal, t.Line, t.Col)
 }

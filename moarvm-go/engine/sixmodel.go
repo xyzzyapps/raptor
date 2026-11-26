@@ -102,6 +102,7 @@ func NewSixModelClass(name string, repr string) *SixModelClass {
 	}
 }
 
+// AddAttribute appends a typed attribute slot to the 6Model class descriptor.
 func (c *SixModelClass) AddAttribute(name string, regType uint16) {
 	c.Attributes = append(c.Attributes, SixModelAttribute{
 		Name: name,
@@ -109,6 +110,7 @@ func (c *SixModelClass) AddAttribute(name string, regType uint16) {
 	})
 }
 
+// AddMethod binds a compiled FrameEmitter method implementation on the 6Model class.
 func (c *SixModelClass) AddMethod(name string, fe *FrameEmitter) {
 	c.Methods[name] = fe
 }

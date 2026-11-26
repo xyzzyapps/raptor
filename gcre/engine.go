@@ -88,6 +88,7 @@ func (m *Match) restore(s matchSnap) {
 	}
 }
 
+// NewMatch allocates an initialized Match result spanning [from, to).
 func NewMatch(str string, from int, to int, ok bool) *Match {
 	return &Match{
 		Str:   str,
@@ -193,10 +194,12 @@ type Context struct {
 	spanTo   int
 }
 
+// IsAtEnd reports whether the scanner cursor has reached the end of input.
 func (c *Context) IsAtEnd() bool {
 	return c.Pos >= len(c.Src)
 }
 
+// Peek returns the rune at the current cursor position without advancing, or 0 at EOF.
 func (c *Context) Peek() rune {
 	if c.Pos < len(c.Src) {
 		return c.Src[c.Pos]
@@ -204,6 +207,7 @@ func (c *Context) Peek() rune {
 	return 0
 }
 
+// Advance consumes and returns the rune at the current cursor position, or 0 at EOF.
 func (c *Context) Advance() rune {
 	if c.Pos < len(c.Src) {
 		r := c.Src[c.Pos]
@@ -213,12 +217,14 @@ func (c *Context) Advance() rune {
 	return 0
 }
 
+// SkipWS advances past any Unicode whitespace runes.
 func (c *Context) SkipWS() {
 	for c.Pos < len(c.Src) && unicode.IsSpace(c.Src[c.Pos]) {
 		c.Pos++
 	}
 }
 
+// SkipHorizontalWS advances past horizontal whitespace runes (spaces and tabs, preserving newlines).
 func (c *Context) SkipHorizontalWS() {
 	for c.Pos < len(c.Src) && isHorizontalSpace(c.Src[c.Pos]) {
 		c.Pos++
@@ -252,6 +258,7 @@ type Grammar struct {
 	optableRules map[string]string // ruleName -> termRule
 }
 
+// NewGrammar constructs an empty named Grammar ready for rule definitions.
 func NewGrammar(name string) *Grammar {
 	return &Grammar{
 		Name:         name,
@@ -297,6 +304,7 @@ func (g *Grammar) Extend(parent *Grammar) {
 	g.rebuildProtosAndOptable()
 }
 
+// DefineRule registers a procedural RuleFunc under name in the grammar.
 func (g *Grammar) DefineRule(name string, fn RuleFunc) {
 	g.Rules[name] = fn
 }
@@ -1072,6 +1080,7 @@ func classContainsCI(spec string, ch rune, ignoreCase, ignoreMark bool) bool {
 	}
 	return false
 }
+// ListWithSep matches one or more occurrences of itemRule separated by sepRule (`item + % sep`).
 func (g *Grammar) ListWithSep(itemRule string, sepRule string, ctx *Context) *Match {
 	start := ctx.Pos
 	first := g.Subrule(itemRule, ctx)

@@ -14,6 +14,8 @@
 #      - raptor-$Version-windows-arm64-zigcc.zip
 #      - raptor-$Version-linux-x86_64-musl-static-zigcc.tar.gz & .zip
 #      - raptor-$Version-linux-arm64-musl-static-zigcc.tar.gz
+#      - raptor-$Version-macos-arm64-zigcc.tar.gz
+#      - raptor-$Version-macos-x86_64-zigcc.tar.gz
 #   C. WebAssembly Interactive Tour (`-trimpath`):
 #      - raptor-$Version-wasm-tour.zip (+ updates web/raptor.wasm & web/wasm_exec.js)
 #   D. Cryptographic Checksums:
@@ -103,7 +105,12 @@ function Build-PlatformBinaries {
         foreach ($pair in @(@("raptor", ".\cmd\raptor"), @("raptorhp", ".\cmd\raptorhp"), @("esp32_raptor", ".\cmd\esp32"))) {
             $binName = $pair[0] + $ext
             $pkgPath = $pair[1]
-            go build -mod=mod -trimpath -ldflags="$LdFlags" -o (Join-Path $OutDir $binName) $pkgPath
+            $outFile = Join-Path $OutDir $binName
+            go build -mod=mod -trimpath -ldflags="$LdFlags" -o $outFile $pkgPath
+            if ($LASTEXITCODE -ne 0) {
+                Start-Sleep -Milliseconds 500
+                go build -mod=mod -trimpath -ldflags="$LdFlags" -o $outFile $pkgPath
+            }
             if ($LASTEXITCODE -ne 0) {
                 throw "Build failed for $GoOS/$GoArch (cgo=$CgoEnabled): $binName"
             }
@@ -163,20 +170,87 @@ if ($Target -eq "All" -or $Target -eq "Go") {
 if (($Target -eq "All" -or $Target -eq "ZigCC") -and $HasZig) {
     Write-Host "`n[2/4] Building zig cc CGO Release Bundles (CGO_ENABLED=1, -trimpath)..." -ForegroundColor Yellow
 
+    # Generate minimal Mach-O .tbd text stubs in TEMP so `zig cc` can link Go's Darwin net/x509 + dlopen FFI cleanly without Xcode
+    $DarwinStubDir = Join-Path $env:TEMP "raptor-darwin-tbd"
+    if (Test-Path $DarwinStubDir) { Remove-Item $DarwinStubDir -Recurse -Force }
+    New-Item -ItemType Directory -Path "$DarwinStubDir\lib" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$DarwinStubDir\Frameworks\CoreFoundation.framework" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$DarwinStubDir\Frameworks\Security.framework" -Force | Out-Null
+
+    @'
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ x86_64-macos, arm64-macos, arm64e-macos ]
+install-name:    '/usr/lib/libresolv.9.dylib'
+exports:
+  - targets:     [ x86_64-macos, arm64-macos, arm64e-macos ]
+    symbols:     [ _res_9_ninit, _res_9_nclose, _res_9_nsearch, _res_9_nquery, _res_9_dn_expand, _res_9_ns_initparse, _res_9_ns_parserr, _dn_expand ]
+...
+'@ | Set-Content -Path "$DarwinStubDir\lib\libresolv.tbd" -Encoding ascii
+
+    @'
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ x86_64-macos, arm64-macos, arm64e-macos ]
+install-name:    '/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation'
+exports:
+  - targets:     [ x86_64-macos, arm64-macos, arm64e-macos ]
+    symbols:     [ _CFArrayAppendValue, _CFArrayCreateMutable, _CFArrayGetCount, _CFArrayGetValueAtIndex, _CFDataCreate, _CFDataGetBytePtr, _CFDataGetLength, _CFDateCompare, _CFDateCreate, _CFDictionaryGetValueIfPresent, _CFEqual, _CFErrorCopyDescription, _CFErrorGetCode, _CFGetTypeID, _CFNumberGetValue, _CFRelease, _CFRetain, _CFStringCreateExternalRepresentation, _CFStringCreateWithBytes, _CFStringGetBytes, _CFStringGetCString, _CFStringGetCStringPtr, _CFStringGetLength, _CFStringGetMaximumSizeForEncoding, _kCFAllocatorDefault, ___CFConstantStringClassReference ]
+...
+'@ | Set-Content -Path "$DarwinStubDir\Frameworks\CoreFoundation.framework\CoreFoundation.tbd" -Encoding ascii
+
+    @'
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ x86_64-macos, arm64-macos, arm64e-macos ]
+install-name:    '/System/Library/Frameworks/Security.framework/Versions/A/Security'
+exports:
+  - targets:     [ x86_64-macos, arm64-macos, arm64e-macos ]
+    symbols:     [ _SecCertificateCopyData, _SecCertificateCreateWithData, _SecItemExport, _SecPolicyCreateBasicX509, _SecPolicyCreateSSL, _SecTrustCopyCertificateChain, _SecTrustCopyResult, _SecTrustCreateWithCertificates, _SecTrustEvaluateWithError, _SecTrustGetCertificateAtIndex, _SecTrustGetCertificateCount, _SecTrustSetAnchorCertificates, _SecTrustSetAnchorCertificatesOnly, _SecTrustSetVerifyDate, _SecTrustSettingsCopyCertificates, _SecTrustSettingsCopyTrustSettings, _errSecSuccess ]
+...
+'@ | Set-Content -Path "$DarwinStubDir\Frameworks\Security.framework\Security.tbd" -Encoding ascii
+
+    $DarwinFlags = "-L" + ($DarwinStubDir -replace "\\", "/") + "/lib -F" + ($DarwinStubDir -replace "\\", "/") + "/Frameworks"
+
+    # Build tiny zig wrapper that strips Go's `-Wl,-no_uuid` (rejected by Zig's Mach-O linker when `-B none` avoids Go's Windows rename lock)
+    @'
+package main
+import ("os"; "os/exec")
+func main() {
+    args := make([]string, 0, len(os.Args))
+    for _, a := range os.Args[1:] {
+        if a == "-Wl,-no_uuid" { continue }
+        args = append(args, a)
+    }
+    cmd := exec.Command("zig", args...)
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+    if err := cmd.Run(); err != nil {
+        if ee, ok := err.(*exec.ExitError); ok { os.Exit(ee.ExitCode()) }
+        os.Exit(1)
+    }
+}
+'@ | Set-Content -Path "$DarwinStubDir\zigwrap.go" -Encoding utf8
+    go build -trimpath -o "$DarwinStubDir\zigwrap.exe" "$DarwinStubDir\zigwrap.go"
+    $ZigMacWrap = ($DarwinStubDir -replace "\\", "/") + "/zigwrap.exe"
+
     $zigMatrix = @(
-        @{ OS = "windows"; Arch = "amd64"; ZigTarget = "x86_64-windows-gnu";  Label = "windows-x86_64-zigcc"; Ld = "-s -w"; WinDLL = $true;  Zip = $true;  Tar = $false },
-        @{ OS = "windows"; Arch = "arm64"; ZigTarget = "aarch64-windows-gnu"; Label = "windows-arm64-zigcc";  Ld = "-s -w"; WinDLL = $false; Zip = $true;  Tar = $false },
-        @{ OS = "linux";   Arch = "amd64"; ZigTarget = "x86_64-linux-musl";   Label = "linux-x86_64-musl-static-zigcc"; Ld = '-s -w -linkmode external -extldflags "-static"'; WinDLL = $false; Zip = $true; Tar = $true },
-        @{ OS = "linux";   Arch = "arm64"; ZigTarget = "aarch64-linux-musl";  Label = "linux-arm64-musl-static-zigcc";  Ld = '-s -w -linkmode external -extldflags "-static"'; WinDLL = $false; Zip = $false; Tar = $true }
+        @{ OS = "windows"; Arch = "amd64"; CC = "zig cc -target x86_64-windows-gnu";                CXX = "zig c++ -target x86_64-windows-gnu";                Label = "windows-x86_64-zigcc"; Ld = "-s -w"; WinDLL = $true;  Zip = $true;  Tar = $false },
+        @{ OS = "windows"; Arch = "arm64"; CC = "zig cc -target aarch64-windows-gnu";               CXX = "zig c++ -target aarch64-windows-gnu";               Label = "windows-arm64-zigcc";  Ld = "-s -w"; WinDLL = $false; Zip = $true;  Tar = $false },
+        @{ OS = "linux";   Arch = "amd64"; CC = "zig cc -target x86_64-linux-musl";                 CXX = "zig c++ -target x86_64-linux-musl";                 Label = "linux-x86_64-musl-static-zigcc"; Ld = '-s -w -linkmode external -extldflags "-static"'; WinDLL = $false; Zip = $true; Tar = $true },
+        @{ OS = "linux";   Arch = "arm64"; CC = "zig cc -target aarch64-linux-musl";                CXX = "zig c++ -target aarch64-linux-musl";                Label = "linux-arm64-musl-static-zigcc";  Ld = '-s -w -linkmode external -extldflags "-static"'; WinDLL = $false; Zip = $false; Tar = $true },
+        @{ OS = "darwin";  Arch = "arm64"; CC = "$ZigMacWrap cc -target aarch64-macos $DarwinFlags"; CXX = "$ZigMacWrap c++ -target aarch64-macos $DarwinFlags"; Label = "macos-arm64-zigcc";    Ld = "-s -w -B none"; WinDLL = $false; Zip = $false; Tar = $true },
+        @{ OS = "darwin";  Arch = "amd64"; CC = "$ZigMacWrap cc -target x86_64-macos $DarwinFlags";  CXX = "$ZigMacWrap c++ -target x86_64-macos $DarwinFlags";  Label = "macos-x86_64-zigcc";   Ld = "-s -w -B none"; WinDLL = $false; Zip = $false; Tar = $true }
     )
 
     foreach ($t in $zigMatrix) {
         $stage = Join-Path $StagingDir $t.Label
         Build-PlatformBinaries -OutDir $stage -GoOS $t.OS -GoArch $t.Arch -CgoEnabled "1" `
-            -CCCmd "zig cc -target $($t.ZigTarget)" -CXXCmd "zig c++ -target $($t.ZigTarget)" -LdFlags $t.Ld
+            -CCCmd $t.CC -CXXCmd $t.CXX -LdFlags $t.Ld
         Copy-CommonBundleAssets -Dest $stage -IncludeWinDLLs $t.WinDLL
         Package-Archive -SourceDir $stage -BaseName "raptor-$Version-$($t.Label)" -MakeZip $t.Zip -MakeTarGz $t.Tar
     }
+    if (Test-Path $DarwinStubDir) { Remove-Item $DarwinStubDir -Recurse -Force }
 }
 
 # ------------------------------------------------------------------------------

@@ -1,0 +1,72 @@
+# Perl Cookbook - Chapter 9: Directories (Ported to Raptor)
+# Covers dir(), glob-like grep, path splitting (dirname, basename, abspath), recursive tree walk, recursive cleanup.
+
+say "=== Chapter 9: Directories ===";
+
+my $root = (getenv("TEMP") || getenv("TMP") || ".") ~ "/raptor_cb09_" ~ pid();
+mkdir("$root/src/core");
+mkdir("$root/docs");
+spurt("$root/README.txt", "root readme");
+spurt("$root/src/main.rp", "say 1;");
+spurt("$root/src/util.rp", "say 2;");
+spurt("$root/src/core/vm.rp", "say 3;");
+spurt("$root/docs/guide.md", "# guide");
+
+# 9.5 & 9.6 Processing All Files in a Directory & Globbing by Extension
+my @src_entries = dir("$root/src");
+my @rp_only = grep(sub ($f) { return ends_with($f, ".rp"); }, @src_entries);
+ASSERT elems(@rp_only) == 2, "9.6 filter .rp files in src";
+say "9.6 .rp files in src/: {join(', ', sort(@rp_only))}";
+
+# 9.7 Processing All Files in a Directory Recursively (File::Find equivalent)
+sub find_files($d) {
+    my @found;
+    for dir($d) -> $entry {
+        my $full = "$d/$entry";
+        if -d $full {
+            for find_files($full) -> $subf {
+                push(@found, $subf);
+            }
+        } else {
+            push(@found, $full);
+        }
+    }
+    return @found;
+}
+
+my @all_files = find_files($root);
+ASSERT elems(@all_files) == 5, "9.7 recursive walk found all 5 files";
+say "9.7 Recursive walk found {elems(@all_files)} files";
+
+# 9.10 Splitting a Filename into Its Component Parts
+my $sample = "$root/src/core/vm.rp";
+my $dn = dirname($sample);
+my $bn = basename($sample);
+ASSERT $bn eq "vm.rp" && ends_with(replace($dn, "\\", "/"), "src/core"), "9.10 dirname & basename";
+say "9.10 basename='$bn' abs='{abspath($sample)}'";
+
+# 9.9 Renaming Files in Bulk
+for @rp_only -> $f {
+    my $old_p = "$root/src/$f";
+    my $new_p = "$root/src/bak_$f";
+    ASSERT copy($old_p, $new_p), "9.9 bulk copy";
+}
+ASSERT (-e "$root/src/bak_main.rp") && (-e "$root/src/bak_util.rp"), "9.9 bulk copies exist";
+
+# 9.8 Removing a Directory and Its Contents Recursively (rmtree)
+sub rmtree($d) {
+    for dir($d) -> $entry {
+        my $full = "$d/$entry";
+        if -d $full {
+            rmtree($full);
+        } else {
+            unlink($full);
+        }
+    }
+    rmdir($d);
+}
+rmtree($root);
+ASSERT !(-e $root), "9.8 rmtree removed entire tree";
+say "9.8 Recursive rmtree cleanup succeeded";
+
+say "Chapter 9: ALL RECIPES PASSED";

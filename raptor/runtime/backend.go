@@ -11,11 +11,12 @@ import (
 	moargo "moarvm-go/engine"
 )
 
-// Backend names: go (AST interpreter), moar (native CompUnit v7), wasm (TinyGo).
+// Backend names: go (AST + superinstruction VM), moar (native CompUnit v7), wasm (TinyGo), cc (Goose-style native C11 + AVX2).
 const (
 	BackendGo   = "go"
 	BackendMoar = "moar"
 	BackendWASM = "wasm"
+	BackendCC   = "cc"
 )
 
 var defaultBackend = BackendGo
@@ -26,6 +27,8 @@ func SetDefaultBackend(name string) {
 		defaultBackend = BackendMoar
 	case BackendWASM, "tinygo":
 		defaultBackend = BackendWASM
+	case BackendCC, "c", "native":
+		defaultBackend = BackendCC
 	default:
 		defaultBackend = BackendGo
 	}
@@ -41,6 +44,8 @@ func (in *Interp) EvalOnBackend(source, backend string) (*Value, error) {
 	switch backend {
 	case BackendMoar:
 		return in.evalMoar(source)
+	case BackendCC:
+		return in.evalCC(source)
 	case BackendWASM:
 		in.GlobalEnv.Define("$*WASM", BoolValue(true))
 		return in.Eval(source)

@@ -1,9 +1,17 @@
 package raptor
 
 import (
+	"crypto/hmac"
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
+	"html"
 	"math"
 	mrand "math/rand"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 func (in *Interp) topicValue() *Value {
@@ -732,7 +742,7 @@ func (in *Interp) registerBuiltins() {
 			if ints := list.intLane(); ints != nil {
 				cp := make([]int64, len(ints))
 				copy(cp, ints)
-				slices.Sort(cp)
+				SortInt64Fast(cp)
 				return IntArrayValue(cp), nil
 			}
 			if floats := list.floatLane(); floats != nil {
@@ -762,9 +772,19 @@ func (in *Interp) registerBuiltins() {
 		return ArrayValue(sorted), nil
 	}
 
-	// reverse(@list)
+	// reverse(@list) or reverse($str)
 	in.Builtins["reverse"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 1 || args[0].Type != ValArray {
+		if len(args) < 1 {
+			return ArrayValue(nil), nil
+		}
+		if args[0].Type == ValString {
+			runes := []rune(args[0].StrVal)
+			for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+				runes[i], runes[j] = runes[j], runes[i]
+			}
+			return StringValue(string(runes)), nil
+		}
+		if args[0].Type != ValArray {
 			return ArrayValue(nil), nil
 		}
 		if args[0].ArrayVal == nil {
@@ -922,12 +942,7 @@ func (in *Interp) registerBuiltins() {
 			return IntValue(-1), nil
 		}
 		cmdStr := args[0].String()
-		var cmd *exec.Cmd
-		if goruntime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/c", cmdStr)
-		} else {
-			cmd = exec.Command("sh", "-c", cmdStr)
-		}
+		cmd := shellExecCommand(cmdStr)
 		cmd.Stdout = in.Stdout
 		cmd.Stderr = in.Stderr
 		err := cmd.Run()
@@ -945,12 +960,7 @@ func (in *Interp) registerBuiltins() {
 			return StringValue(""), nil
 		}
 		cmdStr := args[0].String()
-		var cmd *exec.Cmd
-		if goruntime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/c", cmdStr)
-		} else {
-			cmd = exec.Command("sh", "-c", cmdStr)
-		}
+		cmd := shellExecCommand(cmdStr)
 		out, err := cmd.Output()
 		if err != nil {
 			return StringValue(""), nil
@@ -1248,7 +1258,36 @@ func (in *Interp) registerBuiltins() {
 		if len(args) < 2 {
 			return StringValue(""), nil
 		}
-		runes := []rune(args[0].String())
+		raw := args[0].String()
+		if !utf8.ValidString(raw) {
+			n := len(raw)
+			start := int(in.toInt(args[1]))
+			if start < 0 {
+				start = n + start
+			}
+			if start < 0 {
+				start = 0
+			}
+			if start >= n {
+				return StringValue(""), nil
+			}
+			if len(args) >= 3 {
+				length := int(in.toInt(args[2]))
+				if length < 0 {
+					length = (n + length) - start
+				}
+				if length < 0 {
+					return StringValue(""), nil
+				}
+				end := start + length
+				if end > n {
+					end = n
+				}
+				return StringValue(raw[start:end]), nil
+			}
+			return StringValue(raw[start:]), nil
+		}
+		runes := []rune(raw)
 		start := int(in.toInt(args[1]))
 		if start < 0 {
 			start = len(runes) + start
@@ -1631,6 +1670,650 @@ func (in *Interp) registerBuiltins() {
 		return BoolValue(args[0].IsTrue()), nil
 	}
 	in.Builtins["Bool"] = in.Builtins["bool"]
+	in.Builtins["prod"] = in.Builtins["∏"]
+
+	in.Builtins["scalar"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return NilValue(), nil
+		}
+		if args[0].Type == ValArray {
+			return IntValue(int64(args[0].arrayLen())), nil
+		}
+		if args[0].Type == ValHash {
+			return IntValue(int64(len(args[0].HashVal))), nil
+		}
+		return args[0], nil
+	}
+
+	in.Builtins["flip"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return StringValue(""), nil
+		}
+		runes := []rune(args[0].String())
+		for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+			runes[i], runes[j] = runes[j], runes[i]
+		}
+		return StringValue(string(runes)), nil
+	}
+
+	in.Builtins["words"] = func(in *Interp, args []*Value) (*Value, error) {
+		s := ""
+		if len(args) >= 1 {
+			s = args[0].String()
+		} else {
+			s = in.topicValue().String()
+		}
+		ws := strings.Fields(s)
+		tape := NewStrTape(len(ws), len(s))
+		for _, w := range ws {
+			tape.Append(w)
+		}
+		return StrTapeArrayValue(tape), nil
+	}
+
+	in.Builtins["lines"] = func(in *Interp, args []*Value) (*Value, error) {
+		s := ""
+		if len(args) >= 1 {
+			s = args[0].String()
+		} else {
+			s = in.topicValue().String()
+		}
+		s = strings.TrimRight(s, "\r\n")
+		if s == "" {
+			return ArrayValue(nil), nil
+		}
+		raw := strings.Split(s, "\n")
+		tape := NewStrTape(len(raw), len(s))
+		for _, ln := range raw {
+			tape.Append(strings.TrimSuffix(ln, "\r"))
+		}
+		return StrTapeArrayValue(tape), nil
+	}
+
+	in.Builtins["comb"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) == 0 {
+			return ArrayValue(nil), nil
+		}
+		if len(args) == 1 {
+			runes := []rune(args[0].String())
+			tape := NewStrTape(len(runes), len(args[0].String()))
+			for _, r := range runes {
+				tape.Append(string(r))
+			}
+			return StrTapeArrayValue(tape), nil
+		}
+		// Supports both Raku $str.comb($pat_or_size) and comb($pat_or_size, $str)
+		target := args[0].String()
+		spec := args[1]
+		if args[0].Type == ValInt {
+			spec = args[0]
+			target = args[1].String()
+		}
+		if spec.Type == ValInt {
+			chunk := int(spec.IntVal)
+			if chunk <= 0 {
+				return ArrayValue(nil), nil
+			}
+			runes := []rune(target)
+			tape := NewStrTape((len(runes)+chunk-1)/chunk, len(target))
+			for i := 0; i < len(runes); i += chunk {
+				end := i + chunk
+				if end > len(runes) {
+					end = len(runes)
+				}
+				tape.Append(string(runes[i:end]))
+			}
+			return StrTapeArrayValue(tape), nil
+		}
+		matches, err := RegexFindAll(spec.String(), target)
+		if err != nil {
+			// Try reversed argument order comb($pat, $str)
+			matches2, err2 := RegexFindAll(args[0].String(), args[1].String())
+			if err2 != nil {
+				return nil, err
+			}
+			matches = matches2
+		}
+		tape := NewStrTape(len(matches), len(target))
+		for _, m := range matches {
+			tape.Append(m)
+		}
+		return StrTapeArrayValue(tape), nil
+	}
+
+	in.Builtins["ucfirst"] = in.Builtins["tc"]
+	in.Builtins["lcfirst"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return StringValue(""), nil
+		}
+		runes := []rune(args[0].String())
+		if len(runes) == 0 {
+			return StringValue(""), nil
+		}
+		runes[0] = unicode.ToLower(runes[0])
+		return StringValue(string(runes)), nil
+	}
+
+	in.Builtins["hex"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return IntValue(0), nil
+		}
+		s := strings.TrimSpace(args[0].String())
+		s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+		s = strings.ReplaceAll(s, "_", "")
+		v, _ := strconv.ParseInt(s, 16, 64)
+		return IntValue(v), nil
+	}
+
+	in.Builtins["oct"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return IntValue(0), nil
+		}
+		s := strings.TrimSpace(args[0].String())
+		s = strings.ReplaceAll(s, "_", "")
+		if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+			v, _ := strconv.ParseInt(s[2:], 16, 64)
+			return IntValue(v), nil
+		}
+		if strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B") {
+			v, _ := strconv.ParseInt(s[2:], 2, 64)
+			return IntValue(v), nil
+		}
+		s = strings.TrimPrefix(strings.TrimPrefix(s, "0o"), "0O")
+		s = strings.TrimPrefix(s, "0")
+		if s == "" {
+			return IntValue(0), nil
+		}
+		v, _ := strconv.ParseInt(s, 8, 64)
+		return IntValue(v), nil
+	}
+
+	in.Builtins["printf"] = func(in *Interp, args []*Value) (*Value, error) {
+		res, err := in.Builtins["sprintf"](in, args)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprint(in.Stdout, res.String())
+		return BoolValue(true), nil
+	}
+
+	in.Builtins["note"] = func(in *Interp, args []*Value) (*Value, error) {
+		var parts []string
+		for _, a := range args {
+			parts = append(parts, a.String())
+		}
+		fmt.Fprintln(in.Stderr, strings.Join(parts, ""))
+		return BoolValue(true), nil
+	}
+
+	in.Builtins["sleep"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return FloatValue(0), nil
+		}
+		secs := in.toFloat(args[0])
+		if secs > 0 {
+			time.Sleep(time.Duration(secs * float64(time.Second)))
+		}
+		return FloatValue(secs), nil
+	}
+
+	in.Builtins["match"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return NilValue(), nil
+		}
+		// match($pattern, $text)
+		pat := args[0].String()
+		txt := args[1].String()
+		env := in.CurrentEnv
+		if env == nil {
+			env = in.GlobalEnv
+		}
+		okVal, err := in.evalRegexMatchWithCaptures(txt, pat, false, env)
+		if err != nil {
+			return nil, err
+		}
+		if !okVal.IsTrue() {
+			return NilValue(), nil
+		}
+		if mVal, ok := env.Lookup("$/"); ok {
+			return mVal, nil
+		}
+		return BoolValue(true), nil
+	}
+
+	in.Builtins["match_all"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return ArrayValue(nil), nil
+		}
+		pat := args[0].String()
+		txt := args[1].String()
+		all, err := RegexFindAll(pat, txt)
+		if err != nil {
+			return nil, err
+		}
+		tape := NewStrTape(len(all), len(txt))
+		for _, m := range all {
+			tape.Append(m)
+		}
+		return StrTapeArrayValue(tape), nil
+	}
+
+	in.Builtins["subst"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 3 {
+			return StringValue(""), nil
+		}
+		// subst($str, $pattern, $replacement [, $global])
+		txt := args[0].String()
+		pat := args[1].String()
+		repl := args[2].String()
+		global := true
+		if len(args) >= 4 {
+			global = args[3].IsTrue()
+		}
+		re, err := getOrCompileGoRegex(pat)
+		if err != nil {
+			return nil, err
+		}
+		if global {
+			return StringValue(re.ReplaceAllString(txt, repl)), nil
+		}
+		loc := re.FindStringSubmatchIndex(txt)
+		if loc == nil {
+			return StringValue(txt), nil
+		}
+		expanded := re.ExpandString(nil, repl, txt, loc)
+		return StringValue(txt[:loc[0]] + string(expanded) + txt[loc[1]:]), nil
+	}
+
+	in.Builtins["eval"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return NilValue(), nil
+		}
+		code := args[0].String()
+		env := in.CurrentEnv
+		if env == nil {
+			env = in.GlobalEnv
+		}
+		prog, err := ParseProgram(code)
+		if err != nil {
+			errVal := StringValue(err.Error())
+			env.Define("$!", errVal)
+			in.GlobalEnv.Define("$!", errVal)
+			return NilValue(), nil
+		}
+		in.ResolveProgram(prog, env == in.GlobalEnv)
+		res, err := in.EvalProgram(prog, env)
+		if err != nil {
+			errVal := StringValue(err.Error())
+			env.Define("$!", errVal)
+			in.GlobalEnv.Define("$!", errVal)
+			return NilValue(), nil
+		}
+		env.Define("$!", NilValue())
+		in.GlobalEnv.Define("$!", NilValue())
+		return res, nil
+	}
+	in.Builtins["EVAL"] = in.Builtins["eval"]
+
+	in.Builtins["sha256"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return StringValue(""), nil
+		}
+		sum := sha256.Sum256([]byte(args[0].String()))
+		return StringValue(hex.EncodeToString(sum[:])), nil
+	}
+
+	in.Builtins["md5"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return StringValue(""), nil
+		}
+		sum := md5.Sum([]byte(args[0].String()))
+		return StringValue(hex.EncodeToString(sum[:])), nil
+	}
+
+	in.Builtins["hmac_sha256"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return StringValue(""), nil
+		}
+		mac := hmac.New(sha256.New, []byte(args[0].String()))
+		mac.Write([]byte(args[1].String()))
+		return StringValue(hex.EncodeToString(mac.Sum(nil))), nil
+	}
+
+	in.Builtins["base64_encode"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return StringValue(""), nil
+		}
+		return StringValue(base64.StdEncoding.EncodeToString([]byte(args[0].String()))), nil
+	}
+
+	in.Builtins["base64_decode"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return StringValue(""), nil
+		}
+		dec, err := base64.StdEncoding.DecodeString(strings.TrimSpace(args[0].String()))
+		if err != nil {
+			return StringValue(""), nil
+		}
+		return StringValue(string(dec)), nil
+	}
+
+	in.Builtins["uri_encode"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return StringValue(""), nil
+		}
+		return StringValue(url.QueryEscape(args[0].String())), nil
+	}
+
+	in.Builtins["uri_decode"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return StringValue(""), nil
+		}
+		dec, err := url.QueryUnescape(args[0].String())
+		if err != nil {
+			return args[0], nil
+		}
+		return StringValue(dec), nil
+	}
+
+	in.Builtins["html_escape"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return StringValue(""), nil
+		}
+		return StringValue(html.EscapeString(args[0].String())), nil
+	}
+
+	in.Builtins["pack"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return StringValue(""), nil
+		}
+		tmpl := args[0].String()
+		var vals []*Value
+		for _, a := range args[1:] {
+			if a.Type == ValArray {
+				vals = append(vals, a.materializeArray()...)
+			} else {
+				vals = append(vals, a)
+			}
+		}
+		return packBytes(in, tmpl, vals)
+	}
+
+	in.Builtins["unpack"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 2 {
+			return ArrayValue(nil), nil
+		}
+		return unpackBytes(args[0].String(), []byte(args[1].String()))
+	}
+}
+
+func packBytes(in *Interp, tmpl string, vals []*Value) (*Value, error) {
+	var out []byte
+	vIdx := 0
+	for i := 0; i < len(tmpl); {
+		code := tmpl[i]
+		i++
+		if code == ' ' || code == '\t' {
+			continue
+		}
+		star := false
+		count := 1
+		if i < len(tmpl) && tmpl[i] == '*' {
+			star = true
+			i++
+		} else if i < len(tmpl) && tmpl[i] >= '0' && tmpl[i] <= '9' {
+			j := i
+			for j < len(tmpl) && tmpl[j] >= '0' && tmpl[j] <= '9' {
+				j++
+			}
+			count, _ = strconv.Atoi(tmpl[i:j])
+			i = j
+		}
+		switch code {
+		case 'x':
+			for k := 0; k < count; k++ {
+				out = append(out, 0)
+			}
+		case 'C', 'c':
+			limit := count
+			if star {
+				limit = len(vals) - vIdx
+			}
+			for k := 0; k < limit && vIdx < len(vals); k++ {
+				out = append(out, byte(in.toInt(vals[vIdx])))
+				vIdx++
+			}
+		case 'n':
+			limit := count
+			if star {
+				limit = len(vals) - vIdx
+			}
+			for k := 0; k < limit && vIdx < len(vals); k++ {
+				var b [2]byte
+				binary.BigEndian.PutUint16(b[:], uint16(in.toInt(vals[vIdx])))
+				out = append(out, b[:]...)
+				vIdx++
+			}
+		case 'v', 'S', 's':
+			limit := count
+			if star {
+				limit = len(vals) - vIdx
+			}
+			for k := 0; k < limit && vIdx < len(vals); k++ {
+				var b [2]byte
+				binary.LittleEndian.PutUint16(b[:], uint16(in.toInt(vals[vIdx])))
+				out = append(out, b[:]...)
+				vIdx++
+			}
+		case 'N':
+			limit := count
+			if star {
+				limit = len(vals) - vIdx
+			}
+			for k := 0; k < limit && vIdx < len(vals); k++ {
+				var b [4]byte
+				binary.BigEndian.PutUint32(b[:], uint32(in.toInt(vals[vIdx])))
+				out = append(out, b[:]...)
+				vIdx++
+			}
+		case 'V', 'I', 'L', 'l':
+			limit := count
+			if star {
+				limit = len(vals) - vIdx
+			}
+			for k := 0; k < limit && vIdx < len(vals); k++ {
+				var b [4]byte
+				binary.LittleEndian.PutUint32(b[:], uint32(in.toInt(vals[vIdx])))
+				out = append(out, b[:]...)
+				vIdx++
+			}
+		case 'Q', 'q':
+			limit := count
+			if star {
+				limit = len(vals) - vIdx
+			}
+			for k := 0; k < limit && vIdx < len(vals); k++ {
+				var b [8]byte
+				binary.LittleEndian.PutUint64(b[:], uint64(in.toInt(vals[vIdx])))
+				out = append(out, b[:]...)
+				vIdx++
+			}
+		case 'd':
+			limit := count
+			if star {
+				limit = len(vals) - vIdx
+			}
+			for k := 0; k < limit && vIdx < len(vals); k++ {
+				var b [8]byte
+				binary.LittleEndian.PutUint64(b[:], math.Float64bits(in.toFloat(vals[vIdx])))
+				out = append(out, b[:]...)
+				vIdx++
+			}
+		case 'A', 'a':
+			if vIdx < len(vals) {
+				s := []byte(vals[vIdx].String())
+				vIdx++
+				if star {
+					out = append(out, s...)
+				} else {
+					pad := byte(0)
+					if code == 'A' {
+						pad = ' '
+					}
+					if len(s) >= count {
+						out = append(out, s[:count]...)
+					} else {
+						out = append(out, s...)
+						for k := len(s); k < count; k++ {
+							out = append(out, pad)
+						}
+					}
+				}
+			}
+		case 'H':
+			if vIdx < len(vals) {
+				hs := vals[vIdx].String()
+				vIdx++
+				if !star && count < len(hs) {
+					hs = hs[:count]
+				}
+				if len(hs)%2 == 1 {
+					hs += "0"
+				}
+				dec, _ := hex.DecodeString(hs)
+				out = append(out, dec...)
+			}
+		case 'U':
+			limit := count
+			if star {
+				limit = len(vals) - vIdx
+			}
+			for k := 0; k < limit && vIdx < len(vals); k++ {
+				out = append(out, []byte(string(rune(in.toInt(vals[vIdx]))))...)
+				vIdx++
+			}
+		}
+	}
+	return StringValue(string(out)), nil
+}
+
+func unpackBytes(tmpl string, data []byte) (*Value, error) {
+	var res []*Value
+	off := 0
+	for i := 0; i < len(tmpl); {
+		code := tmpl[i]
+		i++
+		if code == ' ' || code == '\t' {
+			continue
+		}
+		star := false
+		count := 1
+		if i < len(tmpl) && tmpl[i] == '*' {
+			star = true
+			i++
+		} else if i < len(tmpl) && tmpl[i] >= '0' && tmpl[i] <= '9' {
+			j := i
+			for j < len(tmpl) && tmpl[j] >= '0' && tmpl[j] <= '9' {
+				j++
+			}
+			count, _ = strconv.Atoi(tmpl[i:j])
+			i = j
+		}
+		switch code {
+		case 'x':
+			off += count
+		case 'C':
+			for k := 0; (star || k < count) && off < len(data); k++ {
+				res = append(res, IntValue(int64(data[off])))
+				off++
+			}
+		case 'c':
+			for k := 0; (star || k < count) && off < len(data); k++ {
+				res = append(res, IntValue(int64(int8(data[off]))))
+				off++
+			}
+		case 'n':
+			for k := 0; (star || k < count) && off+2 <= len(data); k++ {
+				res = append(res, IntValue(int64(binary.BigEndian.Uint16(data[off:off+2]))))
+				off += 2
+			}
+		case 'v', 'S':
+			for k := 0; (star || k < count) && off+2 <= len(data); k++ {
+				res = append(res, IntValue(int64(binary.LittleEndian.Uint16(data[off:off+2]))))
+				off += 2
+			}
+		case 's':
+			for k := 0; (star || k < count) && off+2 <= len(data); k++ {
+				res = append(res, IntValue(int64(int16(binary.LittleEndian.Uint16(data[off:off+2])))))
+				off += 2
+			}
+		case 'N':
+			for k := 0; (star || k < count) && off+4 <= len(data); k++ {
+				res = append(res, IntValue(int64(binary.BigEndian.Uint32(data[off:off+4]))))
+				off += 4
+			}
+		case 'V', 'I', 'L':
+			for k := 0; (star || k < count) && off+4 <= len(data); k++ {
+				res = append(res, IntValue(int64(binary.LittleEndian.Uint32(data[off:off+4]))))
+				off += 4
+			}
+		case 'l':
+			for k := 0; (star || k < count) && off+4 <= len(data); k++ {
+				res = append(res, IntValue(int64(int32(binary.LittleEndian.Uint32(data[off:off+4])))))
+				off += 4
+			}
+		case 'Q':
+			for k := 0; (star || k < count) && off+8 <= len(data); k++ {
+				res = append(res, IntValue(int64(binary.LittleEndian.Uint64(data[off:off+8]))))
+				off += 8
+			}
+		case 'q':
+			for k := 0; (star || k < count) && off+8 <= len(data); k++ {
+				res = append(res, IntValue(int64(binary.LittleEndian.Uint64(data[off:off+8]))))
+				off += 8
+			}
+		case 'd':
+			for k := 0; (star || k < count) && off+8 <= len(data); k++ {
+				res = append(res, FloatValue(math.Float64frombits(binary.LittleEndian.Uint64(data[off:off+8]))))
+				off += 8
+			}
+		case 'A', 'a':
+			end := len(data)
+			if !star && off+count < end {
+				end = off + count
+			}
+			if off <= end {
+				seg := string(data[off:end])
+				if code == 'A' {
+					seg = strings.TrimRight(seg, " \x00")
+				}
+				res = append(res, StringValue(seg))
+				off = end
+			}
+		case 'H':
+			end := len(data)
+			hs := hex.EncodeToString(data[off:end])
+			if !star && count < len(hs) {
+				hs = hs[:count]
+				off += (count + 1) / 2
+			} else {
+				off = end
+			}
+			res = append(res, StringValue(hs))
+		case 'U':
+			s := string(data[off:])
+			k := 0
+			for _, r := range s {
+				if !star && k >= count {
+					break
+				}
+				res = append(res, IntValue(int64(r)))
+				off += len(string(r))
+				k++
+			}
+		}
+	}
+	return ArrayValue(res), nil
 }
 
 // compareValues provides natural ordering for sort.

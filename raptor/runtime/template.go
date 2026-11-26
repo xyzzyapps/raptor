@@ -129,11 +129,11 @@ func (p *TemplateParser) findCloseTag() int {
 
 func quoteString(s string) string {
 	var sb strings.Builder
-	sb.WriteRune('"')
+	sb.WriteRune('\'')
 	for _, r := range s {
 		switch r {
-		case '"':
-			sb.WriteString(`\"`)
+		case '\'':
+			sb.WriteString(`\'`)
 		case '\\':
 			sb.WriteString(`\\`)
 		case '\n':
@@ -146,7 +146,7 @@ func quoteString(s string) string {
 			sb.WriteRune(r)
 		}
 	}
-	sb.WriteRune('"')
+	sb.WriteRune('\'')
 	return sb.String()
 }
 

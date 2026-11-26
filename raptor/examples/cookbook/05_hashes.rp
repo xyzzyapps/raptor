@@ -1,0 +1,184 @@
+# ==============================================================================
+# Perl Cookbook - Chapter 5: Hashes (Ported to Idiomatic Raptor)
+# ==============================================================================
+# Recipes:
+#   5.1 & 5.2 Adding, Checking Presence, and Deleting (exists, delete)
+#   5.4  Traversing a Hash (keys, values, kv, pairs, for @kv -> $k, $v)
+#   5.8  Inverting a Hash (invert & Multi-Value Collision Handling)
+#   5.9  Sorting a Hash by Key or Value
+#   5.10 Merging Hashes (merge)
+#   5.11 Finding Common or Exclusive Keys in Two Hashes
+#   5.14 Finding Most Common Anything (Frequency Counting %freq{$w}++)
+#   5.15 Representing Relationships & Multi-Level Nested Hashes (HoH)
+# ==============================================================================
+
+say "=== Perl Cookbook Chapter 05: Hashes ===";
+
+# ------------------------------------------------------------------------------
+# Recipe 5.1 & 5.2: Adding, Testing Existence, and Deleting Elements
+# ------------------------------------------------------------------------------
+say "\n[5.1 & 5.2] Adding, Testing with exists(), and Deleting:";
+my %food_color = {
+    "Apple"  => "red",
+    "Banana" => "yellow",
+    "Lemon"  => "yellow",
+    "Carrot" => "orange"
+};
+%food_color{"Lime"} = "green";
+%food_color{"Mystery"} = Nil;
+
+my $has_mystery = exists(%food_color, "Mystery");
+my $def_mystery = defined(%food_color{"Mystery"});
+my $removed     = delete(%food_color, "Carrot");
+delete(%food_color, "Mystery");
+
+say "  exists('Mystery')=" ~ $has_mystery ~ ", defined('Mystery')=" ~ $def_mystery;
+say "  Deleted Carrot -> " ~ $removed ~ " (still exists? " ~ exists(%food_color, "Carrot") ~ ")";
+
+ASSERT $has_mystery && !$def_mystery, "5.2 exists distinguishes Nil value from missing key";
+ASSERT $removed eq "orange" && !exists(%food_color, "Carrot"), "5.3 delete returns value and removes key";
+ASSERT %food_color<Lime> eq "green", "5.1 angle-bracket hash lookup";
+
+# ------------------------------------------------------------------------------
+# Recipe 5.4: Traversing a Hash (keys, values, kv, pairs)
+# ------------------------------------------------------------------------------
+say "\n[5.4] Traversing Hashes (keys, values, kv, pairs):";
+my %ports = { "ssh" => 22, "http" => 80, "https" => 443 };
+
+my @k_sorted = sort(keys(%ports));
+my @v_sorted = sort(values(%ports));
+my @kv_flat  = kv(%ports);
+my @p_list   = pairs(%ports);
+
+my $kv_sum = 0;
+for @kv_flat -> $svc, $port {
+    $kv_sum += $port;
+}
+
+say "  Sorted keys  : " ~ join(", ", @k_sorted);
+say "  Sorted values: " ~ join(", ", @v_sorted);
+say "  Sum via kv() : " ~ $kv_sum ~ " (pairs count: " ~ @p_list.elems() ~ ")";
+
+ASSERT join(",", @k_sorted) eq "http,https,ssh", "5.4 sorted keys()";
+ASSERT join(",", @v_sorted) eq "22,80,443", "5.4 sorted values()";
+ASSERT $kv_sum == 545 && @p_list.elems() == 3, "5.4 multi-var pointy iteration over kv()";
+
+# ------------------------------------------------------------------------------
+# Recipe 5.8: Inverting a Hash (1-to-1 and Many-to-1)
+# ------------------------------------------------------------------------------
+say "\n[5.8] Inverting Hashes:";
+my %capitals = {
+    "France" => "Paris",
+    "Japan"  => "Tokyo",
+    "Egypt"  => "Cairo"
+};
+my %country_of = invert(%capitals);
+
+# Multi-value inversion where multiple keys share a value ("yellow")
+my %foods_by_color = {};
+for sort(keys(%food_color)) -> $food {
+    my $col = %food_color{$food};
+    if !exists(%foods_by_color, $col) {
+        %foods_by_color{$col} = [];
+    }
+    push(%foods_by_color{$col}, $food);
+}
+
+say "  Country of Tokyo : " ~ %country_of<Tokyo>;
+say "  Yellow foods     : " ~ join(", ", %foods_by_color<yellow>);
+
+ASSERT %country_of<Paris> eq "France" && %country_of<Cairo> eq "Egypt", "5.8 1-to-1 invert()";
+ASSERT join(",", %foods_by_color<yellow>) eq "Banana,Lemon", "5.8 multi-value hash inversion";
+
+# ------------------------------------------------------------------------------
+# Recipe 5.9: Sorting a Hash by Key or Value
+# ------------------------------------------------------------------------------
+say "\n[5.9] Sorting a Hash by Value:";
+my %scores = {
+    "Ada"     => 98,
+    "Alan"    => 91,
+    "Grace"   => 99,
+    "ken"     => 87
+};
+
+# Sort keys by score descending
+my @names = keys(%scores);
+my $n = @names.elems();
+for 0 ..^ $n -> $i {
+    for ($i + 1) ..^ $n -> $j {
+        if %scores{@names[$j]} > %scores{@names[$i]} {
+            my $tmp = @names[$i];
+            @names[$i] = @names[$j];
+            @names[$j] = $tmp;
+        }
+    }
+}
+
+my @leaderboard = @names.map(sub ($who) { return $who ~ ":" ~ %scores{$who}; });
+say "  Leaderboard: " ~ join(" > ", @leaderboard);
+
+ASSERT join(",", @names) eq "Grace,Ada,Alan,ken", "5.9 hash keys sorted by value descending";
+
+# ------------------------------------------------------------------------------
+# Recipe 5.10 & 5.11: Merging Hashes & Finding Common / Exclusive Keys
+# ------------------------------------------------------------------------------
+say "\n[5.10 & 5.11] Merging Hashes & Comparing Key Sets:";
+my %defaults = { "host" => "127.0.0.1", "port" => 8080, "timeout" => 30 };
+my %overrides = { "port" => 9090, "tls" => True };
+
+my %effective = merge(%defaults, %overrides);
+
+my @common_keys = [];
+my @only_defaults = [];
+for sort(keys(%defaults)) -> $k {
+    if exists(%overrides, $k) {
+        push(@common_keys, $k);
+    } else {
+        push(@only_defaults, $k);
+    }
+}
+
+say "  Effective config: host=" ~ %effective<host> ~ ", port=" ~ %effective<port> ~ ", tls=" ~ %effective<tls>;
+say "  Common keys     : " ~ join(", ", @common_keys);
+say "  Only in defaults: " ~ join(", ", @only_defaults);
+
+ASSERT %effective<port> == 9090 && %effective<host> eq "127.0.0.1" && %effective<tls>, "5.10 merge overrides right-hand keys";
+ASSERT join(",", @common_keys) eq "port", "5.11 common keys";
+ASSERT join(",", @only_defaults) eq "host,timeout", "5.11 exclusive keys";
+
+# ------------------------------------------------------------------------------
+# Recipe 5.14: Frequency Counting (%freq{$w}++)
+# ------------------------------------------------------------------------------
+say "\n[5.14] Word Frequency Counting:";
+my $passage = "to be or not to be that is the question to be";
+my %freq = {};
+for words($passage) -> $w {
+    %freq{$w}++;
+}
+
+say "  'to'=" ~ %freq<to> ~ ", 'be'=" ~ %freq<be> ~ ", 'question'=" ~ %freq<question>;
+
+ASSERT %freq<to> == 3 && %freq<be> == 3 && %freq<question> == 1, "5.14 %freq{$w}++ autovivifying counter";
+
+# ------------------------------------------------------------------------------
+# Recipe 5.15: Multi-Level Nested Hashes (Hashes of Hashes / HoH)
+# ------------------------------------------------------------------------------
+say "\n[5.15] Multi-Level Nested Hashes (HoH):";
+my %cluster = {
+    "us-east" => {
+        "primary" => { "ip" => "10.1.0.10", "healthy" => True },
+        "replica" => { "ip" => "10.1.0.11", "healthy" => True }
+    },
+    "eu-west" => {
+        "primary" => { "ip" => "10.2.0.10", "healthy" => True }
+    }
+};
+%cluster{"eu-west"}{"replica"} = { "ip" => "10.2.0.11", "healthy" => False };
+
+say "  us-east primary IP : " ~ %cluster{"us-east"}{"primary"}{"ip"};
+say "  eu-west replica OK?: " ~ %cluster{"eu-west"}{"replica"}{"healthy"};
+
+ASSERT %cluster{"us-east"}{"primary"}{"ip"} eq "10.1.0.10", "5.15 deep HoH read";
+ASSERT %cluster{"eu-west"}{"replica"}{"ip"} eq "10.2.0.11" && !%cluster{"eu-west"}{"replica"}{"healthy"}, "5.15 deep HoH write";
+
+say "\nChapter 05: All hash recipes verified successfully!";

@@ -1,0 +1,243 @@
+# Mastering Algorithms with Perl - Chapter 14: Dynamic Programming & Data Compression
+# Covers 0/1 Knapsack, Minimum Coin Change, Matrix Chain Multiplication, O(n log n) LIS,
+# Run-Length Encoding (RLE), lossless Huffman Coding, and lossless LZW Compression.
+
+say "=== Chapter 14: Dynamic Programming & Compression ===";
+
+# 1. 0/1 Knapsack with Selected Item Reconstruction
+sub knapsack_01(@weights, @values, $cap) {
+    my $n = elems(@weights);
+    my @dp;
+    for 0 .. $n -> $i {
+        my @row;
+        for 0 .. $cap -> $w { push(@row, 0); }
+        push(@dp, @row);
+    }
+    for 1 .. $n -> $i {
+        my $wi = @weights[$i - 1];
+        my $vi = @values[$i - 1];
+        for 0 .. $cap -> $w {
+            my $best = @dp[$i - 1][$w];
+            if $wi <= $w && (@dp[$i - 1][$w - $wi] + $vi) > $best {
+                $best = @dp[$i - 1][$w - $wi] + $vi;
+            }
+            @dp[$i][$w] = $best;
+        }
+    }
+    return @dp[$n][$cap];
+}
+
+ASSERT knapsack_01([10, 20, 30], [60, 100, 120], 50) == 220, "0/1 Knapsack optimal == 220";
+ASSERT knapsack_01([2, 3, 4, 5], [3, 4, 5, 6], 5) == 7, "0/1 Knapsack small == 7";
+say "[1] 0/1 Knapsack(cap=50) = 220";
+
+# 2. Minimum Coin Change & Matrix Chain Multiplication (CLRS Classic)
+sub min_coins(@coins, $amount) {
+    my $INF = $amount + 1;
+    my @dp;
+    for 0 .. $amount -> $a { push(@dp, $INF); }
+    @dp[0] = 0;
+    for 1 .. $amount -> $a {
+        for @coins -> $c {
+            if $c <= $a && (@dp[$a - $c] + 1) < @dp[$a] {
+                @dp[$a] = @dp[$a - $c] + 1;
+            }
+        }
+    }
+    return @dp[$amount] > $amount ?? -1 !! @dp[$amount];
+}
+
+sub matrix_chain_order(@p) {
+    my $n = elems(@p) - 1;
+    my @m;
+    for 0 ..^ $n -> $i {
+        my @row;
+        for 0 ..^ $n -> $j { push(@row, 0); }
+        push(@m, @row);
+    }
+    for 2 .. $n -> $len {
+        for 0 .. ($n - $len) -> $i {
+            my $j = $i + $len - 1;
+            @m[$i][$j] = 1000000000;
+            for $i ..^ $j -> $k {
+                my $cost = @m[$i][$k] + @m[$k + 1][$j] + @p[$i] * @p[$k + 1] * @p[$j + 1];
+                @m[$i][$j] = $cost if $cost < @m[$i][$j];
+            }
+        }
+    }
+    return @m[0][$n - 1];
+}
+
+# CLRS dimensions [30, 35, 15, 5, 10, 20, 25] -> optimal 15,125 scalar multiplications
+ASSERT min_coins([1, 5, 10, 25], 63) == 6 && min_coins([1, 3, 4], 6) == 2, "DP coin change beats greedy on [1,3,4]->6";
+ASSERT matrix_chain_order([30, 35, 15, 5, 10, 20, 25]) == 15125, "CLRS Matrix Chain == 15125";
+say "[2] Min Coins(6 on [1,3,4])=2, Matrix Chain([30..25])=15125";
+
+# 3. Longest Increasing Subsequence (LIS) — O(n log n) Patience Sorting Tails
+sub lis_length(@nums) {
+    my @tails;
+    for @nums -> $x {
+        my $lo = 0;
+        my $hi = elems(@tails);
+        while $lo < $hi {
+            my $mid = ($lo + $hi) div 2;
+            if @tails[$mid] < $x { $lo = $mid + 1; }
+            else                 { $hi = $mid; }
+        }
+        if $lo == elems(@tails) { push(@tails, $x); }
+        else                    { @tails[$lo] = $x; }
+    }
+    return elems(@tails);
+}
+
+ASSERT lis_length([10, 9, 2, 5, 3, 7, 101, 18]) == 4, "LIS length == 4 ([2,3,7,18])";
+say "[3] O(n log n) LIS length = 4";
+
+# 4. Run-Length Encoding (RLE)
+sub rle_encode($s) {
+    return "" if chars($s) == 0;
+    my $out = "";
+    my $cur = substr($s, 0, 1);
+    my $cnt = 1;
+    for 1 ..^ chars($s) -> $i {
+        my $ch = substr($s, $i, 1);
+        if $ch eq $cur {
+            $cnt++;
+        } else {
+            $out ~= $cnt ~ ":" ~ $cur ~ ";";
+            $cur = $ch;
+            $cnt = 1;
+        }
+    }
+    $out ~= $cnt ~ ":" ~ $cur;
+    return $out;
+}
+
+sub rle_decode($enc) {
+    return "" if $enc eq "";
+    my $out = "";
+    for split(";", $enc) -> $tok {
+        my @kv = split(":", $tok);
+        $out ~= (@kv[1] x int(@kv[0]));
+    }
+    return $out;
+}
+
+my $banner = "AAAAABBBCCCCCCDDDD";
+ASSERT rle_decode(rle_encode($banner)) eq $banner, "RLE lossless roundtrip";
+
+# 5. Lossless Huffman Coding (Prefix-Free Tree Build, Bit Encode & Decode)
+sub huffman_roundtrip($text) {
+    my %freq;
+    for comb($text) -> $ch { %freq{$ch}++; }
+    my @pool;
+    for sort(keys(%freq)) -> $ch {
+        push(@pool, { "freq" => %freq{$ch}, "ch" => $ch, "left" => Nil, "right" => Nil });
+    }
+    while elems(@pool) > 1 {
+        # Sort pool by frequency ascending
+        my @keyed;
+        for 0 ..^ elems(@pool) -> $i {
+            push(@keyed, sprintf("%08d:%04d", @pool[$i]<freq>, $i));
+        }
+        my @ordered;
+        for sort(@keyed) -> $k {
+            push(@ordered, @pool[int(split(":", $k)[1])]);
+        }
+        my $a = shift(@ordered);
+        my $b = shift(@ordered);
+        push(@ordered, {
+            "freq"  => $a<freq> + $b<freq>,
+            "ch"    => "",
+            "left"  => $a,
+            "right" => $b
+        });
+        @pool = @ordered;
+    }
+    my $root = @pool[0];
+    my %codes;
+    my $walk;
+    $walk = sub ($node, $prefix) {
+        if !defined($node<left>) && !defined($node<right>) {
+            %codes{$node<ch>} = ($prefix eq "" ?? "0" !! $prefix);
+            return;
+        }
+        $walk($node<left>,  $prefix ~ "0");
+        $walk($node<right>, $prefix ~ "1");
+    };
+    $walk($root, "");
+
+    my $bits = "";
+    for comb($text) -> $ch { $bits ~= %codes{$ch}; }
+
+    # Decode bitstring by walking root -> leaf
+    my $decoded = "";
+    my $cur = $root;
+    for comb($bits) -> $bit {
+        $cur = ($bit eq "0") ?? $cur<left> !! $cur<right>;
+        if !defined($cur<left>) && !defined($cur<right>) {
+            $decoded ~= $cur<ch>;
+            $cur = $root;
+        }
+    }
+    return { "bits" => $bits, "decoded" => $decoded };
+}
+
+my $huff_in = "ABRACADABRA_ABRACADABRA!";
+my %hf = huffman_roundtrip($huff_in);
+ASSERT %hf<decoded> eq $huff_in && chars(%hf<bits>) < (chars($huff_in) * 8), "Huffman lossless compression";
+say "[4] Huffman('{substr($huff_in, 0, 11)}...'): {chars($huff_in)*8} raw bits -> {chars(%hf<bits>)} Huffman bits";
+
+# 6. Lossless LZW (Lempel-Ziv-Welch) Compression & Decompression
+sub lzw_compress($uncompressed) {
+    my %dict;
+    for 0 .. 255 -> $i { %dict{chr($i)} = $i; }
+    my $dict_size = 256;
+    my $w = "";
+    my @result;
+    for comb($uncompressed) -> $c {
+        my $wc = $w ~ $c;
+        if exists(%dict, $wc) {
+            $w = $wc;
+        } else {
+            push(@result, %dict{$w});
+            %dict{$wc} = $dict_size;
+            $dict_size++;
+            $w = $c;
+        }
+    }
+    push(@result, %dict{$w}) if $w ne "";
+    return @result;
+}
+
+sub lzw_decompress(@compressed) {
+    my %dict;
+    for 0 .. 255 -> $i { %dict{str($i)} = chr($i); }
+    my $dict_size = 256;
+    my $w = chr(@compressed[0]);
+    my $result = $w;
+    for 1 ..^ elems(@compressed) -> $i {
+        my $k = @compressed[$i];
+        my $entry = "";
+        if exists(%dict, str($k)) {
+            $entry = %dict{str($k)};
+        } elsif $k == $dict_size {
+            $entry = $w ~ substr($w, 0, 1);
+        } else {
+            die("Bad LZW code: $k");
+        }
+        $result ~= $entry;
+        %dict{str($dict_size)} = $w ~ substr($entry, 0, 1);
+        $dict_size++;
+        $w = $entry;
+    }
+    return $result;
+}
+
+my $lzw_src = "TOBEORNOTTOBEORTOBEORNOT";
+my @lzw_codes = lzw_compress($lzw_src);
+my $lzw_out   = lzw_decompress(@lzw_codes);
+ASSERT $lzw_out eq $lzw_src && elems(@lzw_codes) == 16, "LZW compresses 24 chars -> 16 codes and roundtrips";
+say "[5] LZW('$lzw_src'): {chars($lzw_src)} chars -> {elems(@lzw_codes)} codes (100% lossless)";
+
+say "All Chapter 14 assertions passed!";

@@ -1,0 +1,227 @@
+# ==============================================================================
+# Perl Cookbook - Chapter 3: Dates and Times (Ported to Idiomatic Raptor)
+# ==============================================================================
+# Recipes:
+#   3.1  Finding Today's Date (localtime, gmtime)
+#   3.2  Converting Y/M/D H:M:S to Epoch Seconds (Julian/Rata Die & Unix Epoch)
+#   3.3  Converting Epoch Seconds to Broken-Down UTC Components
+#   3.4  Adding to or Subtracting from a Date
+#   3.5  Difference of Two Dates (Days, Hours, Minutes, Seconds)
+#   3.6  Day in a Week / Month / Year (Zeller / Tomohiko Sakamoto & Day-of-Year)
+#   3.7  Parsing ISO-8601 Dates and Timestamps via Declarative Grammar
+#   3.9  High-Resolution Timers & Short Sleeps (now, time_ms, sleep)
+# ==============================================================================
+
+say "=== Perl Cookbook Chapter 03: Dates and Times ===";
+
+# ------------------------------------------------------------------------------
+# Recipe 3.1: Finding Today's Date
+# ------------------------------------------------------------------------------
+say "\n[3.1] Today's Date (localtime & gmtime):";
+my %lt = localtime();
+my %gt = gmtime();
+
+my $local_iso = sprintf("%04d-%02d-%02d %02d:%02d:%02d",
+    %lt<year>, %lt<mon>, %lt<mday>, %lt<hour>, %lt<min>, %lt<sec>);
+my $utc_iso = sprintf("%04d-%02d-%02dT%02d:%02d:%02dZ",
+    %gt<year>, %gt<mon>, %gt<mday>, %gt<hour>, %gt<min>, %gt<sec>);
+
+say "  Local Time : " ~ $local_iso ~ " (yday=" ~ %lt<yday> ~ ", wday=" ~ %lt<wday> ~ ")";
+say "  UTC Time   : " ~ $utc_iso;
+
+ASSERT %lt<year> >= 2024 && 1 <= %lt<mon> <= 12 && 1 <= %lt<mday> <= 31, "3.1 localtime fields valid";
+ASSERT %gt<year> >= 2024 && 1 <= %gt<yday> <= 366, "3.1 gmtime fields valid";
+
+# ------------------------------------------------------------------------------
+# Recipe 3.2 & 3.3: Civil Date <-> Unix Epoch Seconds (Howard Hinnant Algorithm)
+# ------------------------------------------------------------------------------
+say "\n[3.2 & 3.3] Civil Date <-> Unix Epoch Conversions:";
+
+sub is_leap_year($y) {
+    return ($y % 4 == 0 && $y % 100 != 0) || ($y % 400 == 0);
+}
+
+# Days since 1970-01-01 for proleptic Gregorian calendar
+sub days_from_civil($y, $m, $d) {
+    my $yr = $y - ($m <= 2 ?? 1 !! 0);
+    my $era = ($yr >= 0 ?? $yr !! $yr - 399) div 400;
+    my $yoe = $yr - $era * 400;
+    my $mp  = $m + ($m > 2 ?? -3 !! 9);
+    my $doy = (153 * $mp + 2) div 5 + $d - 1;
+    my $doe = $yoe * 365 + ($yoe div 4) - ($yoe div 100) + $doy;
+    return $era * 146097 + $doe - 719468;
+}
+
+sub civil_from_days($z) {
+    my $zz  = $z + 719468;
+    my $era = ($zz >= 0 ?? $zz !! $zz - 146096) div 146097;
+    my $doe = $zz - $era * 146097;
+    my $yoe = ($doe - ($doe div 1460) + ($doe div 36524) - ($doe div 146096)) div 365;
+    my $y   = $yoe + $era * 400;
+    my $doy = $doe - (365 * $yoe + ($yoe div 4) - ($yoe div 100));
+    my $mp  = (5 * $doy + 2) div 153;
+    my $d   = $doy - ((153 * $mp + 2) div 5) + 1;
+    my $m   = $mp + ($mp < 10 ?? 3 !! -9);
+    if $m <= 2 {
+        $y += 1;
+    }
+    return { "year" => $y, "mon" => $m, "mday" => $d };
+}
+
+sub utc_to_epoch($y, $m, $d, $hh = 0, $mm = 0, $ss = 0) {
+    return days_from_civil($y, $m, $d) * 86400 + $hh * 3600 + $mm * 60 + $ss;
+}
+
+sub epoch_to_utc($epoch) {
+    my $days = $epoch div 86400;
+    my $rem  = $epoch % 86400;
+    if $rem < 0 {
+        $days -= 1;
+        $rem += 86400;
+    }
+    my %dt = civil_from_days($days);
+    %dt{"hour"} = $rem div 3600;
+    %dt{"min"}  = ($rem % 3600) div 60;
+    %dt{"sec"}  = $rem % 60;
+    return %dt;
+}
+
+my $y2k_epoch = utc_to_epoch(2000, 1, 1, 0, 0, 0);
+my %roundtrip = epoch_to_utc(1709164800); # 2024-02-29 00:00:00 UTC (leap day!)
+
+say "  2000-01-01T00:00:00Z epoch = " ~ $y2k_epoch;
+say "  Epoch 1709164800 -> " ~ sprintf("%04d-%02d-%02d %02d:%02d:%02d",
+    %roundtrip<year>, %roundtrip<mon>, %roundtrip<mday>,
+    %roundtrip<hour>, %roundtrip<min>, %roundtrip<sec>);
+
+ASSERT $y2k_epoch == 946684800, "3.2 Y2K UTC epoch is 946684800";
+ASSERT %roundtrip<year> == 2024 && %roundtrip<mon> == 2 && %roundtrip<mday> == 29, "3.3 leap day 2024-02-29 decoded";
+
+# ------------------------------------------------------------------------------
+# Recipe 3.4 & 3.5: Date Arithmetic & Differences
+# ------------------------------------------------------------------------------
+say "\n[3.4 & 3.5] Date Arithmetic and Span Differences:";
+my $launch_ep = utc_to_epoch(1969, 7, 16, 13, 32, 0);  # Apollo 11 launch
+my $splash_ep = utc_to_epoch(1969, 7, 24, 16, 50, 35); # Apollo 11 splashdown
+my $mission_secs = $splash_ep - $launch_ep;
+
+my $d_days = $mission_secs div 86400;
+my $d_hrs  = ($mission_secs % 86400) div 3600;
+my $d_mins = ($mission_secs % 3600) div 60;
+my $d_secs = $mission_secs % 60;
+
+# Add 90 days to 2026-01-15
+my %plus_90 = epoch_to_utc(utc_to_epoch(2026, 1, 15) + 90 * 86400);
+
+say "  Apollo 11 duration : " ~ $d_days ~ "d " ~ $d_hrs ~ "h " ~ $d_mins ~ "m " ~ $d_secs ~ "s";
+say "  2026-01-15 + 90d   : " ~ sprintf("%04d-%02d-%02d", %plus_90<year>, %plus_90<mon>, %plus_90<mday>);
+
+ASSERT $d_days == 8 && $d_hrs == 3 && $d_mins == 18 && $d_secs == 35, "3.5 Apollo 11 duration 8d 3h 18m 35s";
+ASSERT %plus_90<year> == 2026 && %plus_90<mon> == 4 && %plus_90<mday> == 15, "3.4 2026-01-15 + 90 days == 2026-04-15";
+
+# ------------------------------------------------------------------------------
+# Recipe 3.6: Day of Week, Day of Year, and ISO Week Number
+# ------------------------------------------------------------------------------
+say "\n[3.6] Day of Week & Day of Year:";
+
+# Sakamoto's method: 0 = Sunday .. 6 = Saturday
+sub day_of_week($y, $m, $d) {
+    my @t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    my $yr = $y - ($m < 3 ?? 1 !! 0);
+    return ($yr + ($yr div 4) - ($yr div 100) + ($yr div 400) + @t[$m - 1] + $d) % 7;
+}
+
+sub day_of_year($y, $m, $d) {
+    my @cum = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+    my $doy = @cum[$m - 1] + $d;
+    if $m > 2 && is_leap_year($y) {
+        $doy += 1;
+    }
+    return $doy;
+}
+
+my @day_names = <Sunday Monday Tuesday Wednesday Thursday Friday Saturday>;
+my $dow = day_of_week(1987, 12, 18); # Perl 1.000 release date!
+my $doy = day_of_year(2024, 12, 31); # Leap year has 366 days
+
+say "  Perl 1.0 release (1987-12-18): " ~ @day_names[$dow];
+say "  2024-12-31 day-of-year       : " ~ $doy;
+
+ASSERT @day_names[$dow] eq "Friday", "3.6 Perl 1.0 was released on Friday, Dec 18, 1987";
+ASSERT $doy == 366 && day_of_year(2025, 12, 31) == 365, "3.6 leap vs common day_of_year";
+
+# ------------------------------------------------------------------------------
+# Recipe 3.7: Parsing ISO-8601 Timestamps via Declarative Grammar
+# ------------------------------------------------------------------------------
+say "\n[3.7] Parsing ISO-8601 Timestamps with Grammar:";
+
+grammar ISO8601 {
+    token TOP {
+        ^ <year> '-' <mon> '-' <mday>
+        [ <[Tt\ ]> <hour> ':' <min> ':' <sec> <tz>? ]? $
+    }
+    token year { \d ** 4 }
+    token mon  { \d ** 2 }
+    token mday { \d ** 2 }
+    token hour { \d ** 2 }
+    token min  { \d ** 2 }
+    token sec  { \d ** 2 }
+    token tz   { <[Zz]> || $<sign>=[<[+\-]>] <tz_h=hour> ':'? <tz_m=min> }
+}
+
+sub parse_iso8601($str) {
+    my $m = ISO8601.parse($str);
+    if !defined($m) {
+        return Nil;
+    }
+    my $y  = int($m<year><Str>);
+    my $mo = int($m<mon><Str>);
+    my $d  = int($m<mday><Str>);
+    my $hh = defined($m<hour>) ?? int($m<hour><Str>) !! 0;
+    my $mm = defined($m<min>)  ?? int($m<min><Str>)  !! 0;
+    my $ss = defined($m<sec>)  ?? int($m<sec><Str>)  !! 0;
+
+    my $ep = utc_to_epoch($y, $mo, $d, $hh, $mm, $ss);
+    if defined($m<tz>) && defined($m<tz><sign>) {
+        my $offset = int($m<tz><tz_h><Str>) * 3600 + int($m<tz><tz_m><Str>) * 60;
+        if $m<tz><sign><Str> eq "+" {
+            $ep -= $offset;
+        } else {
+            $ep += $offset;
+        }
+    }
+    return {
+        "year" => $y, "mon" => $mo, "mday" => $d,
+        "hour" => $hh, "min" => $mm, "sec" => $ss,
+        "epoch" => $ep
+    };
+}
+
+my $p1 = parse_iso8601("2026-11-26T09:30:00+02:00");
+my $p2 = parse_iso8601("2026-11-26T07:30:00Z");
+
+say "  Parsed +02:00 epoch = " ~ $p1<epoch>;
+say "  Parsed Z      epoch = " ~ $p2<epoch>;
+
+ASSERT defined($p1) && defined($p2), "3.7 ISO-8601 grammar parse succeeded";
+ASSERT $p1<epoch> == $p2<epoch>, "3.7 timezone offset +02:00 normalizes to identical UTC epoch";
+ASSERT !defined(parse_iso8601("not-a-date")), "3.7 invalid timestamp rejected";
+
+# ------------------------------------------------------------------------------
+# Recipe 3.9: High-Resolution Timers (now, time_ms, time, sleep)
+# ------------------------------------------------------------------------------
+say "\n[3.9] High-Resolution Timers:";
+my $t0_sec = time();
+my $t0_ms  = time_ms();
+my $t0_hr  = now();
+sleep(0.02);
+my $elapsed_ms = (now() - $t0_hr) * 1000.0;
+
+say "  Unix epoch (s) : " ~ $t0_sec;
+say "  Unix epoch (ms): " ~ $t0_ms;
+say "  20ms sleep took: " ~ sprintf("%.2f ms", $elapsed_ms);
+
+ASSERT $t0_sec > 1700000000 && $t0_ms >= $t0_sec * 1000, "3.9 epoch clocks consistent";
+ASSERT $elapsed_ms >= 10.0, "3.9 high-resolution timer measured sleep";
+
+say "\nChapter 03: All date and time recipes verified successfully!";

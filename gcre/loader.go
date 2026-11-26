@@ -37,6 +37,7 @@ type protoCandidate struct {
 	fullName string
 	sym      string
 	isToken  bool
+	traits   RuleTraits
 	pat      rx
 }
 
@@ -142,7 +143,7 @@ func compileGrammarDef(def *DynamicGrammarDef, env map[string]*Grammar) (*Gramma
 			continue
 		}
 
-		ruleFn := makeSingleRuleFunc(r.IsToken, r.Sym, r.Pat)
+		ruleFn := makeSingleRuleFunc(r.IsToken, r.Sym, r.Traits, r.Pat)
 		g.DefineRule(r.Name, ruleFn)
 
 		if r.HasSym || r.IsMulti {
@@ -158,6 +159,7 @@ func compileGrammarDef(def *DynamicGrammarDef, env map[string]*Grammar) (*Gramma
 				fullName: r.Name,
 				sym:      r.Sym,
 				isToken:  r.IsToken,
+				traits:   r.Traits,
 				pat:      r.Pat,
 			}
 			replaced := false
@@ -210,7 +212,7 @@ func compileGrammarDef(def *DynamicGrammarDef, env map[string]*Grammar) (*Gramma
 	return g, nil
 }
 
-func makeSingleRuleFunc(isToken bool, symVal string, pat rx) RuleFunc {
+func makeSingleRuleFunc(isToken bool, symVal string, traits RuleTraits, pat rx) RuleFunc {
 	hasBOS := startsWithBOS(pat)
 	return func(g *Grammar, ctx *Context) *Match {
 		if !isToken && !hasBOS {
@@ -219,17 +221,46 @@ func makeSingleRuleFunc(isToken bool, symVal string, pat rx) RuleFunc {
 		start := ctx.Pos
 		m := NewMatch("", start, start, true)
 		prevSym := ctx.SymVal
+		prevIC, prevIM := ctx.IgnoreCase, ctx.IgnoreMark
+		prevSpan, prevSF, prevST := ctx.hasSpan, ctx.spanFrom, ctx.spanTo
+		prevCutG, prevCutR := ctx.cutGroup, ctx.cutRule
 		if symVal != "" {
 			ctx.SymVal = symVal
 		}
+		if traits.IgnoreCase {
+			ctx.IgnoreCase = true
+		}
+		if traits.IgnoreMark {
+			ctx.IgnoreMark = true
+		}
+		ctx.hasSpan = false
+		ctx.cutGroup = false
+		ctx.cutRule = false
+
 		ok := pat != nil && pat.match(g, ctx, m, isToken)
+
+		hasSpan, spanFrom, spanTo := ctx.hasSpan, ctx.spanFrom, ctx.spanTo
 		ctx.SymVal = prevSym
+		ctx.IgnoreCase = prevIC
+		ctx.IgnoreMark = prevIM
+		ctx.hasSpan = prevSpan
+		ctx.spanFrom = prevSF
+		ctx.spanTo = prevST
+		ctx.cutGroup = prevCutG
+		ctx.cutRule = prevCutR
+
 		if !ok {
 			ctx.Pos = start
 			return NewMatch("", start, start, false)
 		}
-		m.To = ctx.Pos
-		m.Str = string(ctx.Src[start:ctx.Pos])
+		if hasSpan {
+			m.From = spanFrom
+			m.To = spanTo
+			m.Str = string(ctx.Src[spanFrom:spanTo])
+		} else {
+			m.To = ctx.Pos
+			m.Str = string(ctx.Src[start:ctx.Pos])
+		}
 		m.Ok = true
 		return m
 	}
@@ -238,11 +269,16 @@ func makeSingleRuleFunc(isToken bool, symVal string, pat rx) RuleFunc {
 func (g *Grammar) rebuildProtosAndOptable() {
 	for protoName, pg := range g.protos {
 		pgCopy := pg
+		pName := protoName
 		g.DefineRule(protoName, func(g *Grammar, ctx *Context) *Match {
 			startPos := ctx.Pos
 			var bestCand *protoCandidate
 			var bestMatch *Match
 			bestEnd := -1
+
+			prevRule := ctx.CurRule
+			ctx.CurRule = pName
+			defer func() { ctx.CurRule = prevRule }()
 
 			for i := range pgCopy.cands {
 				cand := &pgCopy.cands[i]
@@ -253,13 +289,42 @@ func (g *Grammar) rebuildProtosAndOptable() {
 				candStart := ctx.Pos
 				m := NewMatch("", candStart, candStart, true)
 				prevSym := ctx.SymVal
+				prevIC, prevIM := ctx.IgnoreCase, ctx.IgnoreMark
+				prevSpan, prevSF, prevST := ctx.hasSpan, ctx.spanFrom, ctx.spanTo
+				prevCutG, prevCutR := ctx.cutGroup, ctx.cutRule
 				ctx.SymVal = cand.sym
+				if cand.traits.IgnoreCase {
+					ctx.IgnoreCase = true
+				}
+				if cand.traits.IgnoreMark {
+					ctx.IgnoreMark = true
+				}
+				ctx.hasSpan = false
+				ctx.cutGroup = false
+				ctx.cutRule = false
+
 				ok := cand.pat != nil && cand.pat.match(g, ctx, m, cand.isToken)
+
+				hasSpan, spanFrom, spanTo := ctx.hasSpan, ctx.spanFrom, ctx.spanTo
 				ctx.SymVal = prevSym
+				ctx.IgnoreCase = prevIC
+				ctx.IgnoreMark = prevIM
+				ctx.hasSpan = prevSpan
+				ctx.spanFrom = prevSF
+				ctx.spanTo = prevST
+				ctx.cutGroup = prevCutG
+				ctx.cutRule = prevCutR
+
 				if ok && ctx.Pos > bestEnd {
 					bestEnd = ctx.Pos
-					m.To = ctx.Pos
-					m.Str = string(ctx.Src[candStart:ctx.Pos])
+					if hasSpan {
+						m.From = spanFrom
+						m.To = spanTo
+						m.Str = string(ctx.Src[spanFrom:spanTo])
+					} else {
+						m.To = ctx.Pos
+						m.Str = string(ctx.Src[candStart:ctx.Pos])
+					}
 					m.Ok = true
 					bestCand = cand
 					bestMatch = m
@@ -488,6 +553,10 @@ type rxSeq struct {
 	elts []rx
 }
 
+type rxConj struct {
+	elts []rx
+}
+
 type rxLit struct {
 	s string
 }
@@ -543,6 +612,24 @@ type rxCap struct {
 	inner rx
 }
 
+type rxCapSpan struct {
+	inner rx
+}
+
+type rxAdverb struct {
+	kind string
+	neg  bool
+}
+
+type rxCut struct {
+	level int // 1=':', 2='::', 3=':::'
+}
+
+type rxBackref struct {
+	name  string
+	index int
+}
+
 type rxAlias struct {
 	name  string
 	inner rx
@@ -573,7 +660,7 @@ func startsWithBOS(p rx) bool {
 
 func noPreWS(p rx) bool {
 	switch t := p.(type) {
-	case *rxNoop, *rxLookbehind:
+	case *rxNoop, *rxLookbehind, *rxAdverb, *rxCut, *rxCapSpan:
 		return true
 	case *rxAnchor:
 		switch t.kind {
@@ -590,24 +677,114 @@ func (r *rxNoop) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
 	return true
 }
 
+func (r *rxAdverb) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
+	return true
+}
+
+func (r *rxConj) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
+	if len(r.elts) == 0 {
+		return true
+	}
+	saved := ctx.Pos
+	snap := cap.snapshot()
+	if !r.elts[0].match(g, ctx, cap, token) {
+		ctx.Pos = saved
+		cap.restore(snap)
+		return false
+	}
+	endPos := ctx.Pos
+	for i := 1; i < len(r.elts); i++ {
+		ctx.Pos = saved
+		if !r.elts[i].match(g, ctx, cap, token) || ctx.Pos != endPos {
+			ctx.Pos = saved
+			cap.restore(snap)
+			return false
+		}
+	}
+	ctx.Pos = endPos
+	return true
+}
+
+func (r *rxCut) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
+	if r.level == 2 {
+		ctx.cutGroup = true
+	} else if r.level >= 3 {
+		ctx.cutRule = true
+	}
+	return true
+}
+
+func (r *rxCapSpan) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
+	if !token && !startsWithBOS(r.inner) {
+		ctx.SkipWS()
+	}
+	sFrom := ctx.Pos
+	if !r.inner.match(g, ctx, cap, token) {
+		ctx.Pos = sFrom
+		return false
+	}
+	ctx.hasSpan = true
+	ctx.spanFrom = sFrom
+	ctx.spanTo = ctx.Pos
+	return true
+}
+
+func (r *rxBackref) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
+	if cap == nil {
+		return false
+	}
+	var sub *Match
+	if r.name != "" {
+		sub = cap.Get(r.name)
+	} else {
+		sub = cap.At(r.index)
+	}
+	if sub == nil || !sub.Ok {
+		return false
+	}
+	if !token {
+		ctx.SkipWS()
+	}
+	return g.ExactLit(sub.Str, ctx).Ok
+}
+
 func (r *rxAlt) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
 	saved := ctx.Pos
 	snap := cap.snapshot()
+	savedSpan, savedSF, savedST := ctx.hasSpan, ctx.spanFrom, ctx.spanTo
 	for _, a := range r.alts {
 		ctx.Pos = saved
 		cap.restore(snap)
+		ctx.hasSpan, ctx.spanFrom, ctx.spanTo = savedSpan, savedSF, savedST
+		ctx.cutGroup = false
 		if a.match(g, ctx, cap, token) {
+			ctx.cutGroup = false
 			return true
+		}
+		if ctx.cutRule {
+			ctx.Pos = saved
+			cap.restore(snap)
+			ctx.hasSpan, ctx.spanFrom, ctx.spanTo = savedSpan, savedSF, savedST
+			return false
+		}
+		if ctx.cutGroup {
+			ctx.cutGroup = false
+			ctx.Pos = saved
+			cap.restore(snap)
+			ctx.hasSpan, ctx.spanFrom, ctx.spanTo = savedSpan, savedSF, savedST
+			return false
 		}
 	}
 	ctx.Pos = saved
 	cap.restore(snap)
+	ctx.hasSpan, ctx.spanFrom, ctx.spanTo = savedSpan, savedSF, savedST
 	return false
 }
 
 func (r *rxLTMAlt) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
 	saved := ctx.Pos
 	snap := cap.snapshot()
+	savedSpan, savedSF, savedST := ctx.hasSpan, ctx.spanFrom, ctx.spanTo
 
 	bestIdx := -1
 	bestEnd := -1
@@ -615,6 +792,7 @@ func (r *rxLTMAlt) match(g *Grammar, ctx *Context, cap *Match, token bool) bool 
 	// Probe all branches to find longest match (ties broken by declaration order).
 	for i, a := range r.alts {
 		ctx.Pos = saved
+		ctx.hasSpan, ctx.spanFrom, ctx.spanTo = savedSpan, savedSF, savedST
 		if a.match(g, ctx, nil, token) {
 			if ctx.Pos > bestEnd {
 				bestEnd = ctx.Pos
@@ -625,6 +803,7 @@ func (r *rxLTMAlt) match(g *Grammar, ctx *Context, cap *Match, token bool) bool 
 	if bestIdx < 0 {
 		ctx.Pos = saved
 		cap.restore(snap)
+		ctx.hasSpan, ctx.spanFrom, ctx.spanTo = savedSpan, savedSF, savedST
 		return false
 	}
 	if cap == nil {
@@ -634,9 +813,11 @@ func (r *rxLTMAlt) match(g *Grammar, ctx *Context, cap *Match, token bool) bool 
 	// Replay winning branch with captures enabled.
 	ctx.Pos = saved
 	cap.restore(snap)
+	ctx.hasSpan, ctx.spanFrom, ctx.spanTo = savedSpan, savedSF, savedST
 	if !r.alts[bestIdx].match(g, ctx, cap, token) {
 		ctx.Pos = saved
 		cap.restore(snap)
+		ctx.hasSpan, ctx.spanFrom, ctx.spanTo = savedSpan, savedSF, savedST
 		return false
 	}
 	return true
@@ -647,11 +828,34 @@ func (r *rxSeq) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
 }
 
 func (r *rxSeq) matchFrom(idx int, g *Grammar, ctx *Context, cap *Match, token bool) bool {
+	prevIC, prevIM := ctx.IgnoreCase, ctx.IgnoreMark
+	hadAdv := false
+	defer func() {
+		if hadAdv {
+			ctx.IgnoreCase = prevIC
+			ctx.IgnoreMark = prevIM
+		}
+	}()
+
 	for idx < len(r.elts) {
 		e := r.elts[idx]
+		if adv, ok := e.(*rxAdverb); ok {
+			hadAdv = true
+			switch adv.kind {
+			case "i", "ignorecase":
+				ctx.IgnoreCase = !adv.neg
+			case "m", "ignoremark":
+				ctx.IgnoreMark = !adv.neg
+			case "s", "sigspace":
+				token = adv.neg
+			}
+			idx++
+			continue
+		}
 		if rq, ok := e.(*rxQuant); ok && rq.q.frugal {
-			return rq.matchFrugalInSeq(g, ctx, cap, token, func() bool {
-				return r.matchFrom(idx+1, g, ctx, cap, token)
+			curToken := token
+			return rq.matchFrugalInSeq(g, ctx, cap, curToken, func() bool {
+				return r.matchFrom(idx+1, g, ctx, cap, curToken)
 			})
 		}
 		if !token && !noPreWS(e) {
@@ -786,7 +990,7 @@ func (r *rxCharClass) match(g *Grammar, ctx *Context, cap *Match, token bool) bo
 	for _, t := range r.terms {
 		var hit bool
 		if t.kind == classTermBracket {
-			hit = classContains(t.bracketSpec, ch)
+			hit = classContainsCI(t.bracketSpec, ch, ctx.IgnoreCase, ctx.IgnoreMark)
 		} else {
 			hit = matchUnicodeProp(t.propName, t.propNeg, ch)
 		}
@@ -823,7 +1027,14 @@ func (r *rxSub) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
 }
 
 func (r *rxGrp) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
-	return r.inner.match(g, ctx, cap, token)
+	prevIC, prevIM := ctx.IgnoreCase, ctx.IgnoreMark
+	prevCutG := ctx.cutGroup
+	ctx.cutGroup = false
+	ok := r.inner.match(g, ctx, cap, token)
+	ctx.IgnoreCase = prevIC
+	ctx.IgnoreMark = prevIM
+	ctx.cutGroup = prevCutG
+	return ok
 }
 
 func (r *rxCap) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
@@ -832,12 +1043,32 @@ func (r *rxCap) match(g *Grammar, ctx *Context, cap *Match, token bool) bool {
 	}
 	start := ctx.Pos
 	sub := NewMatch("", start, start, true)
-	if !r.inner.match(g, ctx, sub, token) {
+	prevIC, prevIM := ctx.IgnoreCase, ctx.IgnoreMark
+	prevSpan, prevSF, prevST := ctx.hasSpan, ctx.spanFrom, ctx.spanTo
+	prevCutG := ctx.cutGroup
+	ctx.hasSpan = false
+	ctx.cutGroup = false
+
+	ok := r.inner.match(g, ctx, sub, token)
+
+	hasSpan, spanFrom, spanTo := ctx.hasSpan, ctx.spanFrom, ctx.spanTo
+	ctx.IgnoreCase = prevIC
+	ctx.IgnoreMark = prevIM
+	ctx.hasSpan, ctx.spanFrom, ctx.spanTo = prevSpan, prevSF, prevST
+	ctx.cutGroup = prevCutG
+
+	if !ok {
 		ctx.Pos = start
 		return false
 	}
-	sub.To = ctx.Pos
-	sub.Str = string(ctx.Src[start:ctx.Pos])
+	if hasSpan {
+		sub.From = spanFrom
+		sub.To = spanTo
+		sub.Str = string(ctx.Src[spanFrom:spanTo])
+	} else {
+		sub.To = ctx.Pos
+		sub.Str = string(ctx.Src[start:ctx.Pos])
+	}
 	sub.Ok = true
 	if cap != nil {
 		cap.AddPositional(sub)

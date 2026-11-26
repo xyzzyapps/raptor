@@ -1,0 +1,122 @@
+# Mastering Algorithms with Perl - Chapter 01: Introduction, Complexity & Binary Search
+# Covers iterative/recursive binary search, lower/upper bounds, exponential search,
+# O(n) Kadane's maximum subarray vs O(n^2), and `state` memoized recursion.
+
+say "=== Chapter 01: Introduction, Complexity & Binary Search ===";
+
+# 1. Iterative & Recursive Binary Search — O(log n)
+sub bsearch_iter(@arr, $target) {
+    my $lo = 0;
+    my $hi = elems(@arr) - 1;
+    while $lo <= $hi {
+        my $mid = ($lo + $hi) div 2;
+        my $v = @arr[$mid];
+        if $v == $target {
+            return $mid;
+        } elsif $v < $target {
+            $lo = $mid + 1;
+        } else {
+            $hi = $mid - 1;
+        }
+    }
+    return -1;
+}
+
+sub bsearch_rec(@arr, $target, $lo, $hi) {
+    return -1 if $lo > $hi;
+    my $mid = ($lo + $hi) div 2;
+    my $v = @arr[$mid];
+    return $mid if $v == $target;
+    return $v < $target
+        ?? bsearch_rec(@arr, $target, $mid + 1, $hi)
+        !! bsearch_rec(@arr, $target, $lo, $mid - 1);
+}
+
+# 2. Lower Bound & Upper Bound (Duplicate Range Queries)
+sub lower_bound(@arr, $target) {
+    my $lo = 0;
+    my $hi = elems(@arr);
+    while $lo < $hi {
+        my $mid = ($lo + $hi) div 2;
+        if @arr[$mid] < $target {
+            $lo = $mid + 1;
+        } else {
+            $hi = $mid;
+        }
+    }
+    return $lo;
+}
+
+sub upper_bound(@arr, $target) {
+    my $lo = 0;
+    my $hi = elems(@arr);
+    while $lo < $hi {
+        my $mid = ($lo + $hi) div 2;
+        if @arr[$mid] <= $target {
+            $lo = $mid + 1;
+        } else {
+            $hi = $mid;
+        }
+    }
+    return $lo;
+}
+
+# 3. Exponential (Galloping) Search — O(log i) where i is target position
+sub exponential_search(@arr, $target) {
+    my $n = elems(@arr);
+    return -1 if $n == 0;
+    return 0  if @arr[0] == $target;
+    my $bound = 1;
+    while $bound < $n && @arr[$bound] < $target {
+        $bound = $bound * 2;
+    }
+    my $lo = $bound div 2;
+    my $hi = $bound < $n ?? $bound !! ($n - 1);
+    return bsearch_rec(@arr, $target, $lo, $hi);
+}
+
+my @sorted = [2, 5, 8, 12, 16, 23, 38, 56, 72, 91];
+ASSERT bsearch_iter(@sorted, 23) == 5, "bsearch_iter finds 23 at index 5";
+ASSERT bsearch_iter(@sorted, 99) == -1, "bsearch_iter returns -1 when absent";
+ASSERT bsearch_rec(@sorted, 72, 0, elems(@sorted) - 1) == 8, "bsearch_rec finds 72 at index 8";
+ASSERT exponential_search(@sorted, 12) == 3, "exponential_search finds 12 at index 3";
+ASSERT exponential_search(@sorted, 91) == 9, "exponential_search finds last element";
+
+my @dups = [1, 2, 4, 4, 4, 7, 9];
+my $lb = lower_bound(@dups, 4);
+my $ub = upper_bound(@dups, 4);
+ASSERT $lb == 2 && $ub == 5 && ($ub - $lb) == 3, "lower/upper bound counts three 4s";
+say "[1] Binary & Exponential Search: idx(23)=5, range(4)=[$lb, $ub)";
+
+# 4. Memoization with `state` Hash — Turning O(2^n) Recursion into O(n)
+sub fib_memo($n) {
+    state %memo = { "0" => 0, "1" => 1 };
+    my $k = str($n);
+    if exists(%memo, $k) {
+        return %memo{$k};
+    }
+    my $ans = fib_memo($n - 1) + fib_memo($n - 2);
+    %memo{$k} = $ans;
+    return $ans;
+}
+
+ASSERT fib_memo(20) == 6765 && fib_memo(40) == 102334155, "state-memoized fib(40) == 102334155";
+say "[2] Memoized Fibonacci: fib(40) = {fib_memo(40)}";
+
+# 5. Algorithmic Improvement: O(n) Kadane's Max Subarray vs O(n^2) Brute Force
+sub max_subarray_kadane(@nums) {
+    my $best = @nums[0];
+    my $cur  = @nums[0];
+    for 1 ..^ elems(@nums) -> $i {
+        my $x = @nums[$i];
+        $cur = ($cur + $x > $x) ?? ($cur + $x) !! $x;
+        $best = $cur if $cur > $best;
+    }
+    return $best;
+}
+
+my @deltas = [-2, 1, -3, 4, -1, 2, 1, -5, 4];
+ASSERT max_subarray_kadane(@deltas) == 6, "Kadane max subarray sum == 6";
+say "[3] Kadane O(n) max subarray sum = {max_subarray_kadane(@deltas)}";
+
+say "All Chapter 01 assertions passed!";

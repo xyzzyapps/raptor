@@ -1,0 +1,595 @@
+# ==============================================================================
+# Mastering Algorithms with Perl — Chapter 02: Basic Data Structures
+# ------------------------------------------------------------------------------
+# Implements procedural, reference/hash-node and ring-buffer data structures:
+#   1. Singly Linked List (insert front/back, pop, search, delete, in-place reverse)
+#   2. Doubly Linked List (O(1) push/pop at both ends, forward & reverse traversal)
+#   3. Circular Linked List (tail-cursor ring + classic Josephus survivor problem)
+#   4. LIFO Stack (push, pop, peek + balanced bracket validation)
+#   5. FIFO Queue (O(1) amortized head-offset queue)
+#   6. Double-Ended Deque (power-of-two resizing circular ring buffer + sliding max)
+# ==============================================================================
+
+say "=== Chapter 02: Basic Data Structures ===";
+
+# Helper: join integer/scalar array for comparison & display
+sub fmt_list(@arr) {
+    return "[" ~ join(", ", @arr) ~ "]";
+}
+
+sub arrays_eq(@a, @b) {
+    if elems(@a) != elems(@b) {
+        return False;
+    }
+    for 0 ..^ elems(@a) -> $i {
+        if @a[$i] != @b[$i] {
+            return False;
+        }
+    }
+    return True;
+}
+
+# ==============================================================================
+# 1. Singly Linked List (Hash-Node Representation)
+# ==============================================================================
+
+sub sll_new() {
+    return { "head" => Nil, "tail" => Nil, "size" => 0 };
+}
+
+sub sll_push_front($list, $val) {
+    my $node = { "val" => $val, "next" => $list{"head"} };
+    $list{"head"} = $node;
+    if $list{"size"} == 0 {
+        $list{"tail"} = $node;
+    }
+    $list{"size"} = $list{"size"} + 1;
+}
+
+sub sll_push_back($list, $val) {
+    my $node = { "val" => $val, "next" => Nil };
+    if $list{"size"} == 0 {
+        $list{"head"} = $node;
+        $list{"tail"} = $node;
+    } else {
+        my $tail = $list{"tail"};
+        $tail{"next"} = $node;
+        $list{"tail"} = $node;
+    }
+    $list{"size"} = $list{"size"} + 1;
+}
+
+sub sll_pop_front($list) {
+    if $list{"size"} == 0 {
+        return Nil;
+    }
+    my $head = $list{"head"};
+    $list{"head"} = $head{"next"};
+    $list{"size"} = $list{"size"} - 1;
+    if $list{"size"} == 0 {
+        $list{"tail"} = Nil;
+    }
+    return $head{"val"};
+}
+
+sub sll_contains($list, $target) {
+    my $cur = $list{"head"};
+    while defined($cur) {
+        if $cur{"val"} == $target {
+            return True;
+        }
+        $cur = $cur{"next"};
+    }
+    return False;
+}
+
+sub sll_delete($list, $target) {
+    my $prev = Nil;
+    my $cur  = $list{"head"};
+    while defined($cur) {
+        if $cur{"val"} == $target {
+            if defined($prev) {
+                $prev{"next"} = $cur{"next"};
+            } else {
+                $list{"head"} = $cur{"next"};
+            }
+            if !defined($cur{"next"}) {
+                $list{"tail"} = $prev;
+            }
+            $list{"size"} = $list{"size"} - 1;
+            return True;
+        }
+        $prev = $cur;
+        $cur  = $cur{"next"};
+    }
+    return False;
+}
+
+sub sll_reverse($list) {
+    my $prev    = Nil;
+    my $cur     = $list{"head"};
+    $list{"tail"} = $cur;
+    while defined($cur) {
+        my $nxt = $cur{"next"};
+        $cur{"next"} = $prev;
+        $prev = $cur;
+        $cur  = $nxt;
+    }
+    $list{"head"} = $prev;
+}
+
+sub sll_to_array($list) {
+    my @out = [];
+    my $cur = $list{"head"};
+    while defined($cur) {
+        push(@out, $cur{"val"});
+        $cur = $cur{"next"};
+    }
+    return @out;
+}
+
+my $sll = sll_new();
+ASSERT sll_pop_front($sll) // -999 == -999, "empty SLL pop returns Nil";
+sll_push_back($sll, 20);
+sll_push_back($sll, 30);
+sll_push_front($sll, 10);
+sll_push_back($sll, 40);
+ASSERT $sll{"size"} == 4, "SLL size is 4";
+ASSERT arrays_eq(sll_to_array($sll), [10, 20, 30, 40]), "SLL order [10, 20, 30, 40]";
+ASSERT sll_contains($sll, 30), "SLL contains 30";
+ASSERT !sll_contains($sll, 99), "SLL does not contain 99";
+
+sll_reverse($sll);
+ASSERT arrays_eq(sll_to_array($sll), [40, 30, 20, 10]), "SLL reversed in-place";
+ASSERT sll_delete($sll, 30), "SLL delete interior node 30";
+ASSERT sll_delete($sll, 10), "SLL delete tail node 10";
+sll_push_back($sll, 50);
+ASSERT arrays_eq(sll_to_array($sll), [40, 20, 50]), "SLL tail intact after delete + push_back";
+say "[1] Singly Linked List: " ~ fmt_list(sll_to_array($sll)) ~ " (size=" ~ $sll{"size"} ~ ")";
+
+# ==============================================================================
+# 2. Doubly Linked List (Bidirectional Hash-Nodes)
+# ==============================================================================
+
+sub dll_new() {
+    return { "head" => Nil, "tail" => Nil, "size" => 0 };
+}
+
+sub dll_push_front($list, $val) {
+    my $node = { "val" => $val, "prev" => Nil, "next" => $list{"head"} };
+    if $list{"size"} == 0 {
+        $list{"tail"} = $node;
+    } else {
+        my $old_head = $list{"head"};
+        $old_head{"prev"} = $node;
+    }
+    $list{"head"} = $node;
+    $list{"size"} = $list{"size"} + 1;
+}
+
+sub dll_push_back($list, $val) {
+    my $node = { "val" => $val, "prev" => $list{"tail"}, "next" => Nil };
+    if $list{"size"} == 0 {
+        $list{"head"} = $node;
+    } else {
+        my $old_tail = $list{"tail"};
+        $old_tail{"next"} = $node;
+    }
+    $list{"tail"} = $node;
+    $list{"size"} = $list{"size"} + 1;
+}
+
+sub dll_pop_front($list) {
+    if $list{"size"} == 0 {
+        return Nil;
+    }
+    my $head = $list{"head"};
+    my $nxt  = $head{"next"};
+    $list{"head"} = $nxt;
+    if defined($nxt) {
+        $nxt{"prev"} = Nil;
+    } else {
+        $list{"tail"} = Nil;
+    }
+    $list{"size"} = $list{"size"} - 1;
+    return $head{"val"};
+}
+
+sub dll_pop_back($list) {
+    if $list{"size"} == 0 {
+        return Nil;
+    }
+    my $tail = $list{"tail"};
+    my $prv  = $tail{"prev"};
+    $list{"tail"} = $prv;
+    if defined($prv) {
+        $prv{"next"} = Nil;
+    } else {
+        $list{"head"} = Nil;
+    }
+    $list{"size"} = $list{"size"} - 1;
+    return $tail{"val"};
+}
+
+sub dll_to_array($list) {
+    my @out = [];
+    my $cur = $list{"head"};
+    while defined($cur) {
+        push(@out, $cur{"val"});
+        $cur = $cur{"next"};
+    }
+    return @out;
+}
+
+sub dll_to_array_rev($list) {
+    my @out = [];
+    my $cur = $list{"tail"};
+    while defined($cur) {
+        push(@out, $cur{"val"});
+        $cur = $cur{"prev"};
+    }
+    return @out;
+}
+
+my $dll = dll_new();
+dll_push_back($dll, 2);
+dll_push_front($dll, 1);
+dll_push_back($dll, 3);
+dll_push_back($dll, 4);
+dll_push_front($dll, 0);
+ASSERT arrays_eq(dll_to_array($dll), [0, 1, 2, 3, 4]), "DLL forward [0..4]";
+ASSERT arrays_eq(dll_to_array_rev($dll), [4, 3, 2, 1, 0]), "DLL reverse [4..0]";
+ASSERT dll_pop_front($dll) == 0, "DLL pop_front == 0";
+ASSERT dll_pop_back($dll) == 4, "DLL pop_back == 4";
+ASSERT arrays_eq(dll_to_array($dll), [1, 2, 3]), "DLL remaining [1, 2, 3]";
+say "[2] Doubly Linked List: fwd=" ~ fmt_list(dll_to_array($dll)) ~ " rev=" ~ fmt_list(dll_to_array_rev($dll));
+
+# ==============================================================================
+# 3. Circular Linked List & Josephus Problem
+# ==============================================================================
+# Tail-pointer representation: $cll{"tail"}{"next"} is always the head node,
+# giving O(1) insert at both head and tail!
+
+sub cll_new() {
+    return { "tail" => Nil, "size" => 0 };
+}
+
+sub cll_push_back($cll, $val) {
+    my $node = { "val" => $val, "next" => Nil };
+    if $cll{"size"} == 0 {
+        $node{"next"} = $node;
+        $cll{"tail"} = $node;
+    } else {
+        my $tail = $cll{"tail"};
+        $node{"next"} = $tail{"next"};
+        $tail{"next"} = $node;
+        $cll{"tail"} = $node;
+    }
+    $cll{"size"} = $cll{"size"} + 1;
+}
+
+sub cll_rotate($cll) {
+    if $cll{"size"} > 1 {
+        my $tail = $cll{"tail"};
+        $cll{"tail"} = $tail{"next"};
+    }
+}
+
+sub cll_pop_front($cll) {
+    if $cll{"size"} == 0 {
+        return Nil;
+    }
+    my $tail = $cll{"tail"};
+    my $head = $tail{"next"};
+    if $cll{"size"} == 1 {
+        $cll{"tail"} = Nil;
+    } else {
+        $tail{"next"} = $head{"next"};
+    }
+    $cll{"size"} = $cll{"size"} - 1;
+    return $head{"val"};
+}
+
+sub cll_to_array($cll) {
+    my @out = [];
+    my $n = $cll{"size"};
+    if $n == 0 {
+        return @out;
+    }
+    my $tail = $cll{"tail"};
+    my $cur  = $tail{"next"};
+    for 0 ..^ $n -> $i {
+        push(@out, $cur{"val"});
+        $cur = $cur{"next"};
+    }
+    return @out;
+}
+
+# Classic Josephus problem: N people in a circle (1..N), every k-th eliminated
+sub josephus_survivor($n, $k) {
+    my $circle = cll_new();
+    for 1 .. $n -> $person {
+        cll_push_back($circle, $person);
+    }
+    while $circle{"size"} > 1 {
+        for 1 ..^ $k -> $step {
+            cll_rotate($circle);
+        }
+        cll_pop_front($circle);
+    }
+    return cll_pop_front($circle);
+}
+
+my $survivor_41_3 = josephus_survivor(41, 3);
+ASSERT $survivor_41_3 == 31, "Flavius Josephus (n=41, k=3) survivor is position 31";
+ASSERT josephus_survivor(7, 3) == 4, "Josephus (n=7, k=3) survivor is 4";
+ASSERT josephus_survivor(1, 5) == 1, "Josephus (n=1, k=5) survivor is 1";
+say "[3] Circular Linked List: Josephus(n=41, k=3) survivor = " ~ $survivor_41_3;
+
+# ==============================================================================
+# 4. LIFO Stack & Balanced Delimiters Check
+# ==============================================================================
+
+sub stack_new() {
+    return { "items" => [] };
+}
+
+sub stack_push($st, $val) {
+    my @items = $st{"items"};
+    push(@items, $val);
+}
+
+sub stack_pop($st) {
+    my @items = $st{"items"};
+    if elems(@items) == 0 {
+        return Nil;
+    }
+    return pop(@items);
+}
+
+sub stack_peek($st) {
+    my @items = $st{"items"};
+    my $n = elems(@items);
+    if $n == 0 {
+        return Nil;
+    }
+    return @items[$n - 1];
+}
+
+sub stack_size($st) {
+    return elems($st{"items"});
+}
+
+sub is_balanced_delimiters($expr) {
+    my $st = stack_new();
+    my %match_open = { ")" => "(", "]" => "[", "}" => "{" };
+    my $len = chars($expr);
+    for 0 ..^ $len -> $i {
+        my $ch = substr($expr, $i, 1);
+        if $ch eq "(" || $ch eq "[" || $ch eq "{" {
+            stack_push($st, $ch);
+        } elsif exists(%match_open, $ch) {
+            my $top = stack_pop($st);
+            if !defined($top) || $top ne %match_open{$ch} {
+                return False;
+            }
+        }
+    }
+    return stack_size($st) == 0;
+}
+
+ASSERT is_balanced_delimiters("{[()()]()}"), "nested brackets balanced";
+ASSERT is_balanced_delimiters(""), "empty string balanced";
+ASSERT !is_balanced_delimiters("{[(])}"), "crossed brackets unbalanced";
+ASSERT !is_balanced_delimiters("((("), "unclosed brackets unbalanced";
+ASSERT !is_balanced_delimiters("())"), "extra closing bracket unbalanced";
+say '[4] LIFO Stack: balanced("{[()()]()}")=' ~ is_balanced_delimiters("{[()()]()}") ~ ', balanced("{[(])}")=' ~ is_balanced_delimiters("{[(])}");
+
+# ==============================================================================
+# 5. FIFO Queue (O(1) Amortized Head-Cursor Compaction)
+# ==============================================================================
+
+sub queue_new() {
+    return { "buf" => [], "head" => 0 };
+}
+
+sub queue_size($q) {
+    return elems($q{"buf"}) - $q{"head"};
+}
+
+sub queue_enqueue($q, $val) {
+    my @buf = $q{"buf"};
+    push(@buf, $val);
+}
+
+sub queue_peek($q) {
+    if queue_size($q) == 0 {
+        return Nil;
+    }
+    my @buf = $q{"buf"};
+    return @buf[$q{"head"}];
+}
+
+sub queue_dequeue($q) {
+    if queue_size($q) == 0 {
+        return Nil;
+    }
+    my @buf = $q{"buf"};
+    my $h   = $q{"head"};
+    my $val = @buf[$h];
+    $h = $h + 1;
+    # Periodically compact dead prefix in O(1) amortized work
+    if $h > 32 && $h * 2 >= elems(@buf) {
+        splice(@buf, 0, $h);
+        $h = 0;
+    }
+    $q{"head"} = $h;
+    return $val;
+}
+
+my $q = queue_new();
+for 1 .. 100 -> $x {
+    queue_enqueue($q, $x);
+}
+my $q_sum = 0;
+for 1 .. 50 -> $i {
+    my $v = queue_dequeue($q);
+    ASSERT $v == $i, "FIFO order check on first half";
+    $q_sum = $q_sum + $v;
+}
+for 101 .. 120 -> $x {
+    queue_enqueue($q, $x);
+}
+ASSERT queue_size($q) == 70, "Queue size after mixed enqueue/dequeue + compaction is 70";
+ASSERT queue_peek($q) == 51, "Queue peek is 51";
+while queue_size($q) > 0 {
+    $q_sum = $q_sum + queue_dequeue($q);
+}
+ASSERT $q_sum == (120 * 121) div 2, "Sum of 1..120 dequeued in exact FIFO sequence";
+say "[5] FIFO Queue: verified 120 enqueues/dequeues with compaction (sum=" ~ $q_sum ~ ")";
+
+# ==============================================================================
+# 6. Double-Ended Deque (Power-of-Two Circular Ring Buffer)
+# ==============================================================================
+
+sub deque_alloc_buf($cap) {
+    my @buf = [];
+    for 0 ..^ $cap -> $i {
+        push(@buf, Nil);
+    }
+    return @buf;
+}
+
+sub deque_new($initial_cap = 8) {
+    my $cap = 1;
+    while $cap < $initial_cap {
+        $cap = $cap +< 1;
+    }
+    return {
+        "buf"  => deque_alloc_buf($cap),
+        "cap"  => $cap,
+        "head" => 0,
+        "size" => 0
+    };
+}
+
+sub deque_grow($dq) {
+    my $old_cap = $dq{"cap"};
+    my $new_cap = $old_cap +< 1;
+    my @old_buf = $dq{"buf"};
+    my @new_buf = deque_alloc_buf($new_cap);
+    my $mask    = $old_cap - 1;
+    my $head    = $dq{"head"};
+    my $sz      = $dq{"size"};
+    for 0 ..^ $sz -> $i {
+        @new_buf[$i] = @old_buf[($head + $i) +& $mask];
+    }
+    $dq{"buf"}  = @new_buf;
+    $dq{"cap"}  = $new_cap;
+    $dq{"head"} = 0;
+}
+
+sub deque_push_back($dq, $val) {
+    if $dq{"size"} == $dq{"cap"} {
+        deque_grow($dq);
+    }
+    my $mask = $dq{"cap"} - 1;
+    my $idx  = ($dq{"head"} + $dq{"size"}) +& $mask;
+    my @buf  = $dq{"buf"};
+    @buf[$idx] = $val;
+    $dq{"size"} = $dq{"size"} + 1;
+}
+
+sub deque_push_front($dq, $val) {
+    if $dq{"size"} == $dq{"cap"} {
+        deque_grow($dq);
+    }
+    my $mask = $dq{"cap"} - 1;
+    my $head = ($dq{"head"} - 1 + $dq{"cap"}) +& $mask;
+    my @buf  = $dq{"buf"};
+    @buf[$head] = $val;
+    $dq{"head"} = $head;
+    $dq{"size"} = $dq{"size"} + 1;
+}
+
+sub deque_pop_front($dq) {
+    if $dq{"size"} == 0 {
+        return Nil;
+    }
+    my $mask = $dq{"cap"} - 1;
+    my $head = $dq{"head"};
+    my @buf  = $dq{"buf"};
+    my $val  = @buf[$head];
+    @buf[$head] = Nil;
+    $dq{"head"} = ($head + 1) +& $mask;
+    $dq{"size"} = $dq{"size"} - 1;
+    return $val;
+}
+
+sub deque_pop_back($dq) {
+    if $dq{"size"} == 0 {
+        return Nil;
+    }
+    my $mask = $dq{"cap"} - 1;
+    my $idx  = ($dq{"head"} + $dq{"size"} - 1) +& $mask;
+    my @buf  = $dq{"buf"};
+    my $val  = @buf[$idx];
+    @buf[$idx] = Nil;
+    $dq{"size"} = $dq{"size"} - 1;
+    return $val;
+}
+
+sub deque_peek_front($dq) {
+    if $dq{"size"} == 0 {
+        return Nil;
+    }
+    my @buf = $dq{"buf"};
+    return @buf[$dq{"head"}];
+}
+
+sub deque_peek_back($dq) {
+    if $dq{"size"} == 0 {
+        return Nil;
+    }
+    my $mask = $dq{"cap"} - 1;
+    my @buf  = $dq{"buf"};
+    return @buf[($dq{"head"} + $dq{"size"} - 1) +& $mask];
+}
+
+# Classic O(n) Monotonic Deque application: Sliding Window Maximum
+sub sliding_window_max(@nums, $k) {
+    my @res = [];
+    my $dq  = deque_new(8);
+    my $n   = elems(@nums);
+    for 0 ..^ $n -> $i {
+        while $dq{"size"} > 0 && deque_peek_front($dq) <= $i - $k {
+            deque_pop_front($dq);
+        }
+        while $dq{"size"} > 0 && @nums[deque_peek_back($dq)] <= @nums[$i] {
+            deque_pop_back($dq);
+        }
+        deque_push_back($dq, $i);
+        if $i >= $k - 1 {
+            push(@res, @nums[deque_peek_front($dq)]);
+        }
+    }
+    return @res;
+}
+
+my $dq = deque_new(4);
+for 1 .. 10 -> $i {
+    if $i %% 2 {
+        deque_push_front($dq, $i);
+    } else {
+        deque_push_back($dq, $i);
+    }
+}
+ASSERT $dq{"size"} == 10 && $dq{"cap"} == 16, "Deque ring buffer grew from 4 -> 16";
+ASSERT deque_pop_front($dq) == 10, "Deque front after alternating pushes is 10";
+ASSERT deque_pop_back($dq) == 9, "Deque back after alternating pushes is 9";
+
+my @win_max = sliding_window_max([1, 3, -1, -3, 5, 3, 6, 7], 3);
+ASSERT arrays_eq(@win_max, [3, 3, 5, 5, 6, 7]), "Monotonic deque sliding window max [3, 3, 5, 5, 6, 7]";
+say "[6] Ring-Buffer Deque: sliding_window_max([1,3,-1,-3,5,3,6,7], k=3) = " ~ fmt_list(@win_max);
+
+say "All Chapter 02 assertions passed!";

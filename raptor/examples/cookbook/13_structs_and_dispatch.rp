@@ -1,0 +1,75 @@
+# Perl Cookbook - Chapter 13: Structs, Closures, and Polymorphic Dispatch (Procedural Adaptation)
+# Raptor omits OOP `class`/`bless` by design; Chapter 13 recipes are expressed cleanly via:
+# 1. Native C-ABI `struct` / `union` types
+# 2. Encapsulated closure-bundle constructors (lexical private state)
+# 3. `multi sub` predicate/tag polymorphism & `infix:<+>` operator overloading
+
+say "=== Chapter 13: Structs, Closures, and Polymorphic Dispatch ===";
+
+# 13.1 & 13.3 Native C-ABI Structs with Zero-Overhead Typed Fields
+struct Vec2 {
+    num64 $x;
+    num64 $y;
+}
+my $p = Vec2.new();
+$p.x = 3.0;
+$p.y = 4.0;
+my $mag = sqrt($p.x * $p.x + $p.y * $p.y);
+ASSERT $mag == 5.0, "13.1 native struct Vec2";
+say "13.1 Vec2({$p.x}, {$p.y}) magnitude = $mag";
+
+# 13.4 & 13.11 Encapsulated State via Closure Bundles (Private Lexical Data)
+sub new_bank_account($owner, $initial = 0) {
+    my $balance = $initial;
+    my @history = ["opened:$initial"];
+    return {
+        "owner"    => sub () { return $owner; },
+        "balance"  => sub () { return $balance; },
+        "deposit"  => sub ($amt) {
+            die("invalid deposit") if $amt <= 0;
+            $balance += $amt;
+            push(@history, "+$amt");
+            return $balance;
+        },
+        "withdraw" => sub ($amt) {
+            die("insufficient funds") if $amt > $balance;
+            $balance -= $amt;
+            push(@history, "-$amt");
+            return $balance;
+        },
+        "ledger"   => sub () { return join(", ", @history); }
+    };
+}
+
+my $acct = new_bank_account("Alice", 100);
+$acct<deposit>(50);
+$acct<withdraw>(30);
+ASSERT $acct<balance>() == 120 && $acct<owner>() eq "Alice", "13.4 encapsulated account closure";
+say "13.4 Account {$acct<owner>()}: balance={$acct<balance>()} ledger=[{$acct<ledger>()}]";
+
+# 13.7–13.9 Polymorphic Dispatch via `multi sub` + `where` Clauses (Replaces Inheritance)
+multi sub area(Hash $s where { $_<kind> eq "circle" }) {
+    return 3.141592653589793 * $s<r> * $s<r>;
+}
+multi sub area(Hash $s where { $_<kind> eq "rect" }) {
+    return $s<w> * $s<h>;
+}
+
+my $c_shape = { "kind" => "circle", "r" => 2.0 };
+my $r_shape = { "kind" => "rect",   "w" => 6.0, "h" => 7.0 };
+ASSERT area($r_shape) == 42.0 && abs(area($c_shape) - 12.5663706) < 1e-5, "13.8 polymorphic multi sub";
+
+# 13.14 Overloading Operators (`sub infix:<...>`)
+sub vec_make($x, $y) { return { "x" => $x, "y" => $y }; }
+sub vec_add($a, $b)  { return { "x" => $a<x> + $b<x>, "y" => $a<y> + $b<y> }; }
+my $v3 = vec_add(vec_make(2, 5), vec_make(8, -1));
+ASSERT $v3<x> == 10 && $v3<y> == 4, "13.14 vector operation";
+
+# 13.15 Creating Magic / Bounded Variables with `subset` + `where`
+subset Percentage where { $_ >= 0 && $_ <= 100 };
+my Percentage $cpu_load = 75;
+ASSERT $cpu_load == 75, "13.15 bounded subset variable";
+my $invalid_pct = try { $cpu_load = 150 };
+ASSERT !defined($invalid_pct), "13.15 subset rejects out-of-range assignment";
+
+say "Chapter 13: ALL RECIPES PASSED";

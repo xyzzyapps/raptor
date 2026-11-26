@@ -92,18 +92,40 @@ func (in *Interp) registerSocketBuiltins() {
 		return HashValue(res), nil
 	}
 
-	// tcp_connect(host, port, [timeout_ms]) -> socket handle
-	in.Builtins["tcp_connect"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 2 {
-			return nil, fmt.Errorf("tcp_connect requires host and port arguments")
+	extractSockKey := func(v *Value) string {
+		if v == nil {
+			return ""
 		}
-		host := args[0].String()
-		port := args[1].String()
-		addr := net.JoinHostPort(host, port)
+		if v.Type == ValHash && v.HashVal != nil {
+			if s, ok := v.HashVal["socket"]; ok && s != nil {
+				return s.String()
+			}
+			if h, ok := v.HashVal["handle"]; ok && h != nil {
+				return h.String()
+			}
+		}
+		return v.String()
+	}
+
+	// tcp_connect(host, port, [timeout_ms]) or tcp_connect("host:port", [timeout_ms]) -> socket handle
+	in.Builtins["tcp_connect"] = func(in *Interp, args []*Value) (*Value, error) {
+		if len(args) < 1 {
+			return nil, fmt.Errorf("tcp_connect requires host:port or host and port arguments")
+		}
+		var addr string
+		timeoutArgIdx := 2
+		if len(args) == 1 || (len(args) >= 2 && strings.Contains(args[0].String(), ":")) {
+			addr = args[0].String()
+			timeoutArgIdx = 1
+		} else {
+			host := args[0].String()
+			port := args[1].String()
+			addr = net.JoinHostPort(host, port)
+		}
 
 		timeout := 10 * time.Second
-		if len(args) >= 3 && args[2].Type != ValNil {
-			ms := in.toInt(args[2])
+		if len(args) > timeoutArgIdx && args[timeoutArgIdx].Type != ValNil {
+			ms := in.toInt(args[timeoutArgIdx])
 			if ms > 0 {
 				timeout = time.Duration(ms) * time.Millisecond
 			}
@@ -128,7 +150,7 @@ func (in *Interp) registerSocketBuiltins() {
 		if len(args) < 2 {
 			return nil, fmt.Errorf("tcp_send requires socket handle and data arguments")
 		}
-		key := args[0].String()
+		key := extractSockKey(args[0])
 
 		globalSockets.mu.Lock()
 		conn, ok := globalSockets.tcpConn[key]
@@ -151,7 +173,7 @@ func (in *Interp) registerSocketBuiltins() {
 		if len(args) < 1 {
 			return nil, fmt.Errorf("tcp_recv requires socket handle argument")
 		}
-		key := args[0].String()
+		key := extractSockKey(args[0])
 
 		globalSockets.mu.Lock()
 		conn, ok := globalSockets.tcpConn[key]
@@ -188,7 +210,7 @@ func (in *Interp) registerSocketBuiltins() {
 		if len(args) < 1 {
 			return BoolValue(false), nil
 		}
-		key := args[0].String()
+		key := extractSockKey(args[0])
 
 		globalSockets.mu.Lock()
 		if listener, ok := globalSockets.tcpListener[key]; ok {
@@ -203,10 +225,19 @@ func (in *Interp) registerSocketBuiltins() {
 			_ = conn.Close()
 			return BoolValue(true), nil
 		}
+		if uconn, ok := globalSockets.udpConn[key]; ok {
+			delete(globalSockets.udpConn, key)
+			globalSockets.mu.Unlock()
+			_ = uconn.Close()
+			return BoolValue(true), nil
+		}
 		globalSockets.mu.Unlock()
 
 		return BoolValue(false), nil
 	}
+	in.Builtins["socket_send"] = in.Builtins["tcp_send"]
+	in.Builtins["socket_recv"] = in.Builtins["tcp_recv"]
+	in.Builtins["socket_close"] = in.Builtins["tcp_close"]
 
 	// udp_bind(port_or_addr) -> UDP socket handle
 	in.Builtins["udp_bind"] = func(in *Interp, args []*Value) (*Value, error) {
@@ -237,15 +268,28 @@ func (in *Interp) registerSocketBuiltins() {
 		return StringValue(key), nil
 	}
 
-	// udp_sendto(sock_handle, host, port, data) -> bytes sent
+	// udp_sendto(sock_handle, host, port, data) or udp_sendto(sock_handle, data, "host:port") -> bytes sent
 	in.Builtins["udp_sendto"] = func(in *Interp, args []*Value) (*Value, error) {
-		if len(args) < 4 {
-			return nil, fmt.Errorf("udp_sendto requires sock_handle, host, port, data arguments")
+		if len(args) < 3 {
+			return nil, fmt.Errorf("udp_sendto requires (sock, host, port, data) or (sock, data, host:port)")
 		}
-		key := args[0].String()
-		host := args[1].String()
-		port := int(in.toInt(args[2]))
-		data := args[3].String()
+		key := extractSockKey(args[0])
+		var host, data string
+		var port int
+		if len(args) == 3 {
+			data = args[1].String()
+			hp := args[2].String()
+			h, pStr, err := net.SplitHostPort(hp)
+			if err != nil {
+				return nil, fmt.Errorf("udp_sendto invalid host:port %q: %w", hp, err)
+			}
+			host = h
+			port, _ = strconv.Atoi(pStr)
+		} else {
+			host = args[1].String()
+			port = int(in.toInt(args[2]))
+			data = args[3].String()
+		}
 
 		globalSockets.mu.Lock()
 		conn, ok := globalSockets.udpConn[key]

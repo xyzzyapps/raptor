@@ -1,0 +1,160 @@
+# Mastering Algorithms with Perl - Chapter 11: Number Theory
+# Covers GCD/LCM, Extended Euclidean Algorithm, modular inverse, modular exponentiation,
+# Sieve of Eratosthenes, Miller-Rabin primality test, Chinese Remainder Theorem, and Euler's totient.
+
+say "=== Chapter 11: Number Theory ===";
+
+# 1. Euclidean GCD, LCM & Extended Euclidean Algorithm (ax + by = gcd(a, b))
+sub gcd($a, $b) {
+    my $x = abs($a);
+    my $y = abs($b);
+    while $y != 0 {
+        my $r = $x % $y;
+        $x = $y;
+        $y = $r;
+    }
+    return $x;
+}
+
+sub lcm($a, $b) {
+    return 0 if $a == 0 || $b == 0;
+    return abs(($a div gcd($a, $b)) * $b);
+}
+
+sub egcd($a, $b) {
+    if $b == 0 {
+        return [$a, 1, 0];
+    }
+    my ($g, $x1, $y1) = egcd($b, $a % $b);
+    return [$g, $y1, $x1 - ($a div $b) * $y1];
+}
+
+sub mod_inv($a, $m) {
+    my ($g, $x, $y) = egcd($a % $m, $m);
+    return Nil if $g != 1;
+    return (($x % $m) + $m) % $m;
+}
+
+ASSERT gcd(252, 105) == 21 && lcm(12, 18) == 36, "GCD and LCM";
+my ($g, $bx, $by) = egcd(240, 46);
+ASSERT $g == 2 && (240 * $bx + 46 * $by) == 2, "Bezout identity 240x + 46y = 2";
+ASSERT mod_inv(3, 11) == 4 && mod_inv(17, 3120) == 2753, "Modular multiplicative inverse";
+say "[1] GCD(252,105)=21, Bezout 240*($bx) + 46*($by) = $g, 17^-1 mod 3120 = {mod_inv(17, 3120)}";
+
+# 2. Binary Modular Exponentiation — O(log exp)
+sub mod_pow($base, $exp, $mod) {
+    my $res = 1 % $mod;
+    my $b = (($base % $mod) + $mod) % $mod;
+    my $e = $exp;
+    while $e > 0 {
+        if ($e +& 1) == 1 {
+            $res = ($res * $b) % $mod;
+        }
+        $b = ($b * $b) % $mod;
+        $e = $e +> 1;
+    }
+    return $res;
+}
+
+ASSERT mod_pow(2, 10, 1000) == 24 && mod_pow(5, 100000, 1000000007) == 754573817, "Fast binary mod_pow";
+say "[2] mod_pow(2, 10, 1000) = {mod_pow(2, 10, 1000)}";
+
+# 3. Sieve of Eratosthenes — O(n log log n)
+sub sieve_primes($limit) {
+    my @is_p;
+    for 0 .. $limit -> $i { push(@is_p, $i >= 2); }
+    my $p = 2;
+    while ($p * $p) <= $limit {
+        if @is_p[$p] {
+            my $mult = $p * $p;
+            while $mult <= $limit {
+                @is_p[$mult] = False;
+                $mult += $p;
+            }
+        }
+        $p++;
+    }
+    my @primes;
+    for 2 .. $limit -> $i {
+        push(@primes, $i) if @is_p[$i];
+    }
+    return @primes;
+}
+
+my @p100  = sieve_primes(100);
+my @p1000 = sieve_primes(1000);
+ASSERT elems(@p100) == 25 && elems(@p1000) == 168 && @p1000[167] == 997, "Sieve counts pi(100)=25, pi(1000)=168";
+say "[3] Sieve of Eratosthenes: pi(100)={elems(@p100)}, pi(1000)={elems(@p1000)}";
+
+# 4. Deterministic Miller-Rabin Primality Test
+sub is_prime_mr($n) {
+    return False if $n < 2;
+    return True  if $n == 2 || $n == 3;
+    return False if ($n % 2) == 0;
+
+    my $d = $n - 1;
+    my $s = 0;
+    while ($d % 2) == 0 {
+        $d = $d div 2;
+        $s++;
+    }
+
+    for [2, 3, 5, 7, 11, 13, 17, 19, 23] -> $a {
+        next if $a >= $n;
+        my $x = mod_pow($a, $d, $n);
+        next if $x == 1 || $x == ($n - 1);
+        my $composite = True;
+        for 1 ..^ $s -> $r {
+            $x = ($x * $x) % $n;
+            if $x == ($n - 1) {
+                $composite = False;
+                last;
+            }
+        }
+        return False if $composite;
+    }
+    return True;
+}
+
+ASSERT is_prime_mr(2) && is_prime_mr(7919) && is_prime_mr(104729), "Miller-Rabin accepts primes";
+ASSERT !is_prime_mr(561) && !is_prime_mr(1729), "Miller-Rabin rejects Carmichael pseudoprimes 561 & 1729";
+say "[4] Miller-Rabin: 104729->True, Carmichael 561->False, Taxicab 1729->False";
+
+# 5. Chinese Remainder Theorem (CRT) & Euler's Totient phi(n)
+sub crt(@remainders, @moduli) {
+    my $prod = 1;
+    for @moduli -> $m { $prod = $prod * $m; }
+    my $sum = 0;
+    for 0 ..^ elems(@moduli) -> $i {
+        my $m = @moduli[$i];
+        my $p = $prod div $m;
+        my $inv = mod_inv($p, $m);
+        $sum = ($sum + @remainders[$i] * $inv * $p) % $prod;
+    }
+    return (($sum % $prod) + $prod) % $prod;
+}
+
+sub euler_totient($num) {
+    my $n = $num;
+    my $res = $n;
+    my $p = 2;
+    while ($p * $p) <= $n {
+        if ($n % $p) == 0 {
+            while ($n % $p) == 0 { $n = $n div $p; }
+            $res = $res - ($res div $p);
+        }
+        $p++;
+    }
+    if $n > 1 {
+        $res = $res - ($res div $n);
+    }
+    return $res;
+}
+
+# Sunzi's classic problem: x = 2 (mod 3), x = 3 (mod 5), x = 2 (mod 7) -> x = 23
+my $x_crt = crt([2, 3, 2], [3, 5, 7]);
+ASSERT $x_crt == 23, "Sunzi CRT solution == 23";
+ASSERT euler_totient(36) == 12 && euler_totient(97) == 96, "Euler totient phi(36)=12, phi(97)=96";
+say "[5] CRT([2,3,2], [3,5,7]) = $x_crt, Euler phi(36) = {euler_totient(36)}";
+
+say "All Chapter 11 assertions passed!";

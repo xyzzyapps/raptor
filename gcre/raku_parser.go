@@ -148,13 +148,35 @@ var g = &grammar{
 			pegPlus(pegSeq(pegNot(pegLit("]")), pegAny())),
 			pegLit("]"),
 		)),
-		pegRule(42, "RuleTrait", pegSeq(
-			pegRef("_"),
-			pegLit("is"),
+		pegRule(42, "RuleTrait", pegChoice(
+			pegSeq(
+				pegRef("_"),
+				pegLit("is"),
+				pegNot(pegRef("NameCont")),
+				pegRef("_"),
+				pegRef("NameTok"),
+				pegOpt(pegRef("TraitArg")),
+			),
+			pegSeq(
+				pegRef("_"),
+				pegRef("RuleAdverb"),
+			),
+		)),
+		pegRule(43, "RuleAdverb", pegSeq(
+			pegLit(":"),
+			pegOpt(pegLit("!")),
+			pegRef("AdverbName"),
 			pegNot(pegRef("NameCont")),
-			pegRef("_"),
-			pegRef("NameTok"),
-			pegOpt(pegRef("TraitArg")),
+		)),
+		pegRule(43, "AdverbName", pegChoice(
+			pegLit("ignorecase"),
+			pegLit("ignoremark"),
+			pegLit("sigspace"),
+			pegLit("ratchet"),
+			pegLit("i"),
+			pegLit("m"),
+			pegLit("s"),
+			pegLit("r"),
 		)),
 		pegRule(44, "TraitArg", pegChoice(
 			pegSeq(pegLit("("), pegStar(pegSeq(pegNot(pegLit(")")), pegAny())), pegLit(")")),
@@ -171,8 +193,12 @@ var g = &grammar{
 		pegRule(48, "RxLTMAlt", pegSeq(
 			pegOpt(pegSeq(pegRef("_"), pegLit("|"), pegNot(pegLit("|")))),
 			pegRef("_"),
+			pegRef("RxConj"),
+			pegStar(pegSeq(pegRef("_"), pegLit("|"), pegNot(pegLit("|")), pegRef("_"), pegRef("RxConj"))),
+		)),
+		pegRule(49, "RxConj", pegSeq(
 			pegRef("RxSeq"),
-			pegStar(pegSeq(pegRef("_"), pegLit("|"), pegNot(pegLit("|")), pegRef("_"), pegRef("RxSeq"))),
+			pegStar(pegSeq(pegRef("_"), pegChoice(pegLit("&&"), pegLit("&")), pegRef("_"), pegRef("RxSeq"))),
 		)),
 		pegRule(50, "RxSeq", pegSeq(
 			pegRef("RxItem"),
@@ -230,6 +256,7 @@ var g = &grammar{
 		pegRule(68, "FrugalOpt", pegChoice(pegLit("?"), pegLit(""))),
 		pegRule(70, "CountRange", pegChoice(
 			pegSeq(pegRef("Digits"), pegRef("_"), pegLit(".."), pegRef("_"), pegRef("UpperBound")),
+			pegSeq(pegLit("^"), pegRef("Digits")),
 			pegRef("Digits"),
 		)),
 		pegRule(72, "UpperBound", pegChoice(pegLit("*"), pegRef("Digits"))),
@@ -247,8 +274,13 @@ var g = &grammar{
 		)),
 		pegRule(82, "RxPrimary", pegChoice(
 			pegRef("ActionStub"),
+			pegRef("RxCapSpan"),
 			pegRef("RxGroup"),
 			pegRef("RxCapture"),
+			pegRef("NamedBackref"),
+			pegRef("PosBackref"),
+			pegRef("RxAdverb"),
+			pegRef("RxCut"),
 			pegRef("RxAngle"),
 			pegRef("RxSq"),
 			pegRef("RxDq"),
@@ -260,7 +292,7 @@ var g = &grammar{
 			pegLit("«"),
 			pegLit("»"),
 			pegLit("^"),
-			pegLit("$"),
+			pegSeq(pegLit("$"), pegNot(pegCC("[0-9<]", []rune{'<'}, []rune{'0', '9'}))),
 			pegLit("."),
 			pegLit("#"),
 			pegLit(";"),
@@ -271,6 +303,13 @@ var g = &grammar{
 			pegLit("*"),
 			pegRef("_"),
 			pegLit("}"),
+		)),
+		pegRule(102, "RxCapSpan", pegSeq(
+			pegLit("<("),
+			pegRef("_"),
+			pegOpt(pegRef("RxAlt")),
+			pegRef("_"),
+			pegLit(")>"),
 		)),
 		pegRule(103, "RxGroup", pegSeq(
 			pegLit("["),
@@ -286,11 +325,29 @@ var g = &grammar{
 			pegRef("_"),
 			pegLit(")"),
 		)),
+		pegRule(106, "NamedBackref", pegSeq(
+			pegLit("$<"),
+			pegRef("NameTok"),
+			pegLit(">"),
+			pegNot(pegSeq(pegRef("_"), pegLit("="))),
+		)),
+		pegRule(106, "PosBackref", pegSeq(
+			pegLit("$"),
+			pegRef("Digits"),
+		)),
+		pegRule(106, "RxAdverb", pegRef("RuleAdverb")),
+		pegRule(106, "RxCut", pegChoice(
+			pegLit(":::"),
+			pegLit("::"),
+			pegSeq(pegLit(":"), pegNot(pegRef("NameCont")), pegNot(pegLit("!"))),
+		)),
 		pegRule(107, "RxAngle", pegChoice(
 			pegRef("LookaheadPos"),
 			pegRef("LookaheadNeg"),
 			pegRef("LookbehindPos"),
 			pegRef("LookbehindNeg"),
+			pegRef("WordBoundPos"),
+			pegRef("WordBoundNeg"),
 			pegRef("StdAngle"),
 		)),
 		pegRule(113, "LookaheadPos", pegSeq(
@@ -333,6 +390,8 @@ var g = &grammar{
 			pegRef("_"),
 			pegLit(">"),
 		)),
+		pegRule(120, "WordBoundPos", pegLit("<|w>")),
+		pegRule(120, "WordBoundNeg", pegLit("<!|w>")),
 		pegRule(121, "StdAngle", pegSeq(
 			pegLit("<"),
 			pegRef("AnglePrefix"),
@@ -348,13 +407,16 @@ var g = &grammar{
 		pegRule(125, "AngleBody", pegChoice(
 			pegRef("CharClassExpr"),
 			pegRef("SubruleAlias"),
+			pegLit("~~"),
+			pegRef("RxSq"),
+			pegRef("RxDq"),
 			pegRef("HostName"),
 			pegRef("NameTok"),
 		)),
 		pegRule(127, "SubruleAlias", pegSeq(
 			pegRef("NameTok"),
 			pegLit("="),
-			pegChoice(pegRef("HostName"), pegRef("NameTok")),
+			pegChoice(pegLit("~~"), pegRef("HostName"), pegRef("NameTok")),
 		)),
 		pegRule(130, "HostName", pegSeq(
 			pegLit("HOST_"),

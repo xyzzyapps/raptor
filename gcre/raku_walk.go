@@ -15,12 +15,17 @@ type TraitOpRef struct {
 
 // RuleTraits holds declarative NQP/Raku traits attached to a rule/token/proto.
 type RuleTraits struct {
-	IsOptable bool
-	IsLTM     bool
-	Tighter   *TraitOpRef
-	Looser    *TraitOpRef
-	Equiv     *TraitOpRef
-	Assoc     string
+	IsOptable   bool
+	IsLTM       bool
+	IgnoreCase  bool
+	IgnoreMark  bool
+	HasSigspace bool
+	Sigspace    bool
+	Ratchet     bool
+	Tighter     *TraitOpRef
+	Looser      *TraitOpRef
+	Equiv       *TraitOpRef
+	Assoc       string
 }
 
 func walkGrammarFile(v any) ([]*DynamicGrammarDef, error) {
@@ -101,9 +106,13 @@ func walkProtoDecl(seq []any) (*DynamicProto, error) {
 	kind := joinText(seq[3])
 	name := joinText(seq[5])
 	traits := walkTraits(seq[6])
+	isToken := kind != "rule"
+	if traits.HasSigspace {
+		isToken = !traits.Sigspace
+	}
 	return &DynamicProto{
 		Name:    name,
-		IsToken: kind != "rule",
+		IsToken: isToken,
 		Traits:  traits,
 	}, nil
 }
@@ -116,6 +125,10 @@ func walkRuleDecl(seq []any) (*DynamicRule, error) {
 	kind := joinText(seq[1])
 	fullName, baseName, symVal, hasSym := walkRuleName(seq[3])
 	traits := walkTraits(seq[4])
+	isToken := kind != "rule"
+	if traits.HasSigspace {
+		isToken = !traits.Sigspace
+	}
 
 	var pat rx = &rxNoop{}
 	if seq[8] != nil {
@@ -134,7 +147,7 @@ func walkRuleDecl(seq []any) (*DynamicRule, error) {
 		Sym:      symVal,
 		HasSym:   hasSym,
 		IsMulti:  isMulti,
-		IsToken:  kind != "rule",
+		IsToken:  isToken,
 		Traits:   traits,
 		Pat:      pat,
 	}, nil
@@ -159,10 +172,34 @@ func walkRuleName(v any) (fullName, baseName, symVal string, hasSym bool) {
 	return baseName, baseName, "", false
 }
 
+func applyAdverbToTraits(tr *RuleTraits, neg bool, name string) {
+	switch name {
+	case "i", "ignorecase":
+		tr.IgnoreCase = !neg
+	case "m", "ignoremark":
+		tr.IgnoreMark = !neg
+	case "s", "sigspace":
+		tr.HasSigspace = true
+		tr.Sigspace = !neg
+	case "r", "ratchet":
+		tr.Ratchet = !neg
+	}
+}
+
 func walkTraits(v any) RuleTraits {
 	var tr RuleTraits
 	for _, item := range asList(v) {
 		rt := asList(item)
+		if len(rt) == 2 {
+			// _ RuleAdverb -> [":", opt"!", AdverbName, nil]
+			adv := asList(rt[1])
+			if len(adv) >= 3 && joinText(adv[0]) == ":" {
+				neg := joinText(adv[1]) == "!"
+				name := joinText(adv[2])
+				applyAdverbToTraits(&tr, neg, name)
+			}
+			continue
+		}
 		if len(rt) < 6 {
 			continue
 		}
@@ -244,6 +281,45 @@ func trimSymDelims(s string) string {
 	return s
 }
 
+func propagateLeadingAdverbs(alts []rx) {
+	if len(alts) <= 1 {
+		return
+	}
+	var leading []*rxAdverb
+	switch first := alts[0].(type) {
+	case *rxAdverb:
+		leading = []*rxAdverb{first}
+	case *rxSeq:
+		for _, e := range first.elts {
+			if adv, ok := e.(*rxAdverb); ok {
+				leading = append(leading, adv)
+			} else {
+				break
+			}
+		}
+	}
+	if len(leading) == 0 {
+		return
+	}
+	prefix := make([]rx, len(leading))
+	for i, a := range leading {
+		prefix[i] = a
+	}
+	for i := 1; i < len(alts); i++ {
+		if seq, ok := alts[i].(*rxSeq); ok {
+			merged := make([]rx, 0, len(prefix)+len(seq.elts))
+			merged = append(merged, prefix...)
+			merged = append(merged, seq.elts...)
+			alts[i] = &rxSeq{elts: merged}
+		} else {
+			merged := make([]rx, 0, len(prefix)+1)
+			merged = append(merged, prefix...)
+			merged = append(merged, alts[i])
+			alts[i] = &rxSeq{elts: merged}
+		}
+	}
+}
+
 func walkRxAlt(v any) (rx, error) {
 	seq := asList(v)
 	// (_ "||")? _ RxLTMAlt (_ "||" _ RxLTMAlt)*
@@ -269,16 +345,17 @@ func walkRxAlt(v any) (rx, error) {
 	if len(alts) == 1 {
 		return alts[0], nil
 	}
+	propagateLeadingAdverbs(alts)
 	return &rxAlt{alts: alts, sequential: true}, nil
 }
 
 func walkRxLTMAlt(v any) (rx, error) {
 	seq := asList(v)
-	// (_ "|" !"|")? _ RxSeq (_ "|" !"|" _ RxSeq)*
+	// (_ "|" !"|")? _ RxConj (_ "|" !"|" _ RxConj)*
 	if len(seq) < 4 {
-		return walkRxSeq(v)
+		return walkRxConj(v)
 	}
-	head, err := walkRxSeq(seq[2])
+	head, err := walkRxConj(seq[2])
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +365,7 @@ func walkRxLTMAlt(v any) (rx, error) {
 		if len(pair) < 5 {
 			continue
 		}
-		s, err := walkRxSeq(pair[4])
+		s, err := walkRxConj(pair[4])
 		if err != nil {
 			return nil, err
 		}
@@ -297,6 +374,7 @@ func walkRxLTMAlt(v any) (rx, error) {
 	if len(alts) == 1 {
 		return alts[0], nil
 	}
+	propagateLeadingAdverbs(alts)
 	allDecl := true
 	for _, a := range alts {
 		if !isPureDeclarative(a) {
@@ -308,6 +386,34 @@ func walkRxLTMAlt(v any) (rx, error) {
 		return &rxLTMAlt{alts: alts}, nil
 	}
 	return &rxAlt{alts: alts, sequential: false}, nil
+}
+
+func walkRxConj(v any) (rx, error) {
+	seq := asList(v)
+	// RxSeq (_ ("&&" / "&") _ RxSeq)*
+	if len(seq) < 2 {
+		return walkRxSeq(v)
+	}
+	head, err := walkRxSeq(seq[0])
+	if err != nil {
+		return nil, err
+	}
+	elts := []rx{head}
+	for _, t := range asList(seq[1]) {
+		pair := asList(t)
+		if len(pair) < 4 {
+			continue
+		}
+		s, err := walkRxSeq(pair[3])
+		if err != nil {
+			return nil, err
+		}
+		elts = append(elts, s)
+	}
+	if len(elts) == 1 {
+		return elts[0], nil
+	}
+	return &rxConj{elts: elts}, nil
 }
 
 func walkRxSeq(v any) (rx, error) {
@@ -522,6 +628,16 @@ func walkCountRange(v any) (int, int, error) {
 		}
 		return lo, hi, nil
 	}
+	if len(cr) == 2 && joinText(cr[0]) == "^" {
+		hi, err := strconv.Atoi(strings.TrimSpace(joinText(cr[1])))
+		if err != nil {
+			return 0, 0, err
+		}
+		if hi <= 0 {
+			return 0, 0, nil
+		}
+		return 0, hi - 1, nil
+	}
 	n, err := strconv.Atoi(strings.TrimSpace(joinText(v)))
 	if err != nil {
 		return 0, 0, err
@@ -543,6 +659,18 @@ func walkRxPrimary(v any) (rx, error) {
 		// ActionStub: "{", _, "*", _, "}"
 		if h0 == "{" && len(x) == 5 {
 			return &rxNoop{}, nil
+		}
+		// RxCapSpan: "<(", _, optAlt, _, ")>"
+		if h0 == "<(" && len(x) == 5 {
+			var inner rx = &rxNoop{}
+			if x[2] != nil {
+				var err error
+				inner, err = walkRxAlt(x[2])
+				if err != nil {
+					return nil, err
+				}
+			}
+			return &rxCapSpan{inner: inner}, nil
 		}
 		// RxGroup: "[", _, optAlt, _, "]"
 		if h0 == "[" && len(x) == 5 {
@@ -566,6 +694,33 @@ func walkRxPrimary(v any) (rx, error) {
 				}
 			}
 			return &rxCap{inner: inner}, nil
+		}
+		// NamedBackref: "$<", NameTok, ">", !(_ "=")
+		if h0 == "$<" && len(x) == 4 {
+			return &rxBackref{name: joinText(x[1]), index: -1}, nil
+		}
+		// PosBackref ("$", Digits) vs EOS ("$", ![0-9<])
+		if h0 == "$" && len(x) == 2 {
+			d := strings.TrimSpace(joinText(x[1]))
+			if d == "" {
+				return &rxAnchor{kind: "$"}, nil
+			}
+			idx, err := strconv.Atoi(d)
+			if err == nil {
+				return &rxBackref{index: idx}, nil
+			}
+		}
+		// RxAdverb (RuleAdverb): ":", opt"!", AdverbName, !NameCont
+		if h0 == ":" && len(x) == 4 {
+			neg := joinText(x[1]) == "!"
+			advName := joinText(x[2])
+			if advName != "" {
+				return &rxAdverb{kind: advName, neg: neg}, nil
+			}
+		}
+		// RxCut: ":" !NameCont !"!" -> len(x) == 3
+		if h0 == ":" && len(x) == 3 && joinText(x[1]) == "" && joinText(x[2]) == "" {
+			return &rxCut{level: 1}, nil
 		}
 		// Lookahead / Lookbehind: "<?" / "<!", _, "before" / "after", !NameCont, _, RxAlt, _, ">"
 		if (h0 == "<?" || h0 == "<!") && len(x) == 8 {
@@ -601,6 +756,9 @@ func walkRxPrimary(v any) (rx, error) {
 			if esc != "" && strings.ContainsRune("ntrsdwhvNTRSDWHV", rune(esc[0])) {
 				return &rxCharClass{esc: rune(esc[0])}, nil
 			}
+			if esc == "0" {
+				return &rxLit{s: "\x00"}, nil
+			}
 			if esc != "" {
 				return &rxLit{s: string(unescapeRune(esc))}, nil
 			}
@@ -617,7 +775,7 @@ func walkStdAngle(x []any) (rx, error) {
 	ab := asList(body)
 	bodyStr := joinText(body)
 
-	// 1. SubruleAlias: NameTok "=" (HostName / NameTok)
+	// 1. SubruleAlias: NameTok "=" ("~~" / HostName / NameTok)
 	if len(ab) == 3 && joinText(ab[1]) == "=" {
 		alias := joinText(ab[0])
 		target := joinText(ab[2])
@@ -625,6 +783,24 @@ func walkStdAngle(x []any) (rx, error) {
 			return &rxHost{name: strings.TrimPrefix(target, "HOST_"), alias: alias, capture: prefix != "."}, nil
 		}
 		return &rxSub{name: target, alias: alias, capture: prefix != "."}, nil
+	}
+
+	// 1b. Quoted literal inside angle brackets: <'hello'>, <"world">, <!'end'>, <?'start'>
+	if len(ab) >= 3 && (joinText(ab[0]) == "'" || joinText(ab[0]) == `"`) {
+		var lit string
+		if joinText(ab[0]) == "'" {
+			lit = unescapeSq(joinText(ab[1]))
+		} else {
+			lit = unescapeDq(joinText(ab[1]))
+		}
+		inner := &rxLit{s: lit}
+		if prefix == "?" {
+			return &rxLookahead{inner: inner, neg: false}, nil
+		}
+		if prefix == "!" {
+			return &rxLookahead{inner: inner, neg: true}, nil
+		}
+		return inner, nil
 	}
 
 	// 2. HostName: "HOST_" NameTok
@@ -648,7 +824,7 @@ func walkStdAngle(x []any) (rx, error) {
 		return &rxCharClass{terms: terms, outerNeg: prefix == "!"}, nil
 	}
 
-	// 4. Plain subrule / assertion NameTok
+	// 4. Plain subrule / assertion NameTok or "~~"
 	if bodyStr == "" {
 		return nil, fmt.Errorf("raku: empty <subrule>")
 	}
@@ -780,6 +956,16 @@ func walkRxPrimaryText(s string) (rx, error) {
 		return &rxAnchor{kind: "<<"}, nil
 	case ">>", "»":
 		return &rxAnchor{kind: ">>"}, nil
+	case "<|w>":
+		return &rxAnchor{kind: "wb"}, nil
+	case "<!|w>":
+		return &rxAnchor{kind: "!wb"}, nil
+	case ":::":
+		return &rxCut{level: 3}, nil
+	case "::":
+		return &rxCut{level: 2}, nil
+	case ":":
+		return &rxCut{level: 1}, nil
 	case "#":
 		return &rxLit{s: "#"}, nil
 	case ";":

@@ -1,0 +1,60 @@
+# Perl Cookbook - Chapter 7: File Access (Ported to Raptor)
+# Covers open, readline / <$fh>, close, slurp, spurt, file test ops (-e, -f, -d, -s), atomic rename, copy.
+
+say "=== Chapter 7: File Access ===";
+
+my $tmp_base = (getenv("TEMP") || getenv("TMP") || ".") ~ "/raptor_cb07_" ~ pid();
+mkdir($tmp_base);
+ASSERT (-d $tmp_base), "7.0 temp directory created";
+
+# 7.1 Opening a File & Writing / Reading Line-by-Line
+my $f1 = "$tmp_base/notes.txt";
+my $wh = open($f1, "w");
+close($wh);
+spurt($f1, "first line\nsecond line\nthird line\n");
+ASSERT (-e $f1) && (-f $f1) && (-s $f1) > 10, "7.1 file exists and non-empty";
+
+my $rh = open($f1, "<");
+my @read_lines;
+# Standard <$rh> diamond readline loop
+while True {
+    my $ln = <$rh>;
+    last if !defined($ln);
+    push(@read_lines, chomp($ln));
+}
+close($rh);
+ASSERT elems(@read_lines) == 3 && @read_lines[1] eq "second line", "7.1 <$rh> diamond readline";
+say "7.1 Read {elems(@read_lines)} lines: {join(' | ', @read_lines)}";
+
+# 7.3 Appending to an Existing File (">>")
+my $ah = open($f1, ">>");
+close($ah);
+my $prev = slurp($f1);
+spurt($f1, $prev ~ "fourth line\n");
+ASSERT elems(lines(slurp($f1))) == 4, "7.3 append line";
+
+# 7.8 Modifying a File in Place via Atomic Temp-File + Rename
+my $tmp_swap = "$tmp_base/notes.txt.tmp";
+my @filtered;
+for lines(slurp($f1)) -> $ln {
+    push(@filtered, uc($ln)) unless contains($ln, "second");
+}
+spurt($tmp_swap, join("\n", @filtered) ~ "\n");
+unlink($f1);
+ASSERT rename($tmp_swap, $f1), "7.8 atomic rename";
+my @after = lines(slurp($f1));
+ASSERT elems(@after) == 3 && @after[0] eq "FIRST LINE" && @after[1] eq "THIRD LINE", "7.8 in-place filter";
+say "7.8 Atomic in-place update -> {join(', ', @after)}";
+
+# 7.9 Copying a File & Checking Permissions
+my $f2 = "$tmp_base/backup.txt";
+ASSERT copy($f1, $f2), "7.9 copy file";
+ASSERT (-r $f2) && (-w $f2) && slurp($f2) eq slurp($f1), "7.9 backup matches original";
+
+# Cleanup
+unlink($f1);
+unlink($f2);
+rmdir($tmp_base);
+ASSERT !(-e $tmp_base), "7.cleanup temp dir removed";
+
+say "Chapter 7: ALL RECIPES PASSED";

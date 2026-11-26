@@ -1,0 +1,60 @@
+# Perl Cookbook - Chapter 17: Sockets (Ported to Raptor)
+# Covers TCP client/server (`tcp_listen`, `tcp_accept`, `tcp_connect`) and UDP datagrams (`udp_bind`, `udp_sendto`, `udp_recvfrom`).
+
+say "=== Chapter 17: Sockets ===";
+
+# 17.1 & 17.2 Bidirectional TCP Client & Server over Loopback
+my $tcp_port = 0;
+my $listener = Nil;
+for 19710 .. 19730 -> $cand {
+    my $s = try { tcp_listen("127.0.0.1:$cand") };
+    if defined($s) {
+        $listener = $s;
+        $tcp_port = $cand;
+        last;
+    }
+}
+ASSERT defined($listener) && $tcp_port > 0, "17.2 bound loopback TCP listener";
+
+my $server_task = start {
+    my $conn = tcp_accept($listener);
+    my $req = trim(socket_recv($conn, 1024));
+    socket_send($conn, "ACK:" ~ uc($req) ~ "\n");
+    socket_close($conn);
+    return $req;
+};
+
+my $client = tcp_connect("127.0.0.1:$tcp_port");
+socket_send($client, "hello_raptor_tcp\n");
+my $reply = trim(socket_recv($client, 1024));
+socket_close($client);
+my $srv_saw = await($server_task);
+socket_close($listener);
+
+ASSERT $srv_saw eq "hello_raptor_tcp" && $reply eq "ACK:HELLO_RAPTOR_TCP", "17.2 TCP roundtrip";
+say "17.2 TCP loopback roundtrip on port $tcp_port -> '$reply'";
+
+# 17.4 & 17.5 Setting Up UDP Datagram Client & Server
+my $udp_srv = Nil;
+my $udp_port = 0;
+for 19740 .. 19760 -> $cand {
+    my $u = try { udp_bind("127.0.0.1:$cand") };
+    if defined($u) {
+        $udp_srv = $u;
+        $udp_port = $cand;
+        last;
+    }
+}
+ASSERT defined($udp_srv), "17.5 bound loopback UDP socket";
+
+my $udp_cli = udp_bind("127.0.0.1:0");
+udp_sendto($udp_cli, "ping_datagram", "127.0.0.1:$udp_port");
+my $pkt = udp_recvfrom($udp_srv, 512);
+socket_close($udp_cli);
+socket_close($udp_srv);
+
+my $payload = type($pkt) eq "Hash" ?? ($pkt<data> // $pkt<msg> // "$pkt") !! "$pkt";
+ASSERT contains($payload, "ping_datagram"), "17.5 UDP datagram received";
+say "17.5 UDP datagram received on port $udp_port: '$payload'";
+
+say "Chapter 17: ALL RECIPES PASSED";

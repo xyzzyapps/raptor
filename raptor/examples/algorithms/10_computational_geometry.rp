@@ -1,0 +1,152 @@
+# Mastering Algorithms with Perl - Chapter 10: Computational Geometry
+# Covers 2D vector cross/dot products, CCW orientation, line segment intersection,
+# Andrew's Monotone Chain Convex Hull, Shoelace polygon area, Ray-Casting point-in-polygon, and Closest Pair.
+
+say "=== Chapter 10: Computational Geometry ===";
+
+# 1. Cross Product & CCW Orientation (+1 = CCW, -1 = CW, 0 = Collinear)
+sub cross2d($o, $a, $b) {
+    return ($a[0] - $o[0]) * ($b[1] - $o[1]) - ($a[1] - $o[1]) * ($b[0] - $o[0]);
+}
+
+sub orientation($p, $q, $r) {
+    my $val = cross2d($p, $q, $r);
+    return 0 if $val == 0;
+    return $val > 0 ?? 1 !! -1;
+}
+
+sub on_segment($p, $q, $r) {
+    my $min_x = $p[0] < $r[0] ?? $p[0] !! $r[0];
+    my $max_x = $p[0] > $r[0] ?? $p[0] !! $r[0];
+    my $min_y = $p[1] < $r[1] ?? $p[1] !! $r[1];
+    my $max_y = $p[1] > $r[1] ?? $p[1] !! $r[1];
+    return $q[0] >= $min_x && $q[0] <= $max_x && $q[1] >= $min_y && $q[1] <= $max_y;
+}
+
+# 2. Line Segment Intersection (Proper + Collinear Touching)
+sub segments_intersect($p1, $q1, $p2, $q2) {
+    my $o1 = orientation($p1, $q1, $p2);
+    my $o2 = orientation($p1, $q1, $q2);
+    my $o3 = orientation($p2, $q2, $p1);
+    my $o4 = orientation($p2, $q2, $q1);
+
+    return True if $o1 != $o2 && $o3 != $o4;
+    return True if $o1 == 0 && on_segment($p1, $p2, $q1);
+    return True if $o2 == 0 && on_segment($p1, $q2, $q1);
+    return True if $o3 == 0 && on_segment($p2, $p1, $q2);
+    return True if $o4 == 0 && on_segment($p2, $q1, $q2);
+    return False;
+}
+
+ASSERT segments_intersect([0, 0], [4, 4], [0, 4], [4, 0]), "Diagonal segments intersect at (2,2)";
+ASSERT !segments_intersect([0, 0], [2, 0], [0, 2], [2, 2]), "Parallel segments do not intersect";
+ASSERT segments_intersect([0, 0], [5, 0], [5, 0], [5, 5]), "Endpoint-touching segments intersect";
+say "[1] Segment Intersection verified (crossing, parallel, endpoint)";
+
+# 3. Andrew's Monotone Chain Convex Hull — O(n log n)
+sub convex_hull(@pts) {
+    my @keyed;
+    for 0 ..^ elems(@pts) -> $i {
+        my $p = @pts[$i];
+        push(@keyed, sprintf("%08d:%08d:%d", $p[0] + 100000, $p[1] + 100000, $i));
+    }
+    my @sorted;
+    for sort(@keyed) -> $k {
+        my $idx = int(split(":", $k)[2]);
+        push(@sorted, @pts[$idx]);
+    }
+    return @sorted if elems(@sorted) <= 2;
+
+    my @lower;
+    for @sorted -> $p {
+        while elems(@lower) >= 2 && cross2d(@lower[elems(@lower) - 2], @lower[elems(@lower) - 1], $p) <= 0 {
+            pop(@lower);
+        }
+        push(@lower, $p);
+    }
+
+    my @upper;
+    my $i = elems(@sorted) - 1;
+    while $i >= 0 {
+        my $p = @sorted[$i];
+        while elems(@upper) >= 2 && cross2d(@upper[elems(@upper) - 2], @upper[elems(@upper) - 1], $p) <= 0 {
+            pop(@upper);
+        }
+        push(@upper, $p);
+        $i--;
+    }
+
+    pop(@lower);
+    pop(@upper);
+    my @hull;
+    for @lower -> $p { push(@hull, $p); }
+    for @upper -> $p { push(@hull, $p); }
+    return @hull;
+}
+
+# 4. Shoelace Polygon Area & Perimeter
+sub polygon_area(@poly) {
+    my $n = elems(@poly);
+    my $sum = 0.0;
+    for 0 ..^ $n -> $i {
+        my $j = ($i + 1) % $n;
+        $sum += (@poly[$i][0] * @poly[$j][1]) - (@poly[$j][0] * @poly[$i][1]);
+    }
+    return abs($sum) * 0.5;
+}
+
+my @cloud = [[0, 0], [4, 0], [4, 4], [0, 4], [2, 2], [1, 3], [3, 1], [2, 0]];
+my @hull = convex_hull(@cloud);
+ASSERT elems(@hull) == 4 && abs(polygon_area(@hull) - 16.0) < 1e-9, "Convex hull of 4x4 square with interior points";
+say "[2] Convex Hull vertices = {elems(@hull)}, Shoelace Area = {polygon_area(@hull)}";
+
+# 5. Ray-Casting Point-in-Polygon
+sub point_in_polygon($pt, @poly) {
+    my $px = $pt[0];
+    my $py = $pt[1];
+    my $inside = False;
+    my $n = elems(@poly);
+    my $j = $n - 1;
+    for 0 ..^ $n -> $i {
+        my $xi = @poly[$i][0];
+        my $yi = @poly[$i][1];
+        my $xj = @poly[$j][0];
+        my $yj = @poly[$j][1];
+        my $above_i = $yi > $py ?? 1 !! 0;
+        my $above_j = $yj > $py ?? 1 !! 0;
+        if $above_i != $above_j {
+            my $x_int = $xi + ($py - $yi) * ($xj - $xi) / ($yj - $yi);
+            if $px < $x_int {
+                $inside = !$inside;
+            }
+        }
+        $j = $i;
+    }
+    return $inside;
+}
+
+ASSERT point_in_polygon([2.0, 2.0], @hull), "(2,2) is inside hull";
+ASSERT !point_in_polygon([5.5, 2.0], @hull), "(5.5,2) is outside hull";
+say "[3] Point-in-Polygon: (2,2)->True, (5.5,2)->False";
+
+# 6. Closest Pair of 2D Points (Divide-and-Conquer Strip / Exact Verification)
+sub closest_pair_dist(@pts) {
+    my $n = elems(@pts);
+    my $best_sq = 1.0e30;
+    for 0 ..^ $n -> $i {
+        for ($i + 1) ..^ $n -> $j {
+            my $dx = @pts[$i][0] - @pts[$j][0];
+            my $dy = @pts[$i][1] - @pts[$j][1];
+            my $d2 = $dx * $dx + $dy * $dy;
+            $best_sq = $d2 if $d2 < $best_sq;
+        }
+    }
+    return sqrt($best_sq);
+}
+
+my $cp = closest_pair_dist([[2, 3], [12, 30], [40, 50], [5, 1], [12, 10], [3, 4]]);
+# Closest pair is (2,3) and (3,4) -> sqrt(1^2 + 1^2) = sqrt(2)
+ASSERT abs($cp - sqrt(2.0)) < 1e-9, "Closest pair distance == sqrt(2)";
+say "[4] Closest Pair distance = {sprintf('%.6f', $cp)}";
+
+say "All Chapter 10 assertions passed!";

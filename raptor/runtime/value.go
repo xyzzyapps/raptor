@@ -3,6 +3,7 @@ package raptor
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +45,7 @@ const (
 	extRef
 	extStrBuf
 	extArrayLane
+	extMatchObj
 )
 
 // Arena / stack ownership flags on Value.flags.
@@ -110,6 +112,7 @@ type Closure struct {
 	NeedsEnv      bool
 	FastSimple    bool
 	NoParamChecks bool
+	intRec        *intRecSpec
 }
 
 type multiSubBox struct {
@@ -654,6 +657,15 @@ func HashValue(m map[string]*Value) *Value {
 	return &Value{Type: ValHash, HashVal: m}
 }
 
+func MatchValue(matchedStr string, m map[string]*Value) *Value {
+	for k, v := range m {
+		if v != nil && v.flags != 0 {
+			m[k] = escapeValue(v)
+		}
+	}
+	return &Value{Type: ValHash, StrVal: matchedStr, HashVal: m, extKind: extMatchObj}
+}
+
 func ClosureValue(c *Closure) *Value {
 	return &Value{Type: ValClosure, ext: unsafe.Pointer(c), extKind: extClosure}
 }
@@ -846,6 +858,14 @@ func (v *Value) MatchesType(constraint string) bool {
 	}
 }
 
+func formatFloatRaku(f float64) string {
+	abs := math.Abs(f)
+	if !math.IsNaN(f) && !math.IsInf(f, 0) && abs >= 1e6 && abs < 1e15 {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	return strconv.FormatFloat(f, 'g', -1, 64)
+}
+
 func (v *Value) String() string {
 	if v == nil {
 		return "(nil)"
@@ -861,7 +881,7 @@ func (v *Value) String() string {
 	case ValInt:
 		return formatIntFast(v.IntVal)
 	case ValFloat:
-		return strconv.FormatFloat(v.FloatVal, 'g', -1, 64)
+		return formatFloatRaku(v.FloatVal)
 	case ValString:
 		return v.StrVal
 	case ValArray:
@@ -895,6 +915,9 @@ func (v *Value) String() string {
 		}
 		return "[" + strings.Join(items, " ") + "]"
 	case ValHash:
+		if v.extKind == extMatchObj {
+			return v.StrVal
+		}
 		var pairs []string
 		for k, val := range v.HashVal {
 			pairs = append(pairs, k+" => "+val.String())

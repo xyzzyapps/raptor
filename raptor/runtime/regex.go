@@ -66,16 +66,51 @@ func (g *GoRegexpEngine) Replace(pattern, repl, text string) (string, error) {
 	return re.ReplaceAllString(text, repl), nil
 }
 
+func normalizeRegexPattern(pattern string) string {
+	if len(pattern) >= 2 && pattern[0] == '/' {
+		lastSlash := strings.LastIndexByte(pattern, '/')
+		if lastSlash > 0 {
+			body := pattern[1:lastSlash]
+			mods := pattern[lastSlash+1:]
+			flagSet := ""
+			for _, c := range mods {
+				if (c == 'i' || c == 'm' || c == 's') && !strings.ContainsRune(flagSet, c) {
+					flagSet += string(c)
+				}
+			}
+			if flagSet != "" {
+				return "(?" + flagSet + ")" + body
+			}
+			return body
+		}
+	}
+	return pattern
+}
+
 func getOrCompileGoRegex(pattern string) (*regexp.Regexp, error) {
-	if cached, ok := compiledRegexCache.Load(pattern); ok {
+	norm := normalizeRegexPattern(pattern)
+	if cached, ok := compiledRegexCache.Load(norm); ok {
 		return cached.(*regexp.Regexp), nil
 	}
-	re, err := regexp.Compile(pattern)
+	re, err := regexp.Compile(norm)
 	if err != nil {
 		return nil, fmt.Errorf("invalid regex %q: %w", pattern, err)
 	}
-	compiledRegexCache.Store(pattern, re)
+	compiledRegexCache.Store(norm, re)
 	return re, nil
+}
+
+// RegexFindSubmatch returns the full match + submatches and subexpression names.
+func RegexFindSubmatch(pattern, text string) ([]string, []string, error) {
+	re, err := getOrCompileGoRegex(pattern)
+	if err != nil {
+		return nil, nil, err
+	}
+	subs := re.FindStringSubmatch(text)
+	if subs == nil {
+		return nil, nil, nil
+	}
+	return subs, re.SubexpNames(), nil
 }
 
 // SamreEngine implements a structural regular expression engine backend

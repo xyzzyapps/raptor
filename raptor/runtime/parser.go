@@ -213,6 +213,18 @@ func (p *Parser) parseStatement() (Stmt, error) {
 	case TokLoop:
 		return p.parseLoop()
 
+	case TokTry:
+		te, err := p.parseTryExpr()
+		if err != nil {
+			return nil, err
+		}
+		stmt, err := p.checkModifier(te)
+		if err != nil {
+			return nil, err
+		}
+		p.match(TokSemicolon)
+		return stmt, nil
+
 	case TokUse:
 		return p.parseUse()
 
@@ -249,13 +261,21 @@ func (p *Parser) parseStatement() (Stmt, error) {
 
 	case TokLast:
 		p.advance()
+		stmt, err := p.checkModifier(&BreakStmt{})
+		if err != nil {
+			return nil, err
+		}
 		p.match(TokSemicolon)
-		return &BreakStmt{}, nil
+		return stmt, nil
 
 	case TokNext:
 		p.advance()
+		stmt, err := p.checkModifier(&ContinueStmt{})
+		if err != nil {
+			return nil, err
+		}
 		p.match(TokSemicolon)
-		return &ContinueStmt{}, nil
+		return stmt, nil
 
 	case TokRedo:
 		p.advance()
@@ -335,6 +355,44 @@ func (p *Parser) parseVarDecl() (Stmt, error) {
 		typeName = typeTok.Literal
 	}
 
+	if p.peek().Type == TokLParen {
+		p.advance()
+		var targets []Expr
+		for p.peek().Type != TokRParen && !p.isAtEnd() {
+			if p.peek().Type == TokStar {
+				p.advance()
+			}
+			vTok := p.peek()
+			if vTok.Type != TokScalar && vTok.Type != TokArray && vTok.Type != TokHash {
+				return nil, fmt.Errorf("line %d: expected variable in %s (...) list, got %s", vTok.Line, scope, vTok.Literal)
+			}
+			p.advance()
+			targets = append(targets, &VarExpr{Name: vTok.Literal})
+			if p.peek().Type == TokComma {
+				p.advance()
+			}
+		}
+		if err := p.consume(TokRParen); err != nil {
+			return nil, err
+		}
+		var init Expr
+		if p.peek().Type == TokAssign {
+			p.advance()
+			val, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			init = val
+		}
+		var stmt Stmt = &ListAssignStmt{Scope: scope, Targets: targets, Value: init}
+		stmt, err := p.checkModifier(stmt)
+		if err != nil {
+			return nil, err
+		}
+		p.match(TokSemicolon)
+		return stmt, nil
+	}
+
 	nameTok := p.peek()
 	if nameTok.Type != TokScalar && nameTok.Type != TokArray && nameTok.Type != TokHash {
 		return nil, fmt.Errorf("line %d: expected variable name after %s, got %s", nameTok.Line, scope, nameTok.Literal)
@@ -395,116 +453,11 @@ func (p *Parser) parseSubDecl(isMulti bool) (Stmt, error) {
 
 	var params []Param
 	if p.peek().Type == TokLParen {
-		p.advance()
-		for p.peek().Type != TokRParen && !p.isAtEnd() {
-			// Array destructuring parameter: [$h, *@t]
-			if p.peek().Type == TokLBracket {
-				p.advance()
-				var dParams []Param
-				for p.peek().Type != TokRBracket && !p.isAtEnd() {
-					isSlurpy := false
-					if p.peek().Type == TokStar || p.peek().Literal == "*" {
-						p.advance()
-						isSlurpy = true
-					}
-					dpTok := p.advance()
-					dParams = append(dParams, Param{
-						Name:     dpTok.Literal,
-						IsSlurpy: isSlurpy,
-					})
-					if p.peek().Type == TokComma {
-						p.advance()
-					}
-				}
-				p.consume(TokRBracket)
-				params = append(params, Param{
-					Name:        fmt.Sprintf("$_destruct_arr_%d", len(params)),
-					Type:        "Array",
-					DestructArr: dParams,
-				})
-				if p.peek().Type == TokComma {
-					p.advance()
-				}
-				continue
-			}
-
-			// Hash destructuring parameter: :{:$name, :$age}
-			if p.peek().Type == TokLBrace || (p.peek().Type == TokColon && p.peekNext().Type == TokLBrace) {
-				if p.peek().Type == TokColon {
-					p.advance()
-				}
-				p.advance()
-				var dParams []Param
-				for p.peek().Type != TokRBrace && !p.isAtEnd() {
-					if p.peek().Type == TokColon {
-						p.advance()
-					}
-					dpTok := p.advance()
-					dParams = append(dParams, Param{
-						Name: dpTok.Literal,
-					})
-					if p.peek().Type == TokComma {
-						p.advance()
-					}
-				}
-				p.consume(TokRBrace)
-				params = append(params, Param{
-					Name:         fmt.Sprintf("$_destruct_hash_%d", len(params)),
-					Type:         "Hash",
-					DestructHash: dParams,
-				})
-				if p.peek().Type == TokComma {
-					p.advance()
-				}
-				continue
-			}
-
-			var paramType string
-			if p.isTypeToken(p.peek().Type) || (p.peek().Type == TokIdent && (p.peekNext().Type == TokScalar || p.peekNext().Type == TokArray || p.peekNext().Type == TokHash || p.peekNext().Type == TokSubRef)) {
-				paramType = p.advance().Literal
-			}
-			paramTok := p.peek()
-			if paramTok.Type == TokScalar || paramTok.Type == TokArray || paramTok.Type == TokHash || paramTok.Type == TokSubRef {
-				pName := paramTok.Literal
-				p.advance()
-				if p.peek().Type == TokAssign {
-					p.advance()
-					if _, err := p.parseExpression(0); err != nil {
-						return nil, err
-					}
-				}
-
-				var paramWhere Expr
-				if p.peek().Type == TokWhere {
-					p.advance()
-					if p.peek().Type == TokLBrace {
-						body, err := p.parseBlock()
-						if err != nil {
-							return nil, err
-						}
-						paramWhere = &ClosureExpr{Body: body}
-					} else {
-						we, err := p.parseExpression(0)
-						if err != nil {
-							return nil, err
-						}
-						paramWhere = we
-					}
-				}
-
-				params = append(params, Param{
-					Name:  pName,
-					Type:  paramType,
-					Where: paramWhere,
-				})
-			} else {
-				return nil, fmt.Errorf("line %d: expected parameter name, got %s", paramTok.Line, paramTok.Literal)
-			}
-			if p.peek().Type == TokComma {
-				p.advance()
-			}
+		var err error
+		params, err = p.parseSubParams()
+		if err != nil {
+			return nil, err
 		}
-		p.consume(TokRParen)
 	}
 
 
@@ -659,20 +612,264 @@ func (p *Parser) parseWhile(isUntil bool) (Stmt, error) {
 	return &WhileStmt{IsUntil: isUntil, Condition: cond, Body: body}, nil
 }
 
+func (p *Parser) parseSubParams() ([]Param, error) {
+	var params []Param
+	if err := p.consume(TokLParen); err != nil {
+		return nil, err
+	}
+	for p.peek().Type != TokRParen && !p.isAtEnd() {
+		// Array destructuring parameter: [$h, *@t]
+		if p.peek().Type == TokLBracket {
+			p.advance()
+			var dParams []Param
+			for p.peek().Type != TokRBracket && !p.isAtEnd() {
+				isSlurpy := false
+				if p.peek().Type == TokStar || p.peek().Literal == "*" {
+					p.advance()
+					isSlurpy = true
+				}
+				dpTok := p.advance()
+				dParams = append(dParams, Param{
+					Name:     dpTok.Literal,
+					IsSlurpy: isSlurpy,
+				})
+				if p.peek().Type == TokComma {
+					p.advance()
+				}
+			}
+			p.consume(TokRBracket)
+			params = append(params, Param{
+				Name:        fmt.Sprintf("$_destruct_arr_%d", len(params)),
+				Type:        "Array",
+				DestructArr: dParams,
+			})
+			if p.peek().Type == TokComma {
+				p.advance()
+			}
+			continue
+		}
+
+		// Hash destructuring parameter: :{:$name, :$age}
+		if p.peek().Type == TokLBrace || (p.peek().Type == TokColon && p.peekNext().Type == TokLBrace) {
+			if p.peek().Type == TokColon {
+				p.advance()
+			}
+			p.advance()
+			var dParams []Param
+			for p.peek().Type != TokRBrace && !p.isAtEnd() {
+				if p.peek().Type == TokColon {
+					p.advance()
+				}
+				dpTok := p.advance()
+				dParams = append(dParams, Param{
+					Name: dpTok.Literal,
+				})
+				if p.peek().Type == TokComma {
+					p.advance()
+				}
+			}
+			p.consume(TokRBrace)
+			params = append(params, Param{
+				Name:         fmt.Sprintf("$_destruct_hash_%d", len(params)),
+				Type:         "Hash",
+				DestructHash: dParams,
+			})
+			if p.peek().Type == TokComma {
+				p.advance()
+			}
+			continue
+		}
+
+		var paramType string
+		if p.isTypeToken(p.peek().Type) || (p.peek().Type == TokIdent && (p.peekNext().Type == TokScalar || p.peekNext().Type == TokArray || p.peekNext().Type == TokHash || p.peekNext().Type == TokSubRef || p.peekNext().Type == TokStar || p.peekNext().Type == TokColon)) {
+			paramType = p.advance().Literal
+		}
+
+		isSlurpy := false
+		if p.peek().Type == TokStar {
+			p.advance()
+			isSlurpy = true
+		}
+
+		isOpt := false
+		if p.peek().Type == TokColon {
+			p.advance()
+			isOpt = true
+		}
+
+		paramTok := p.peek()
+		if paramTok.Type == TokScalar || paramTok.Type == TokArray || paramTok.Type == TokHash || paramTok.Type == TokSubRef {
+			pName := paramTok.Literal
+			if paramTok.Type == TokSubRef && pName == "&" && p.peekNext().Type == TokIdent {
+				p.advance()
+				pName = "&" + p.advance().Literal
+			} else {
+				p.advance()
+			}
+			if p.peek().Type == TokQuestion {
+				p.advance()
+				isOpt = true
+			}
+			var defExpr Expr
+			if p.peek().Type == TokAssign {
+				p.advance()
+				de, err := p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+				defExpr = de
+				isOpt = true
+			}
+
+			var paramWhere Expr
+			if p.peek().Type == TokWhere {
+				p.advance()
+				if p.peek().Type == TokLBrace {
+					body, err := p.parseBlock()
+					if err != nil {
+						return nil, err
+					}
+					paramWhere = &ClosureExpr{Body: body}
+				} else {
+					we, err := p.parseExpression(0)
+					if err != nil {
+						return nil, err
+					}
+					paramWhere = we
+				}
+			}
+
+			params = append(params, Param{
+				Name:       pName,
+				Type:       paramType,
+				IsOptional: isOpt,
+				IsSlurpy:   isSlurpy,
+				Default:    defExpr,
+				Where:      paramWhere,
+			})
+		} else {
+			return nil, fmt.Errorf("line %d: expected parameter name, got %s", paramTok.Line, paramTok.Literal)
+		}
+		if p.peek().Type == TokComma {
+			p.advance()
+		}
+	}
+	p.consume(TokRParen)
+	return params, nil
+}
+
+func (p *Parser) parseTryExpr() (*TryExpr, error) {
+	p.consume(TokTry)
+	body, err := p.parseBlock()
+	if err != nil {
+		return nil, err
+	}
+	var catchBody *BlockStmt
+	if p.peek().Type == TokIdent && (p.peek().Literal == "catch" || p.peek().Literal == "CATCH") {
+		p.advance()
+		cb, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		catchBody = cb
+	}
+	return &TryExpr{Body: body, Catch: catchBody}, nil
+}
+
+func (p *Parser) hasSemiInParens() bool {
+	if p.peek().Type != TokLParen {
+		return false
+	}
+	depth := 0
+	for i := p.pos; i < len(p.tokens); i++ {
+		t := p.tokens[i].Type
+		if t == TokEOF {
+			break
+		}
+		if t == TokLParen || t == TokLBracket || t == TokLBrace {
+			depth++
+		} else if t == TokRParen || t == TokRBracket || t == TokRBrace {
+			depth--
+			if depth == 0 {
+				return false
+			}
+		} else if t == TokSemicolon && depth == 1 {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Parser) parseFor() (Stmt, error) {
 	p.consume(TokFor)
+
+	// 1. C-style for (my $i = 0; $i < 10; $i++) { ... }
+	if p.peek().Type == TokLParen && p.hasSemiInParens() {
+		return p.parseCStyleLoopTail()
+	}
+
+	// 2. Perl 5 foreach / for [my] $var (@list) { ... }
+	if p.peek().Type == TokMy || (p.peek().Type == TokScalar && p.peekNext().Type == TokLParen) {
+		saved := p.pos
+		if p.peek().Type == TokMy {
+			p.advance()
+		}
+		if p.peek().Type == TokScalar && p.peekNext().Type == TokLParen {
+			varName := p.advance().Literal
+			p.consume(TokLParen)
+			iterable, err := p.parseParenListOrExpr()
+			if err != nil {
+				return nil, err
+			}
+			if err := p.consume(TokRParen); err != nil {
+				return nil, err
+			}
+			body, err := p.parseBlock()
+			if err != nil {
+				return nil, err
+			}
+			return &ForStmt{Iterable: iterable, VarName: varName, Body: body}, nil
+		}
+		p.pos = saved
+	}
+
+	// 3. Raku for @list [-> $a, $b] { ... }
 	iterable, err := p.parseExpression(0)
 	if err != nil {
 		return nil, err
 	}
+	// Also allow top-level comma list: for 1, 2, 3 -> $x { ... }
+	if p.peek().Type == TokComma {
+		elems := []Expr{iterable}
+		for p.peek().Type == TokComma {
+			p.advance()
+			if p.peek().Type == TokArrow || p.peek().Type == TokLBrace {
+				break
+			}
+			nx, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			elems = append(elems, nx)
+		}
+		iterable = &ArrayLiteralExpr{Elements: elems}
+	}
 
 	var varName string
+	var varNames []string
 	if p.peek().Type == TokArrow {
 		p.advance()
-		vTok := p.peek()
-		if vTok.Type == TokScalar || vTok.Type == TokArray || vTok.Type == TokHash {
-			varName = vTok.Literal
-			p.advance()
+		for p.peek().Type == TokScalar || p.peek().Type == TokArray || p.peek().Type == TokHash {
+			varNames = append(varNames, p.advance().Literal)
+			if p.peek().Type == TokComma {
+				p.advance()
+			} else {
+				break
+			}
+		}
+		if len(varNames) == 1 {
+			varName = varNames[0]
+			varNames = nil
 		}
 	}
 
@@ -680,11 +877,22 @@ func (p *Parser) parseFor() (Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ForStmt{Iterable: iterable, VarName: varName, Body: body}, nil
+	return &ForStmt{Iterable: iterable, VarName: varName, VarNames: varNames, Body: body}, nil
 }
 
 func (p *Parser) parseLoop() (Stmt, error) {
 	p.consume(TokLoop)
+	if p.peek().Type == TokLBrace {
+		body, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		return &LoopStmt{Body: body}, nil
+	}
+	return p.parseCStyleLoopTail()
+}
+
+func (p *Parser) parseCStyleLoopTail() (Stmt, error) {
 	p.consume(TokLParen)
 
 	var initExpr Expr
@@ -919,6 +1127,12 @@ func (p *Parser) parseExpression(minPrec int) (Expr, error) {
 			if err != nil {
 				return nil, err
 			}
+			if op == "=" {
+				if arrLit, isList := left.(*ArrayLiteralExpr); isList {
+					left = &ListAssignStmt{Targets: arrLit.Elements, Value: val}
+					continue
+				}
+			}
 			left = &AssignStmt{Target: left, Op: op, Value: val}
 			continue
 		}
@@ -1133,7 +1347,7 @@ func (p *Parser) parseExpression(minPrec int) (Expr, error) {
 					left = &HashAccessExpr{Hash: left, Key: keyExpr}
 					continue
 				}
-				if isPercentVar || isChain {
+				if (isPercentVar || isChain) && adjacentBrace {
 					if err != nil {
 						return nil, err
 					}
@@ -1143,6 +1357,13 @@ func (p *Parser) parseExpression(minPrec int) (Expr, error) {
 				}
 				p.pos = savedPos
 			}
+		}
+
+		// Postfix increment / decrement: $i++, $i--, @a[$i]++, %h{$k}++
+		if tok.Type == TokInc || tok.Type == TokDec {
+			p.advance()
+			left = &IncDecExpr{Target: left, Op: tok.Literal, Post: true}
+			continue
 		}
 
 
@@ -1222,7 +1443,7 @@ func (p *Parser) parsePrimary() (Expr, error) {
 		}
 		return &UnaryExpr{Op: op, Right: right}, nil
 
-	case TokPlus, TokNot, TokFileTest, TokConcat, TokQuestion, TokSo:
+	case TokPlus, TokNot, TokFileTest, TokConcat, TokQuestion, TokSo, TokCaret:
 		p.advance()
 		op := tok.Literal
 		right, err := p.parseExpression(8)
@@ -1230,6 +1451,62 @@ func (p *Parser) parsePrimary() (Expr, error) {
 			return nil, err
 		}
 		return &UnaryExpr{Op: op, Right: right}, nil
+
+	case TokInc, TokDec:
+		p.advance()
+		op := tok.Literal
+		target, err := p.parseExpression(8)
+		if err != nil {
+			return nil, err
+		}
+		return &IncDecExpr{Target: target, Op: op, Post: false}, nil
+
+	case TokTry:
+		return p.parseTryExpr()
+
+	case TokQw:
+		p.advance()
+		words := strings.Fields(tok.Literal)
+		elems := make([]Expr, len(words))
+		for i, w := range words {
+			elems[i] = &LiteralExpr{Type: TokString, Value: w}
+		}
+		return &ArrayLiteralExpr{Elements: elems}, nil
+
+	case TokAngleL:
+		p.advance() // consume '<'
+		if p.peek().Type == TokAngleR {
+			p.advance()
+			return &ArrayLiteralExpr{Elements: nil}, nil
+		}
+		if p.peek().Type == TokScalar && p.peekNext().Type == TokAngleR {
+			sc := p.advance()
+			p.advance() // consume '>'
+			return &CallExpr{Callee: &VarExpr{Name: "readline"}, Args: []Expr{&VarExpr{Name: sc.Literal}}}, nil
+		}
+		var words []string
+		var cur strings.Builder
+		lastEnd := -1
+		for !p.isAtEnd() && p.peek().Type != TokAngleR {
+			t := p.advance()
+			if lastEnd >= 0 && t.From > lastEnd {
+				words = append(words, cur.String())
+				cur.Reset()
+			}
+			cur.WriteString(t.Literal)
+			lastEnd = t.To
+		}
+		if cur.Len() > 0 {
+			words = append(words, cur.String())
+		}
+		if err := p.consume(TokAngleR); err != nil {
+			return nil, err
+		}
+		elems := make([]Expr, len(words))
+		for i, w := range words {
+			elems[i] = &LiteralExpr{Type: TokString, Value: w}
+		}
+		return &ArrayLiteralExpr{Elements: elems}, nil
 
 	case TokEllipsis:
 		p.advance()
@@ -1422,13 +1699,17 @@ func (p *Parser) parsePrimary() (Expr, error) {
 
 	case TokLParen:
 		p.advance()
+		if p.peek().Type == TokRParen {
+			p.advance()
+			return &ArrayLiteralExpr{Elements: nil}, nil
+		}
 		if call, ok, err := p.tryPrefixCallInParens(); ok {
 			if err != nil {
 				return nil, err
 			}
 			return call, nil
 		}
-		expr, err := p.parseExpression(0)
+		expr, err := p.parseParenListOrExpr()
 		if err != nil {
 			return nil, err
 		}
@@ -1553,22 +1834,11 @@ func (p *Parser) parsePrimary() (Expr, error) {
 		p.advance()
 		var params []Param
 		if p.peek().Type == TokLParen {
-			p.advance()
-			for p.peek().Type != TokRParen && !p.isAtEnd() {
-				var pType string
-				if p.isTypeToken(p.peek().Type) {
-					pType = p.advance().Literal
-				}
-				paramTok := p.peek()
-				if paramTok.Type == TokScalar || paramTok.Type == TokArray || paramTok.Type == TokHash {
-					params = append(params, Param{Name: paramTok.Literal, Type: pType})
-					p.advance()
-				}
-				if p.peek().Type == TokComma {
-					p.advance()
-				}
+			var err error
+			params, err = p.parseSubParams()
+			if err != nil {
+				return nil, err
 			}
-			p.consume(TokRParen)
 		}
 		body, err := p.parseBlock()
 		if err != nil {
@@ -1618,13 +1888,36 @@ func isCallNameTok(t Token) bool {
 	return false
 }
 
+func (p *Parser) parseParenListOrExpr() (Expr, error) {
+	first, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().Type != TokComma {
+		return first, nil
+	}
+	elems := []Expr{first}
+	for p.peek().Type == TokComma {
+		p.advance()
+		if p.peek().Type == TokRParen || p.isAtEnd() {
+			break
+		}
+		nx, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		elems = append(elems, nx)
+	}
+	return &ArrayLiteralExpr{Elements: elems}, nil
+}
+
 func canStartCallArg(t Token) bool {
 	// Values only. '+' / '-' after a name is infix grouping: ($a + $b), fib($n - 1).
 	switch t.Type {
 	case TokInt, TokFloat, TokString, TokInterpString, TokIdent,
 		TokScalar, TokArray, TokHash, TokSubRef,
 		TokLParen, TokLBracket, TokLBrace, TokSub,
-		TokBacktick, TokInterpBacktick:
+		TokBacktick, TokInterpBacktick, TokQw, TokCaret, TokTry:
 		return true
 	}
 	return false
@@ -1682,8 +1975,12 @@ func (p *Parser) tryPrefixCallInParens() (Expr, bool, error) {
 
 // parseNamedCallOrVar is `foo` or `foo $a, $b` after the name is consumed.
 func (p *Parser) parseNamedCallOrVar(name string) (Expr, error) {
+	switch name {
+	case "True", "False", "Nil", "true", "false":
+		return &VarExpr{Name: name}, nil
+	}
 	t := p.peek()
-	looksLikeArgs := t.Type != TokDot && t.Type != TokAssign && t.Type != TokLParen && t.Type != TokLBracket && t.Type != TokLBrace && t.Type != TokAngleL && t.Type != TokSemicolon && t.Type != TokRParen && t.Type != TokRBrace && t.Type != TokRBracket && t.Type != TokComma && (!p.isBinaryOp(t) || isUnaryPrefixTok(t))
+	looksLikeArgs := t.Type != TokDot && t.Type != TokAssign && t.Type != TokLParen && t.Type != TokLBracket && t.Type != TokLBrace && t.Type != TokAngleL && t.Type != TokSemicolon && t.Type != TokRParen && t.Type != TokRBrace && t.Type != TokRBracket && t.Type != TokComma && t.Type != TokIf && t.Type != TokUnless && t.Type != TokWhile && t.Type != TokUntil && t.Type != TokFor && t.Type != TokGiven && (!p.isBinaryOp(t) || isUnaryPrefixTok(t))
 	if looksLikeArgs {
 		args, err := p.parseCallArgs(false)
 		if err != nil {
@@ -1772,7 +2069,52 @@ func (p *Parser) parseEnum() (Stmt, error) {
 	return &EnumDeclStmt{Name: enumName, Values: values}, nil
 }
 
-// parseInterpString parses interpolation markers ($var, {expr}) in double-quoted strings.
+func consumeInterpSubscripts(base Expr, runes []rune, pos int) (Expr, int) {
+	cur := base
+	for pos < len(runes) {
+		if runes[pos] == '<' && pos+2 < len(runes) && isIdentStart(runes[pos+1]) {
+			k := pos + 2
+			for k < len(runes) && (isIdentContinue(runes[k]) || runes[k] == '-') {
+				k++
+			}
+			if k < len(runes) && runes[k] == '>' {
+				key := string(runes[pos+1 : k])
+				cur = &HashAccessExpr{Hash: cur, Key: &LiteralExpr{Type: TokString, Value: key}}
+				pos = k + 1
+				continue
+			}
+		}
+		if runes[pos] == '[' {
+			k := pos + 1
+			depth := 1
+			for k < len(runes) && depth > 0 {
+				if runes[k] == '[' {
+					depth++
+				} else if runes[k] == ']' {
+					depth--
+					if depth == 0 {
+						break
+					}
+				}
+				k++
+			}
+			if k < len(runes) && runes[k] == ']' {
+				idxSrc := strings.TrimSpace(string(runes[pos+1 : k]))
+				if idxSrc != "" {
+					if idxExpr, _, err := ParseOneExpression(idxSrc); err == nil && idxExpr != nil {
+						cur = &IndexExpr{Array: cur, Index: idxExpr}
+						pos = k + 1
+						continue
+					}
+				}
+			}
+		}
+		break
+	}
+	return cur, pos
+}
+
+// parseInterpString parses interpolation markers ($var, @arr[i], %hash<k>, {expr}) in double-quoted strings.
 func (p *Parser) parseInterpString(raw string) (Expr, error) {
 	runes := []rune(raw)
 	var parts []Expr
@@ -1782,21 +2124,57 @@ func (p *Parser) parseInterpString(raw string) (Expr, error) {
 	for i < len(runes) {
 		ch := runes[i]
 
-		if ch == '\\' && i+1 < len(runes) && (runes[i+1] == '$' || runes[i+1] == '{') {
+		if ch == '\\' && i+1 < len(runes) && (runes[i+1] == '$' || runes[i+1] == '{' || runes[i+1] == '@' || runes[i+1] == '%') {
 			buf = append(buf, runes[i+1])
 			i += 2
 			continue
 		}
 
+		// Raku subscript-only @arr[idx] / %hash<key> interpolation (leaves "user@host" and "%d" untouched!)
+		if (ch == '@' || ch == '%') && i+2 < len(runes) && isIdentStart(runes[i+1]) {
+			k := i + 2
+			for k < len(runes) && (isIdentContinue(runes[k]) || (runes[k] == '-' && k+1 < len(runes) && isIdentStart(runes[k+1]))) {
+				k++
+			}
+			baseExpr := Expr(&VarExpr{Name: string(runes[i:k])})
+			subExpr, nextPos := consumeInterpSubscripts(baseExpr, runes, k)
+			if nextPos > k {
+				if len(buf) > 0 {
+					parts = append(parts, &LiteralExpr{Type: TokString, Value: string(buf)})
+					buf = nil
+				}
+				parts = append(parts, subExpr)
+				i = nextPos
+				continue
+			}
+		}
+
 		if ch == '$' && i+1 < len(runes) {
 			next := runes[i+1]
+			if next == '<' && i+3 < len(runes) && isIdentStart(runes[i+2]) {
+				k := i + 3
+				for k < len(runes) && (isIdentContinue(runes[k]) || runes[k] == '-') {
+					k++
+				}
+				if k < len(runes) && runes[k] == '>' {
+					if len(buf) > 0 {
+						parts = append(parts, &LiteralExpr{Type: TokString, Value: string(buf)})
+						buf = nil
+					}
+					subExpr, nextPos := consumeInterpSubscripts(&VarExpr{Name: string(runes[i : k+1])}, runes, k+1)
+					parts = append(parts, subExpr)
+					i = nextPos
+					continue
+				}
+			}
 			if next == '/' || (next == '$' && (i+2 >= len(runes) || (!isIdentContinue(runes[i+2]) && runes[i+2] != '{' && runes[i+2] != '$'))) {
 				if len(buf) > 0 {
 					parts = append(parts, &LiteralExpr{Type: TokString, Value: string(buf)})
 					buf = nil
 				}
-				parts = append(parts, &VarExpr{Name: "$" + string(next)})
-				i += 2
+				subExpr, nextPos := consumeInterpSubscripts(&VarExpr{Name: "$" + string(next)}, runes, i+2)
+				parts = append(parts, subExpr)
+				i = nextPos
 				continue
 			}
 			if next >= '0' && next <= '9' {
@@ -1833,7 +2211,9 @@ func (p *Parser) parseInterpString(raw string) (Expr, error) {
 					varName = append(varName, runes[i])
 					i++
 				}
-				parts = append(parts, &VarExpr{Name: string(varName)})
+				subExpr, nextPos := consumeInterpSubscripts(&VarExpr{Name: string(varName)}, runes, i)
+				parts = append(parts, subExpr)
+				i = nextPos
 				continue
 			}
 		}
@@ -1860,28 +2240,49 @@ func (p *Parser) parseInterpString(raw string) (Expr, error) {
 				exprBuf = append(exprBuf, runes[i])
 				i++
 			}
+			if depth > 0 {
+				// Unclosed '{' inside string (e.g. "{"): keep literal without fabricating '}'
+				buf = append(buf, '{')
+				buf = append(buf, exprBuf...)
+				continue
+			}
 			if i < len(runes) {
 				i++ // skip closing }
 			}
 			// Parse the expression
 			exprStr := string(exprBuf)
-			if strings.TrimSpace(exprStr) == "" {
-				buf = append(buf, '{', '}')
+			if strings.TrimSpace(exprStr) == "" || strings.HasPrefix(strings.TrimSpace(exprStr), "{") {
+				buf = append(buf, '{')
+				buf = append(buf, exprBuf...)
+				buf = append(buf, '}')
 				continue
 			}
 			lexer := NewLexer(exprStr)
 			var tokens []Token
+			hasLexErr := false
 			for {
 				tok := lexer.NextToken()
+				if tok.Type == TokError {
+					hasLexErr = true
+				}
 				tokens = append(tokens, tok)
 				if tok.Type == TokEOF {
 					break
 				}
 			}
+			if hasLexErr {
+				buf = append(buf, '{')
+				buf = append(buf, exprBuf...)
+				buf = append(buf, '}')
+				continue
+			}
 			subParser := NewParser(tokens)
 			expr, err := subParser.parseExpression(0)
-			if err != nil {
-				return nil, fmt.Errorf("interpolation error in \"{%s}\": %w", exprStr, err)
+			if err != nil || !subParser.isAtEnd() || isNonScalarBraceInterp(expr) {
+				buf = append(buf, '{')
+				buf = append(buf, exprBuf...)
+				buf = append(buf, '}')
+				continue
 			}
 			parts = append(parts, expr)
 			continue
@@ -1904,6 +2305,19 @@ func (p *Parser) parseInterpString(raw string) (Expr, error) {
 	return &InterpStringExpr{Parts: parts}, nil
 }
 
+func isNonScalarBraceInterp(expr Expr) bool {
+	switch x := expr.(type) {
+	case *ClosureExpr, *HashLiteralExpr, *ArrayLiteralExpr:
+		return true
+	case *CallExpr:
+		switch x.Callee.(type) {
+		case *ArrayLiteralExpr, *HashLiteralExpr:
+			return true
+		}
+	}
+	return false
+}
+
 func isIdentStart(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_'
 }
@@ -1920,7 +2334,7 @@ func getPrecedence(tok Token) int {
 		return 2
 	case TokEqual, TokNotEqual, TokLess, TokLessEq, TokGreater, TokGreaterEq, TokEqStr, TokNeStr, TokLtStr, TokGtStr, TokLeStr, TokGeStr, TokAngleL, TokAngleR, TokElem, TokNotElem, TokDivisible, TokSmartMatch, TokRegexMatch, TokRegexNotMatch, TokMin, TokMax, TokCmp:
 		return 4
-	case TokConcat, TokRepeat, TokListRepeat, TokDotDot, TokIntersect, TokUnionOp, TokBitAnd, TokBitOr, TokBitXor, TokBitShiftL, TokBitShiftR:
+	case TokConcat, TokRepeat, TokListRepeat, TokDotDot, TokDotDotCaret, TokCaretDotDot, TokCaretDotDotCaret, TokIntersect, TokUnionOp, TokBitAnd, TokBitOr, TokBitXor, TokBitShiftL, TokBitShiftR:
 		return 5
 	case TokPlus, TokMinus:
 		return 6
@@ -1958,7 +2372,7 @@ func (p *Parser) isBinaryOp(t Token) bool {
 // `say +@a` and `say ~@a` parse as function calls with coerced arguments.
 func isUnaryPrefixTok(t Token) bool {
 	switch t.Type {
-	case TokPlus, TokMinus, TokNot, TokConcat, TokQuestion, TokSo, TokFileTest, TokEllipsis:
+	case TokPlus, TokMinus, TokNot, TokConcat, TokQuestion, TokSo, TokFileTest, TokEllipsis, TokInc, TokDec, TokCaret, TokTry:
 		return true
 	}
 	return false

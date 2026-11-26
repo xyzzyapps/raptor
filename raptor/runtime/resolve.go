@@ -18,7 +18,10 @@ func isFastSlotCandidate(name string) bool {
 		return false
 	}
 	switch name {
-	case "$_", "$/", "$!", "$?", "$0", "$AUTOLOAD", "@ARGV", "%ENV":
+	case "$_", "$/", "$!", "$?", "$0", "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "$AUTOLOAD", "@_", "@ARGV", "%ENV":
+		return false
+	}
+	if strings.HasPrefix(name, "$<") {
 		return false
 	}
 	return true
@@ -47,7 +50,7 @@ func (hs *hazardScanner) scanParams(params []Param) {
 		if hs.nestedDepth > 0 && p.Name != "" {
 			// Inner closure parameter itself is fine inside inner closure, don't mark outer unless referenced.
 		}
-		if p.Where != nil || len(p.DestructArr) > 0 || len(p.DestructHash) > 0 || p.IsSlurpy {
+		if p.Where != nil || p.Default != nil || len(p.DestructArr) > 0 || len(p.DestructHash) > 0 || p.IsSlurpy {
 			if p.Name != "" {
 				hs.nonFastNames[p.Name] = true
 			}
@@ -61,6 +64,9 @@ func (hs *hazardScanner) scanParams(params []Param) {
 					hs.nonFastNames[hp.Name] = true
 				}
 			}
+		}
+		if p.Default != nil {
+			hs.scanExpr(p.Default)
 		}
 		if p.Where != nil {
 			hs.nestedDepth++
@@ -169,8 +175,25 @@ func (hs *hazardScanner) scanStmt(stmt Stmt) {
 		if s.VarName != "" {
 			hs.recordDeclName(s.VarName)
 		}
+		for _, vn := range s.VarNames {
+			hs.recordDeclName(vn)
+		}
 		hs.scanExpr(s.Iterable)
 		hs.scanBlock(s.Body)
+	case *ListAssignStmt:
+		for _, t := range s.Targets {
+			if ve, ok := t.(*VarExpr); ok && s.Scope != "" {
+				hs.recordDeclName(ve.Name)
+				if s.Scope != "my" {
+					hs.nonFastNames[ve.Name] = true
+				}
+			}
+			hs.scanExpr(t)
+		}
+		hs.scanExpr(s.Value)
+	case *TryExpr:
+		hs.scanBlock(s.Body)
+		hs.scanBlock(s.Catch)
 	case *LoopStmt:
 		hs.scanExpr(s.Init)
 		hs.scanExpr(s.Cond)
@@ -303,6 +326,13 @@ func (hs *hazardScanner) scanExpr(expr Expr) {
 		}
 	case *BacktickExpr:
 		hs.scanExpr(e.Command)
+	case *IncDecExpr:
+		hs.scanExpr(e.Target)
+	case *TryExpr:
+		hs.scanBlock(e.Body)
+		hs.scanBlock(e.Catch)
+	case *ListAssignStmt:
+		hs.scanStmt(e)
 	}
 }
 
@@ -484,7 +514,7 @@ func (in *Interp) resolveFunction(params []Param, body *BlockStmt, topSubSlots m
 		if p.Type != "" {
 			noChecks = false
 		}
-		if p.Where != nil || len(p.DestructArr) > 0 || len(p.DestructHash) > 0 || p.IsSlurpy || p.Name == "" {
+		if p.Where != nil || p.Default != nil || len(p.DestructArr) > 0 || len(p.DestructHash) > 0 || p.IsSlurpy || p.Name == "" {
 			paramSlots[i] = -1
 			allParamsFast = false
 			if p.Name != "" {
@@ -495,6 +525,9 @@ func (in *Interp) resolveFunction(params []Param, body *BlockStmt, topSubSlots m
 			}
 			for _, hp := range p.DestructHash {
 				sr.declareShadowNone(hp.Name)
+			}
+			if p.Default != nil {
+				sr.resolveExpr(p.Default)
 			}
 			if p.Where != nil {
 				sr.resolveExpr(p.Where)
@@ -628,7 +661,17 @@ func (sr *slotResolver) resolveStmt(stmt Stmt) {
 	case *ForStmt:
 		sr.resolveExpr(s.Iterable)
 		sr.pushScope()
-		if s.VarName != "" {
+		if len(s.VarNames) > 0 {
+			s.VarSlotKinds = make([]SlotKind, len(s.VarNames))
+			s.VarSlots = make([]int, len(s.VarNames))
+			for i, vn := range s.VarNames {
+				b := sr.allocSlot(vn)
+				s.VarSlotKinds[i] = b.kind
+				s.VarSlots[i] = b.slot
+			}
+			s.VarSlotKind = SlotNone
+			s.VarSlot = -1
+		} else if s.VarName != "" {
 			b := sr.allocSlot(s.VarName)
 			s.VarSlotKind = b.kind
 			s.VarSlot = b.slot
@@ -639,7 +682,35 @@ func (sr *slotResolver) resolveStmt(stmt Stmt) {
 		sr.resolveBlockInCurrentScope(s.Body)
 		sr.popScope()
 		s.UsesTopic = blockUsesTopic(s.Body)
-		s.NeedsLoopEnv = s.UsesTopic || (s.VarName != "" && s.VarSlotKind == SlotNone) || (s.Body != nil && s.Body.NeedsBlockEnv)
+		anyNone := s.VarName != "" && s.VarSlotKind == SlotNone
+		for _, k := range s.VarSlotKinds {
+			if k == SlotNone {
+				anyNone = true
+			}
+		}
+		s.NeedsLoopEnv = s.UsesTopic || anyNone || (s.Body != nil && s.Body.NeedsBlockEnv)
+
+	case *ListAssignStmt:
+		sr.resolveExpr(s.Value)
+		for _, t := range s.Targets {
+			if ve, ok := t.(*VarExpr); ok && s.Scope != "" {
+				if s.Scope == "my" {
+					b := sr.allocSlot(ve.Name)
+					ve.SlotKind = b.kind
+					ve.Slot = b.slot
+				} else {
+					ve.SlotKind = SlotNone
+					ve.Slot = -1
+					sr.declareShadowNone(ve.Name)
+				}
+			} else {
+				sr.resolveExpr(t)
+			}
+		}
+
+	case *TryExpr:
+		sr.resolveBlock(s.Body)
+		sr.resolveBlock(s.Catch)
 
 	case *LoopStmt:
 		sr.pushScope()
@@ -853,6 +924,16 @@ func (sr *slotResolver) resolveExpr(expr Expr) {
 
 	case *BacktickExpr:
 		sr.resolveExpr(e.Command)
+
+	case *IncDecExpr:
+		sr.resolveExpr(e.Target)
+
+	case *TryExpr:
+		sr.resolveBlock(e.Body)
+		sr.resolveBlock(e.Catch)
+
+	case *ListAssignStmt:
+		sr.resolveStmt(e)
 	}
 }
 
@@ -930,6 +1011,22 @@ func stmtTouchesEnv(stmt Stmt) bool {
 		return stmtTouchesEnv(s.Stmt)
 	case *AssertStmt:
 		return exprTouchesEnv(s.Condition) || exprTouchesEnv(s.Message)
+	case *ListAssignStmt:
+		if exprTouchesEnv(s.Value) {
+			return true
+		}
+		for _, t := range s.Targets {
+			if ve, ok := t.(*VarExpr); ok {
+				if ve.SlotKind == SlotNone {
+					return true
+				}
+			} else if exprTouchesEnv(t) {
+				return true
+			}
+		}
+		return false
+	case *TryExpr:
+		return true
 	default:
 		// SubDeclStmt, PackageDeclStmt, UseStmt, GivenStmt, EnumDeclStmt, GrammarDeclStmt, etc.
 		return true
@@ -941,8 +1038,19 @@ func exprTouchesEnv(expr Expr) bool {
 		return false
 	}
 	switch e := expr.(type) {
-	case *LiteralExpr, *VarExpr, *StubExpr:
+	case *LiteralExpr, *StubExpr:
 		return false
+	case *VarExpr:
+		return e.Name == "@_" || strings.HasPrefix(e.Name, "$<") || e.Name == "$/" || e.Name == "$!"
+	case *IncDecExpr:
+		if ve, ok := e.Target.(*VarExpr); ok {
+			return ve.SlotKind == SlotNone
+		}
+		return exprTouchesEnv(e.Target)
+	case *ListAssignStmt:
+		return stmtTouchesEnv(e)
+	case *TryExpr:
+		return true
 	case *ClosureExpr:
 		// Creating a closure captures env! If a block creates a closure, it needs its own Env if any outer vars were SlotNone.
 		return true

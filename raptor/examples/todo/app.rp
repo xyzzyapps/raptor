@@ -1,0 +1,1438 @@
+# ==============================================================================
+# Raptor Full-Stack Todo Web Application (REST JSON API + Glassmorphism SPA)
+# ==============================================================================
+# Usage:
+#   Interactive Server:  raptor raptor/examples/todo/app.rp
+#   Automated Self-Test: raptor --go raptor/examples/todo/app.rp --self-test
+#   Env Overrides:       PORT=8080  RAPTOR_TODO_DB=todo.db
+# ==============================================================================
+
+our $is_test_mode = 0;
+if getenv("RAPTOR_TEST_MODE") eq "1" {
+    $is_test_mode = 1;
+}
+for @ARGV -> $arg {
+    if $arg eq "--self-test" {
+        $is_test_mode = 1;
+    }
+}
+
+our $db_path = getenv("RAPTOR_TODO_DB");
+if $db_path eq "" {
+    if $is_test_mode == 1 {
+        $db_path = ":memory:";
+    } else {
+        $db_path = "todo.db";
+    }
+}
+
+our $db = sqlite_open($db_path);
+try {
+    sqlite_exec($db, "PRAGMA busy_timeout = 5000;");
+};
+
+sqlite_exec($db, "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, completed INTEGER, priority TEXT, category TEXT, created_at INTEGER)");
+
+# ------------------------------------------------------------------------------
+# Sanitization & Data Helpers
+# ------------------------------------------------------------------------------
+
+sub sql_escape($val) {
+    if !defined($val) {
+        return "";
+    }
+    return replace(str($val), "'", "''");
+}
+
+sub normalize_priority($val) {
+    if !defined($val) {
+        return "medium";
+    }
+    my $p = lc(trim(str($val)));
+    if $p eq "high" || $p eq "medium" || $p eq "low" {
+        return $p;
+    }
+    return "medium";
+}
+
+sub normalize_category($val) {
+    if !defined($val) {
+        return "general";
+    }
+    my $c = trim(str($val));
+    if $c eq "" {
+        return "general";
+    }
+    if length($c) > 32 {
+        $c = substr($c, 0, 32);
+    }
+    return $c;
+}
+
+sub normalize_completed($val) {
+    if !defined($val) {
+        return 0;
+    }
+    if type($val) eq "Bool" {
+        if $val {
+            return 1;
+        }
+        return 0;
+    }
+    my $s = lc(trim(str($val)));
+    if $s eq "1" || $s eq "true" || $s eq "yes" {
+        return 1;
+    }
+    return 0;
+}
+
+sub row_to_todo($row) {
+    if !defined($row) || type($row) ne "Hash" {
+        return Nil;
+    }
+    return {
+        "id"         => int($row<id>),
+        "title"      => str($row<title>),
+        "completed"  => int($row<completed>),
+        "priority"   => normalize_priority($row<priority>),
+        "category"   => normalize_category($row<category>),
+        "created_at" => int($row<created_at>)
+    };
+}
+
+sub get_todo_by_id($id) {
+    our $db;
+    my $rows = sqlite_query($db, "SELECT id, title, completed, priority, category, created_at FROM todos WHERE id = " ~ int($id) ~ " LIMIT 1");
+    if elems($rows) == 0 {
+        return Nil;
+    }
+    return row_to_todo($rows[0]);
+}
+
+sub create_todo_record($title, $priority, $category, $completed) {
+    our $db;
+    my $clean_title = trim(str($title));
+    my $clean_prio  = normalize_priority($priority);
+    my $clean_cat   = normalize_category($category);
+    my $clean_comp  = normalize_completed($completed);
+    my $now_ts      = time();
+
+    my $sql = "INSERT INTO todos (title, completed, priority, category, created_at) VALUES ('"
+        ~ sql_escape($clean_title) ~ "', "
+        ~ $clean_comp ~ ", '"
+        ~ sql_escape($clean_prio) ~ "', '"
+        ~ sql_escape($clean_cat) ~ "', "
+        ~ $now_ts ~ ")";
+
+    my $res = sqlite_exec($db, $sql);
+    my $new_id = int($res<last_insert_id>);
+    my $fetched = get_todo_by_id($new_id);
+    if defined($fetched) {
+        return $fetched;
+    }
+    return {
+        "id"         => $new_id,
+        "title"      => $clean_title,
+        "completed"  => $clean_comp,
+        "priority"   => $clean_prio,
+        "category"   => $clean_cat,
+        "created_at" => $now_ts
+    };
+}
+
+sub seed_if_empty() {
+    our $db;
+    my $all = sqlite_query($db, "SELECT id FROM todos LIMIT 1");
+    if elems($all) == 0 {
+        create_todo_record("Explore Raptor HTTP & SQLite builtins", "high", "runtime", 1);
+        create_todo_record("Design responsive glassmorphism Todo UI", "high", "frontend", 0);
+        create_todo_record("Write end-to-end CRUD contract assertions", "medium", "testing", 0);
+        create_todo_record("Try RaptorHP server-rendered index.phtml mode", "low", "docs", 0);
+    }
+}
+
+# ------------------------------------------------------------------------------
+# HTTP Response Helpers
+# ------------------------------------------------------------------------------
+
+sub json_response($status, $payload) {
+    return {
+        "status"  => $status,
+        "headers" => {
+            "Content-Type"  => "application/json; charset=utf-8",
+            "Cache-Control" => "no-store"
+        },
+        "body"    => json_encode($payload)
+    };
+}
+
+sub html_response($status, $html_body) {
+    return {
+        "status"  => $status,
+        "headers" => {
+            "Content-Type" => "text/html; charset=utf-8"
+        },
+        "body"    => $html_body
+    };
+}
+
+# ------------------------------------------------------------------------------
+# Single-Page Application Frontend (HTML5 + CSS3 Glassmorphism + Vanilla JS)
+# ------------------------------------------------------------------------------
+
+sub render_spa_html() {
+    our $db_path;
+    my $app_title = html_escape("Raptor Todo");
+    my $safe_db   = html_escape($db_path);
+
+    my $tpl = <<'HTML_END';
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{APP_TITLE}} — Full-Stack Raptor App</title>
+    <style>
+        :root {
+            --bg-primary: #0b1020;
+            --bg-mesh-1: rgba(99, 102, 241, 0.22);
+            --bg-mesh-2: rgba(16, 185, 129, 0.16);
+            --bg-mesh-3: rgba(236, 72, 153, 0.14);
+            --glass-bg: rgba(19, 27, 46, 0.72);
+            --glass-card: rgba(30, 41, 69, 0.58);
+            --glass-hover: rgba(43, 58, 95, 0.68);
+            --glass-border: rgba(148, 163, 184, 0.18);
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --text-faint: #64748b;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --accent-glow: rgba(99, 102, 241, 0.35);
+            --prio-high-bg: rgba(244, 63, 94, 0.16);
+            --prio-high-fg: #fb7185;
+            --prio-high-bd: rgba(244, 63, 94, 0.36);
+            --prio-med-bg: rgba(245, 158, 11, 0.16);
+            --prio-med-fg: #fbbf24;
+            --prio-med-bd: rgba(245, 158, 11, 0.36);
+            --prio-low-bg: rgba(16, 185, 129, 0.16);
+            --prio-low-fg: #34d399;
+            --prio-low-bd: rgba(16, 185, 129, 0.36);
+            --cat-bg: rgba(56, 189, 248, 0.14);
+            --cat-fg: #38bdf8;
+            --danger: #f43f5e;
+            --shadow-lg: 0 24px 60px rgba(2, 6, 23, 0.55);
+            --input-bg: rgba(15, 23, 42, 0.65);
+        }
+
+        html[data-theme="light"] {
+            --bg-primary: #f1f5f9;
+            --bg-mesh-1: rgba(99, 102, 241, 0.18);
+            --bg-mesh-2: rgba(14, 165, 233, 0.15);
+            --bg-mesh-3: rgba(236, 72, 153, 0.12);
+            --glass-bg: rgba(255, 255, 255, 0.78);
+            --glass-card: rgba(255, 255, 255, 0.85);
+            --glass-hover: rgba(248, 250, 252, 0.96);
+            --glass-border: rgba(100, 116, 139, 0.20);
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --text-faint: #94a3b8;
+            --accent: #4f46e5;
+            --accent-hover: #4338ca;
+            --accent-glow: rgba(79, 70, 229, 0.22);
+            --prio-high-bg: rgba(244, 63, 94, 0.12);
+            --prio-high-fg: #e11d48;
+            --prio-high-bd: rgba(244, 63, 94, 0.28);
+            --prio-med-bg: rgba(245, 158, 11, 0.13);
+            --prio-med-fg: #d97706;
+            --prio-med-bd: rgba(245, 158, 11, 0.30);
+            --prio-low-bg: rgba(16, 185, 129, 0.12);
+            --prio-low-fg: #059669;
+            --prio-low-bd: rgba(16, 185, 129, 0.28);
+            --cat-bg: rgba(2, 132, 199, 0.11);
+            --cat-fg: #0284c7;
+            --danger: #e11d48;
+            --shadow-lg: 0 20px 50px rgba(15, 23, 42, 0.10);
+            --input-bg: rgba(248, 250, 252, 0.90);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-primary);
+            background-image:
+                radial-gradient(circle at 12% 18%, var(--bg-mesh-1), transparent 42%),
+                radial-gradient(circle at 86% 16%, var(--bg-mesh-2), transparent 38%),
+                radial-gradient(circle at 52% 88%, var(--bg-mesh-3), transparent 45%);
+            background-attachment: fixed;
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2.25rem 1rem 4rem;
+            line-height: 1.5;
+            transition: background-color 0.25s ease, color 0.25s ease;
+        }
+
+        .app-shell {
+            max-width: 780px;
+            margin: 0 auto;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            box-shadow: var(--shadow-lg);
+            padding: 2rem;
+        }
+
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+        }
+
+        .brand-logo {
+            width: 44px;
+            height: 44px;
+            border-radius: 13px;
+            background: linear-gradient(135deg, var(--accent), #10b981);
+            display: grid;
+            place-items: center;
+            color: #fff;
+            font-weight: 800;
+            font-size: 1.25rem;
+            box-shadow: 0 8px 20px var(--accent-glow);
+        }
+
+        .brand h1 {
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+        }
+
+        .brand-sub {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .theme-btn {
+            background: var(--glass-card);
+            color: var(--text-main);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 0.55rem 0.9rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            transition: all 0.18s ease;
+        }
+
+        .theme-btn:hover {
+            background: var(--glass-hover);
+            transform: translateY(-1px);
+        }
+
+        .stats-strip {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-pill {
+            background: var(--glass-card);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+        }
+
+        .stat-label {
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        .stat-val {
+            font-size: 1.35rem;
+            font-weight: 800;
+        }
+
+        .composer {
+            display: grid;
+            grid-template-columns: 1fr auto auto auto;
+            gap: 0.65rem;
+            margin-bottom: 1.35rem;
+            background: var(--glass-card);
+            border: 1px solid var(--glass-border);
+            padding: 0.85rem;
+            border-radius: 16px;
+        }
+
+        input[type="text"], input[type="search"], select {
+            background: var(--input-bg);
+            color: var(--text-main);
+            border: 1px solid var(--glass-border);
+            border-radius: 11px;
+            padding: 0.68rem 0.9rem;
+            font-size: 0.92rem;
+            outline: none;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        input[type="text"]:focus, input[type="search"]:focus, select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .cat-input {
+            width: 128px;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #ffffff;
+            border: none;
+            border-radius: 11px;
+            padding: 0.68rem 1.2rem;
+            font-weight: 700;
+            font-size: 0.92rem;
+            cursor: pointer;
+            transition: background 0.18s ease, transform 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.15rem;
+        }
+
+        .tabs {
+            display: inline-flex;
+            background: var(--glass-card);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 0.22rem;
+            gap: 0.2rem;
+        }
+
+        .tab-btn {
+            background: transparent;
+            color: var(--text-muted);
+            border: none;
+            padding: 0.42rem 0.85rem;
+            border-radius: 9px;
+            font-size: 0.83rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .tab-btn.active {
+            background: var(--accent);
+            color: #fff;
+            box-shadow: 0 3px 10px var(--accent-glow);
+        }
+
+        .filter-right {
+            display: flex;
+            gap: 0.55rem;
+            align-items: center;
+            flex: 1;
+            justify-content: flex-end;
+            min-width: 240px;
+        }
+
+        .search-box {
+            flex: 1;
+            max-width: 230px;
+        }
+
+        .todo-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            min-height: 120px;
+        }
+
+        .todo-item {
+            background: var(--glass-card);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            padding: 0.85rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+        }
+
+        .todo-item:hover {
+            background: var(--glass-hover);
+        }
+
+        .todo-item.completed .todo-title {
+            text-decoration: line-through;
+            color: var(--text-faint);
+        }
+
+        .check-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 7px;
+            border: 2px solid var(--text-muted);
+            background: transparent;
+            cursor: pointer;
+            display: grid;
+            place-items: center;
+            flex-shrink: 0;
+            color: transparent;
+            font-size: 0.82rem;
+            font-weight: 900;
+            transition: all 0.15s ease;
+        }
+
+        .todo-item.completed .check-btn {
+            background: #10b981;
+            border-color: #10b981;
+            color: #ffffff;
+        }
+
+        .todo-main {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .todo-title {
+            font-size: 0.97rem;
+            font-weight: 600;
+            word-break: break-word;
+        }
+
+        .todo-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            align-items: center;
+            margin-top: 0.3rem;
+        }
+
+        .badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 0.14rem 0.52rem;
+            border-radius: 999px;
+            border: 1px solid transparent;
+        }
+
+        .prio-high {
+            background: var(--prio-high-bg);
+            color: var(--prio-high-fg);
+            border-color: var(--prio-high-bd);
+        }
+
+        .prio-medium {
+            background: var(--prio-med-bg);
+            color: var(--prio-med-fg);
+            border-color: var(--prio-med-bd);
+        }
+
+        .prio-low {
+            background: var(--prio-low-bg);
+            color: var(--prio-low-fg);
+            border-color: var(--prio-low-bd);
+        }
+
+        .cat-tag {
+            font-size: 0.73rem;
+            font-weight: 600;
+            padding: 0.12rem 0.55rem;
+            border-radius: 999px;
+            background: var(--cat-bg);
+            color: var(--cat-fg);
+            cursor: pointer;
+            border: none;
+        }
+
+        .todo-actions {
+            display: flex;
+            gap: 0.35rem;
+            align-items: center;
+        }
+
+        .icon-btn {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid transparent;
+            border-radius: 8px;
+            padding: 0.35rem 0.55rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .icon-btn:hover {
+            background: var(--input-bg);
+            color: var(--text-main);
+            border-color: var(--glass-border);
+        }
+
+        .icon-btn.delete:hover {
+            color: var(--danger);
+            border-color: rgba(244, 63, 94, 0.35);
+        }
+
+        .edit-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            width: 100%;
+            align-items: center;
+        }
+
+        .edit-row input[type="text"] {
+            flex: 1;
+            min-width: 160px;
+            padding: 0.45rem 0.7rem;
+        }
+
+        .edit-row select {
+            padding: 0.45rem 0.6rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 2.6rem 1rem;
+            color: var(--text-muted);
+            border: 1px dashed var(--glass-border);
+            border-radius: 16px;
+        }
+
+        .footer-bar {
+            margin-top: 1.35rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--glass-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            font-size: 0.86rem;
+            color: var(--text-muted);
+        }
+
+        .clear-btn {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            padding: 0.45rem 0.85rem;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .clear-btn:hover:not(:disabled) {
+            color: var(--danger);
+            border-color: var(--prio-high-bd);
+            background: var(--prio-high-bg);
+        }
+
+        .clear-btn:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 1.25rem;
+            right: 1.25rem;
+            background: var(--glass-bg);
+            border: 1px solid var(--prio-high-bd);
+            color: var(--text-main);
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            box-shadow: var(--shadow-lg);
+            font-size: 0.86rem;
+            display: none;
+        }
+
+        @media (max-width: 680px) {
+            .app-shell { padding: 1.25rem; }
+            .composer { grid-template-columns: 1fr 1fr; }
+            .composer #new-title { grid-column: 1 / -1; }
+            .composer .cat-input { width: 100%; }
+            .composer .btn-primary { grid-column: 1 / -1; }
+            .stats-strip { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <main class="app-shell">
+        <header class="top-bar">
+            <div class="brand">
+                <div class="brand-logo" aria-hidden="true">R</div>
+                <div>
+                    <h1>{{APP_TITLE}}</h1>
+                    <div class="brand-sub">Raptor HTTP + SQLite ({{DB_PATH}})</div>
+                </div>
+            </div>
+            <button id="theme-toggle" class="theme-btn" type="button" aria-label="Toggle color theme">
+                <span id="theme-icon">&#9790;</span>
+                <span id="theme-label">Light Mode</span>
+            </button>
+        </header>
+
+        <section class="stats-strip" aria-label="Task summary">
+            <div class="stat-pill">
+                <span class="stat-label">Total</span>
+                <span class="stat-val" id="stat-total">0</span>
+            </div>
+            <div class="stat-pill">
+                <span class="stat-label">Active</span>
+                <span class="stat-val" id="stat-active">0</span>
+            </div>
+            <div class="stat-pill">
+                <span class="stat-label">Done</span>
+                <span class="stat-val" id="stat-completed">0</span>
+            </div>
+        </section>
+
+        <form id="add-form" class="composer" autocomplete="off">
+            <input id="new-title" type="text" placeholder="What needs to get done?" required maxlength="240">
+            <select id="new-priority" aria-label="Priority">
+                <option value="high">High Priority</option>
+                <option value="medium" selected>Medium</option>
+                <option value="low">Low Priority</option>
+            </select>
+            <input id="new-category" class="cat-input" type="text" placeholder="Category (work)" value="work" maxlength="32">
+            <button type="submit" class="btn-primary">+ Add Task</button>
+        </form>
+
+        <section class="toolbar" aria-label="Filters">
+            <div class="tabs" role="tablist">
+                <button type="button" class="tab-btn active" data-status="">All</button>
+                <button type="button" class="tab-btn" data-status="active">Active</button>
+                <button type="button" class="tab-btn" data-status="completed">Completed</button>
+            </div>
+            <div class="filter-right">
+                <select id="filter-priority" aria-label="Filter by priority">
+                    <option value="">All Priorities</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                </select>
+                <input id="filter-search" class="search-box" type="search" placeholder="Search tasks or tags...">
+            </div>
+        </section>
+
+        <ul id="todo-list" class="todo-list" aria-live="polite"></ul>
+
+        <footer class="footer-bar">
+            <span id="active-counter">0 items left</span>
+            <button id="clear-completed-btn" type="button" class="clear-btn" disabled>Clear Completed</button>
+        </footer>
+    </main>
+
+    <div id="toast" class="toast" role="status"></div>
+
+    <script>
+        (function () {
+            const state = {
+                status: '',
+                priority: '',
+                q: '',
+                editingId: null,
+                todos: [],
+                summary: { total: 0, active: 0, completed: 0 }
+            };
+
+            const htmlEl = document.documentElement;
+            const themeBtn = document.getElementById('theme-toggle');
+            const themeIcon = document.getElementById('theme-icon');
+            const themeLabel = document.getElementById('theme-label');
+            const listEl = document.getElementById('todo-list');
+            const addForm = document.getElementById('add-form');
+            const titleInput = document.getElementById('new-title');
+            const prioInput = document.getElementById('new-priority');
+            const catInput = document.getElementById('new-category');
+            const filterPrio = document.getElementById('filter-priority');
+            const filterSearch = document.getElementById('filter-search');
+            const clearBtn = document.getElementById('clear-completed-btn');
+            const activeCounter = document.getElementById('active-counter');
+            const statTotal = document.getElementById('stat-total');
+            const statActive = document.getElementById('stat-active');
+            const statCompleted = document.getElementById('stat-completed');
+            const toastEl = document.getElementById('toast');
+
+            function applyTheme(theme) {
+                htmlEl.setAttribute('data-theme', theme);
+                localStorage.setItem('raptor_todo_theme', theme);
+                if (theme === 'light') {
+                    themeIcon.textContent = '\u2600';
+                    themeLabel.textContent = 'Dark Mode';
+                } else {
+                    themeIcon.textContent = '\u263E';
+                    themeLabel.textContent = 'Light Mode';
+                }
+            }
+
+            applyTheme(localStorage.getItem('raptor_todo_theme') || 'dark');
+            themeBtn.addEventListener('click', () => {
+                const next = htmlEl.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                applyTheme(next);
+            });
+
+            function showToast(msg) {
+                toastEl.textContent = msg;
+                toastEl.style.display = 'block';
+                clearTimeout(showToast._t);
+                showToast._t = setTimeout(() => { toastEl.style.display = 'none'; }, 3000);
+            }
+
+            function escapeHtml(str) {
+                const d = document.createElement('div');
+                d.textContent = str == null ? '' : String(str);
+                return d.innerHTML;
+            }
+
+            async function api(path, options) {
+                const res = await fetch(path, Object.assign({
+                    headers: { 'Content-Type': 'application/json' }
+                }, options || {}));
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    throw new Error(data.error || ('HTTP ' + res.status));
+                }
+                return data;
+            }
+
+            async function loadTodos() {
+                try {
+                    const params = new URLSearchParams();
+                    if (state.status) params.set('status', state.status);
+                    if (state.priority) params.set('priority', state.priority);
+                    if (state.q) params.set('q', state.q);
+                    const qs = params.toString();
+                    const data = await api('/api/todos' + (qs ? '?' + qs : ''));
+                    state.todos = Array.isArray(data.todos) ? data.todos : [];
+                    state.summary = data.summary || { total: state.todos.length, active: 0, completed: 0 };
+                    render();
+                } catch (err) {
+                    showToast('Failed to load todos: ' + err.message);
+                }
+            }
+
+            function render() {
+                const s = state.summary;
+                statTotal.textContent = s.total || 0;
+                statActive.textContent = s.active || 0;
+                statCompleted.textContent = s.completed || 0;
+                activeCounter.textContent = (s.active === 1 ? '1 active item left' : (s.active || 0) + ' active items left');
+                clearBtn.disabled = !(s.completed > 0);
+
+                if (state.todos.length === 0) {
+                    listEl.innerHTML = '<li class="empty-state">No tasks match the current view. Add one above!</li>';
+                    return;
+                }
+
+                listEl.innerHTML = state.todos.map(todo => {
+                    const done = Number(todo.completed) === 1 || todo.completed === true;
+                    const prio = (todo.priority || 'medium').toLowerCase();
+                    const cat = todo.category || 'general';
+
+                    if (state.editingId === todo.id) {
+                        return `
+                            <li class="todo-item" data-id="${todo.id}">
+                                <div class="edit-row">
+                                    <input type="text" class="edit-title" value="${escapeHtml(todo.title)}" maxlength="240">
+                                    <select class="edit-prio">
+                                        <option value="high" ${prio === 'high' ? 'selected' : ''}>High</option>
+                                        <option value="medium" ${prio === 'medium' ? 'selected' : ''}>Medium</option>
+                                        <option value="low" ${prio === 'low' ? 'selected' : ''}>Low</option>
+                                    </select>
+                                    <input type="text" class="edit-cat cat-input" value="${escapeHtml(cat)}" maxlength="32">
+                                    <button type="button" class="btn-primary save-edit-btn">Save</button>
+                                    <button type="button" class="icon-btn cancel-edit-btn">Cancel</button>
+                                </div>
+                            </li>
+                        `;
+                    }
+
+                    return `
+                        <li class="todo-item ${done ? 'completed' : ''}" data-id="${todo.id}">
+                            <button type="button" class="check-btn toggle-btn" aria-label="Toggle completion">&#10003;</button>
+                            <div class="todo-main">
+                                <div class="todo-title">${escapeHtml(todo.title)}</div>
+                                <div class="todo-meta">
+                                    <span class="badge prio-${escapeHtml(prio)}">${escapeHtml(prio)}</span>
+                                    <button type="button" class="cat-tag" data-cat="${escapeHtml(cat)}">#${escapeHtml(cat)}</button>
+                                </div>
+                            </div>
+                            <div class="todo-actions">
+                                <button type="button" class="icon-btn edit-btn">Edit</button>
+                                <button type="button" class="icon-btn delete delete-btn">Delete</button>
+                            </div>
+                        </li>
+                    `;
+                }).join('');
+            }
+
+            addForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const title = titleInput.value.trim();
+                if (!title) return;
+                try {
+                    await api('/api/todos', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            title,
+                            priority: prioInput.value,
+                            category: catInput.value.trim() || 'general'
+                        })
+                    });
+                    titleInput.value = '';
+                    titleInput.focus();
+                    await loadTodos();
+                } catch (err) {
+                    showToast('Could not add task: ' + err.message);
+                }
+            });
+
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    state.status = btn.getAttribute('data-status') || '';
+                    loadTodos();
+                });
+            });
+
+            filterPrio.addEventListener('change', () => {
+                state.priority = filterPrio.value;
+                loadTodos();
+            });
+
+            let searchTimer = null;
+            filterSearch.addEventListener('input', () => {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => {
+                    state.q = filterSearch.value.trim();
+                    loadTodos();
+                }, 140);
+            });
+
+            clearBtn.addEventListener('click', async () => {
+                try {
+                    await api('/api/todos/clear-completed', { method: 'POST', body: '{}' });
+                    await loadTodos();
+                } catch (err) {
+                    showToast('Failed clearing completed: ' + err.message);
+                }
+            });
+
+            listEl.addEventListener('click', async (e) => {
+                const li = e.target.closest('.todo-item');
+                if (!li) return;
+                const id = Number(li.getAttribute('data-id'));
+
+                if (e.target.closest('.toggle-btn')) {
+                    try {
+                        await api('/api/todos/' + id + '/toggle', { method: 'POST', body: '{}' });
+                        await loadTodos();
+                    } catch (err) {
+                        showToast('Toggle failed: ' + err.message);
+                    }
+                } else if (e.target.closest('.delete-btn')) {
+                    try {
+                        await api('/api/todos/' + id, { method: 'DELETE' });
+                        await loadTodos();
+                    } catch (err) {
+                        showToast('Delete failed: ' + err.message);
+                    }
+                } else if (e.target.closest('.edit-btn')) {
+                    state.editingId = id;
+                    render();
+                } else if (e.target.closest('.cancel-edit-btn')) {
+                    state.editingId = null;
+                    render();
+                } else if (e.target.closest('.save-edit-btn')) {
+                    const newTitle = li.querySelector('.edit-title').value.trim();
+                    const newPrio = li.querySelector('.edit-prio').value;
+                    const newCat = li.querySelector('.edit-cat').value.trim() || 'general';
+                    if (!newTitle) return;
+                    try {
+                        await api('/api/todos/' + id, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ title: newTitle, priority: newPrio, category: newCat })
+                        });
+                        state.editingId = null;
+                        await loadTodos();
+                    } catch (err) {
+                        showToast('Update failed: ' + err.message);
+                    }
+                } else if (e.target.closest('.cat-tag')) {
+                    const cat = e.target.closest('.cat-tag').getAttribute('data-cat');
+                    filterSearch.value = cat;
+                    state.q = cat;
+                    loadTodos();
+                }
+            });
+
+            loadTodos();
+        })();
+    </script>
+</body>
+</html>
+HTML_END
+
+    $tpl = replace($tpl, "{{APP_TITLE}}", $app_title);
+    $tpl = replace($tpl, "{{DB_PATH}}", $safe_db);
+    return $tpl;
+}
+
+# ------------------------------------------------------------------------------
+# REST API Request Router
+# ------------------------------------------------------------------------------
+
+sub handle_list_todos($query) {
+    our $db;
+    my $status_filter = "";
+    my $prio_filter   = "";
+    my $q_filter      = "";
+
+    if defined($query) && type($query) eq "Hash" {
+        if exists($query, "status") && defined($query<status>) {
+            $status_filter = lc(trim(str($query<status>)));
+        }
+        if exists($query, "priority") && defined($query<priority>) {
+            $prio_filter = lc(trim(str($query<priority>)));
+        }
+        if exists($query, "q") && defined($query<q>) {
+            $q_filter = lc(trim(str($query<q>)));
+        }
+    }
+
+    my $rows = sqlite_query($db, "SELECT id, title, completed, priority, category, created_at FROM todos ORDER BY id DESC");
+
+    my $total      = 0;
+    my $active     = 0;
+    my $completed  = 0;
+    my $cnt_high   = 0;
+    my $cnt_medium = 0;
+    my $cnt_low    = 0;
+    my $filtered   = [];
+
+    for $rows -> $r {
+        my $todo = row_to_todo($r);
+        $total = $total + 1;
+        if $todo<completed> == 1 {
+            $completed = $completed + 1;
+        } else {
+            $active = $active + 1;
+        }
+
+        if $todo<priority> eq "high" {
+            $cnt_high = $cnt_high + 1;
+        } elsif $todo<priority> eq "low" {
+            $cnt_low = $cnt_low + 1;
+        } else {
+            $cnt_medium = $cnt_medium + 1;
+        }
+
+        my $keep = 1;
+        if $status_filter eq "active" && $todo<completed> != 0 {
+            $keep = 0;
+        } elsif $status_filter eq "completed" && $todo<completed> != 1 {
+            $keep = 0;
+        }
+
+        if $keep == 1 && ($prio_filter eq "high" || $prio_filter eq "medium" || $prio_filter eq "low") {
+            if $todo<priority> ne $prio_filter {
+                $keep = 0;
+            }
+        }
+
+        if $keep == 1 && $q_filter ne "" {
+            my $hay_title = lc($todo<title>);
+            my $hay_cat   = lc($todo<category>);
+            if !contains($hay_title, $q_filter) && !contains($hay_cat, $q_filter) {
+                $keep = 0;
+            }
+        }
+
+        if $keep == 1 {
+            push($filtered, $todo);
+        }
+    }
+
+    return json_response(200, {
+        "todos"     => $filtered,
+        "total"     => $total,
+        "active"    => $active,
+        "completed" => $completed,
+        "summary"   => {
+            "total"     => $total,
+            "active"    => $active,
+            "completed" => $completed,
+            "filtered"  => elems($filtered),
+            "high"      => $cnt_high,
+            "medium"    => $cnt_medium,
+            "low"       => $cnt_low
+        }
+    });
+}
+
+sub handle_create_todo($raw_body) {
+    my $payload = try { json_decode($raw_body) };
+    if !defined($payload) || type($payload) ne "Hash" {
+        return json_response(400, { "error" => "Request body must be a valid JSON object" });
+    }
+
+    my $title = "";
+    if exists($payload, "title") && defined($payload<title>) {
+        $title = trim(str($payload<title>));
+    }
+    if $title eq "" {
+        return json_response(400, { "error" => "Field 'title' is required" });
+    }
+
+    my $prio = "medium";
+    if exists($payload, "priority") {
+        $prio = normalize_priority($payload<priority>);
+    }
+
+    my $cat = "general";
+    if exists($payload, "category") {
+        $cat = normalize_category($payload<category>);
+    }
+
+    my $created = create_todo_record($title, $prio, $cat, 0);
+    return json_response(201, $created);
+}
+
+sub handle_toggle_todo($id) {
+    our $db;
+    my $existing = get_todo_by_id($id);
+    if !defined($existing) {
+        return json_response(404, { "error" => "Todo not found" });
+    }
+
+    my $next_comp = 1;
+    if $existing<completed> == 1 {
+        $next_comp = 0;
+    }
+
+    sqlite_exec($db, "UPDATE todos SET completed = " ~ $next_comp ~ " WHERE id = " ~ int($id));
+    my $updated = get_todo_by_id($id);
+    return json_response(200, $updated);
+}
+
+sub handle_update_todo($id, $raw_body) {
+    our $db;
+    my $existing = get_todo_by_id($id);
+    if !defined($existing) {
+        return json_response(404, { "error" => "Todo not found" });
+    }
+
+    my $trimmed_body = trim(str($raw_body // ""));
+    if $trimmed_body eq "" || $trimmed_body eq "{}" {
+        return handle_toggle_todo($id);
+    }
+
+    my $payload = try { json_decode($trimmed_body) };
+    if !defined($payload) || type($payload) ne "Hash" {
+        return json_response(400, { "error" => "Invalid JSON payload" });
+    }
+
+    my $next_title = $existing<title>;
+    my $next_prio  = $existing<priority>;
+    my $next_cat   = $existing<category>;
+    my $next_comp  = $existing<completed>;
+
+    if exists($payload, "title") && defined($payload<title>) {
+        my $t = trim(str($payload<title>));
+        if $t eq "" {
+            return json_response(400, { "error" => "Field 'title' cannot be empty" });
+        }
+        $next_title = $t;
+    }
+
+    if exists($payload, "priority") && defined($payload<priority>) {
+        $next_prio = normalize_priority($payload<priority>);
+    }
+
+    if exists($payload, "category") && defined($payload<category>) {
+        $next_cat = normalize_category($payload<category>);
+    }
+
+    if exists($payload, "completed") && defined($payload<completed>) {
+        $next_comp = normalize_completed($payload<completed>);
+    }
+
+    my $sql = "UPDATE todos SET title = '" ~ sql_escape($next_title)
+        ~ "', priority = '" ~ sql_escape($next_prio)
+        ~ "', category = '" ~ sql_escape($next_cat)
+        ~ "', completed = " ~ $next_comp
+        ~ " WHERE id = " ~ int($id);
+
+    sqlite_exec($db, $sql);
+    my $updated = get_todo_by_id($id);
+    return json_response(200, $updated);
+}
+
+sub handle_delete_todo($id) {
+    our $db;
+    my $existing = get_todo_by_id($id);
+    if !defined($existing) {
+        return json_response(404, { "error" => "Todo not found" });
+    }
+
+    my $res = sqlite_exec($db, "DELETE FROM todos WHERE id = " ~ int($id));
+    return json_response(200, {
+        "deleted" => int($res<changes>),
+        "id"      => int($id)
+    });
+}
+
+sub handle_clear_completed() {
+    our $db;
+    my $res = sqlite_exec($db, "DELETE FROM todos WHERE completed = 1");
+    return json_response(200, {
+        "cleared" => int($res<changes>)
+    });
+}
+
+our $http_handler = sub ($req) {
+    my $method = uc(str($req<method> // "GET"));
+    my $path   = str($req<path> // "/");
+
+    if length($path) > 1 && ends_with($path, "/") {
+        $path = substr($path, 0, length($path) - 1);
+    }
+
+    if $method eq "GET" && ($path eq "/" || $path eq "/index.html") {
+        return html_response(200, render_spa_html());
+    }
+
+    if $method eq "GET" && $path eq "/api/health" {
+        return json_response(200, { "status" => "ok" });
+    }
+
+    if $path eq "/api/todos" {
+        if $method eq "GET" {
+            return handle_list_todos($req<query>);
+        }
+        if $method eq "POST" {
+            return handle_create_todo($req<body>);
+        }
+    }
+
+    if $path eq "/api/todos/clear-completed" && ($method eq "POST" || $method eq "DELETE") {
+        return handle_clear_completed();
+    }
+
+    my $parts = split("/", $path);
+    # /api/todos/:id -> ["", "api", "todos", ":id"]
+    if elems($parts) == 4 && $parts[1] eq "api" && $parts[2] eq "todos" {
+        my $id_str = $parts[3];
+        my $id = int($id_str);
+        if $id > 0 && str($id) eq $id_str {
+            if $method eq "GET" {
+                my $item = get_todo_by_id($id);
+                if !defined($item) {
+                    return json_response(404, { "error" => "Todo not found" });
+                }
+                return json_response(200, $item);
+            }
+            if $method eq "PATCH" || $method eq "PUT" || $method eq "POST" {
+                return handle_update_todo($id, $req<body>);
+            }
+            if $method eq "DELETE" {
+                return handle_delete_todo($id);
+            }
+        }
+    }
+
+    # /api/todos/:id/toggle -> ["", "api", "todos", ":id", "toggle"]
+    if elems($parts) == 5 && $parts[1] eq "api" && $parts[2] eq "todos" && $parts[4] eq "toggle" {
+        my $id_str = $parts[3];
+        my $id = int($id_str);
+        if $id > 0 && str($id) eq $id_str && ($method eq "POST" || $method eq "PATCH" || $method eq "PUT") {
+            return handle_toggle_todo($id);
+        }
+    }
+
+    return json_response(404, { "error" => "Not found: " ~ $method ~ " " ~ $path });
+};
+
+# ------------------------------------------------------------------------------
+# Automated End-to-End CRUD Self-Test Mode vs Interactive Server Mode
+# ------------------------------------------------------------------------------
+
+sub run_self_test() {
+    our $http_handler;
+    our $db;
+
+    my $srv = Nil;
+    my $bound_port = 0;
+
+    for 18921..18935 -> $candidate_port {
+        my $attempt = try { http_server_listen($candidate_port, $http_handler) };
+        if defined($attempt) && type($attempt) eq "Hash" {
+            $srv = $attempt;
+            $bound_port = $candidate_port;
+            last;
+        }
+    }
+
+    ASSERT defined($srv), "Bound Todo HTTP server on ephemeral test port";
+    sleep(0.05);
+
+    my $base = "http://127.0.0.1:" ~ $bound_port;
+
+    # 1. GET / serves responsive SPA HTML
+    my $home = http_get($base ~ "/");
+    ASSERT $home<status> == 200, "GET / returns HTTP 200";
+    ASSERT contains($home<body>, "Raptor Todo"), "GET / contains Raptor Todo title";
+    ASSERT contains($home<body>, "clear-completed-btn"), "GET / renders SPA controls";
+
+    # 2. POST 3 todos with varied priorities, categories, and SQL/HTML characters
+    my $r1 = http_post($base ~ "/api/todos", json_encode({
+        "title"    => "Implement HTTP & SQLite API",
+        "priority" => "high",
+        "category" => "backend"
+    }));
+    ASSERT $r1<status> == 201, "POST todo #1 returns 201";
+    my $t1 = json_decode($r1<body>);
+    ASSERT $t1<id> > 0, "Todo #1 assigned positive id";
+    ASSERT $t1<priority> eq "high", "Todo #1 priority is high";
+
+    my $r2 = http_post($base ~ "/api/todos", json_encode({
+        "title"    => "Review O'Reilly's Raptor Guide",
+        "priority" => "medium",
+        "category" => "docs"
+    }));
+    ASSERT $r2<status> == 201, "POST todo #2 with single quote returns 201";
+    my $t2 = json_decode($r2<body>);
+    ASSERT $t2<title> eq "Review O'Reilly's Raptor Guide", "SQL single-quote round-trips cleanly";
+
+    my $r3 = http_post($base ~ "/api/todos", json_encode({
+        "title"    => "Polish dark/light glassmorphism CSS",
+        "priority" => "low",
+        "category" => "frontend"
+    }));
+    ASSERT $r3<status> == 201, "POST todo #3 returns 201";
+    my $t3 = json_decode($r3<body>);
+
+    # 3. GET /api/todos returns all 3 + accurate summary counts
+    my $list_all = http_get($base ~ "/api/todos");
+    ASSERT $list_all<status> == 200, "GET /api/todos returns 200";
+    my $list_data = json_decode($list_all<body>);
+    ASSERT elems($list_data<todos>) == 3, "GET /api/todos returns 3 todos";
+    ASSERT $list_data<summary><total> == 3, "Summary total is 3";
+    ASSERT $list_data<summary><active> == 3, "Summary active is 3";
+    ASSERT $list_data<summary><completed> == 0, "Summary completed is 0";
+
+    # 4. Toggle completion on todo #1
+    my $tog = http_post($base ~ "/api/todos/" ~ $t1<id> ~ "/toggle", "{}");
+    ASSERT $tog<status> == 200, "POST /api/todos/:id/toggle returns 200";
+    my $tog_data = json_decode($tog<body>);
+    ASSERT $tog_data<completed> == 1, "Todo #1 toggled to completed=1";
+
+    # 5. Filter ?status=active, ?priority=low, and ?q=O'Reilly
+    my $act_resp = http_get($base ~ "/api/todos?status=active");
+    my $act_data = json_decode($act_resp<body>);
+    ASSERT elems($act_data<todos>) == 2, "Filter ?status=active returns 2 active todos";
+    ASSERT $act_data<summary><completed> == 1, "Summary still tracks 1 completed todo";
+
+    my $prio_resp = http_get($base ~ "/api/todos?priority=low");
+    my $prio_data = json_decode($prio_resp<body>);
+    ASSERT elems($prio_data<todos>) == 1, "Filter ?priority=low returns 1 todo";
+    ASSERT $prio_data<todos>[0]<id> == $t3<id>, "Filter ?priority=low matches todo #3";
+
+    my $search_resp = http_get($base ~ "/api/todos?q=frontend");
+    my $search_data = json_decode($search_resp<body>);
+    ASSERT elems($search_data<todos>) == 1, "Search ?q=frontend matches category";
+
+    # 6. Update title & priority via PATCH /api/todos/:id
+    my $upd_resp = http_request(
+        "PATCH",
+        $base ~ "/api/todos/" ~ $t2<id>,
+        json_encode({ "title" => "Publish Raptor v1.0 Guide", "priority" => "high", "category" => "release" }),
+        { "Content-Type" => "application/json" }
+    );
+    ASSERT $upd_resp<status> == 200, "PATCH /api/todos/:id returns 200";
+    my $upd_data = json_decode($upd_resp<body>);
+    ASSERT $upd_data<title> eq "Publish Raptor v1.0 Guide", "PATCH updated title";
+    ASSERT $upd_data<priority> eq "high", "PATCH updated priority";
+    ASSERT $upd_data<category> eq "release", "PATCH updated category";
+
+    # 7. DELETE /api/todos/:id removes todo #3
+    my $del_resp = http_request("DELETE", $base ~ "/api/todos/" ~ $t3<id>, "", {});
+    ASSERT $del_resp<status> == 200, "DELETE /api/todos/:id returns 200";
+    my $del_data = json_decode($del_resp<body>);
+    ASSERT $del_data<deleted> == 1, "DELETE reports 1 row deleted";
+
+    # 8. POST /api/todos/clear-completed deletes completed todo #1, leaving active todo #2
+    my $clr_resp = http_post($base ~ "/api/todos/clear-completed", "{}");
+    ASSERT $clr_resp<status> == 200, "POST /api/todos/clear-completed returns 200";
+    my $clr_data = json_decode($clr_resp<body>);
+    ASSERT $clr_data<cleared> == 1, "clear-completed removed 1 completed todo";
+
+    my $final_resp = http_get($base ~ "/api/todos");
+    my $final_data = json_decode($final_resp<body>);
+    ASSERT elems($final_data<todos>) == 1, "Exactly 1 active todo remains";
+    ASSERT $final_data<todos>[0]<id> == $t2<id>, "Remaining todo is updated todo #2";
+
+    http_server_close($srv);
+    sqlite_close($db);
+    say "Todo Web App self-test PASSED";
+}
+
+if $is_test_mode == 1 {
+    run_self_test();
+} else {
+    my $port = getenv("PORT");
+    if $port eq "" {
+        $port = "8080";
+    }
+    seed_if_empty();
+    my $srv = http_server_listen($port, $http_handler);
+    say "Raptor Todo App listening on http://localhost:" ~ $port;
+    while True {
+        sleep(1);
+    }
+}

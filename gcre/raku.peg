@@ -40,12 +40,19 @@ SymTexas <- "<<" (!">>" .)+ ">>"
 SymBracket <- "[" (!"]" .)+ "]"
 
 RuleTrait <- _ "is" !NameCont _ NameTok TraitArg?
+           / _ RuleAdverb
+
+RuleAdverb <- ":" "!"? AdverbName !NameCont
+
+AdverbName <- "ignorecase" / "ignoremark" / "sigspace" / "ratchet" / "i" / "m" / "s" / "r"
 
 TraitArg <- "(" (!")" .)* ")" / "«" (!"»" .)* "»" / "[" (!"]" .)* "]" / "<" (!">" .)* ">"
 
 RxAlt <- (_ "||")? _ RxLTMAlt (_ "||" _ RxLTMAlt)*
 
-RxLTMAlt <- (_ "|" !"|")? _ RxSeq (_ "|" !"|" _ RxSeq)*
+RxLTMAlt <- (_ "|" !"|")? _ RxConj (_ "|" !"|" _ RxConj)*
+
+RxConj <- RxSeq (_ ("&&" / "&") _ RxSeq)*
 
 RxSeq <- RxItem (_ RxItem)*
 
@@ -63,9 +70,11 @@ QuantSpec <- StarStarQuant / SimpleQuant
 
 StarStarQuant <- _ "**" _ CountRange FrugalOpt
 
+SimpleQuant <- "*?" / "+?" / "??" / "*" / "+" / "?"
+
 FrugalOpt <- "?" / ""
 
-CountRange <- Digits _ ".." _ UpperBound / Digits
+CountRange <- Digits _ ".." _ UpperBound / "^" Digits / Digits
 
 UpperBound <- "*" / Digits
 
@@ -78,8 +87,13 @@ SepOp <- "%%" / "%"
 SepAtom <- RxPrimary QuantSpec?
 
 RxPrimary <- ActionStub
+           / RxCapSpan
            / RxGroup
            / RxCapture
+           / NamedBackref
+           / PosBackref
+           / RxAdverb
+           / RxCut
            / RxAngle
            / RxSq
            / RxDq
@@ -91,21 +105,33 @@ RxPrimary <- ActionStub
            / "«"
            / "»"
            / "^"
-           / "$"
+           / "$" ![0-9<]
            / "."
            / "#"
            / ";"
 
 ActionStub <- "{" _ "*" _ "}"
 
+RxCapSpan <- "<(" _ RxAlt? _ ")>"
+
 RxGroup <- "[" _ RxAlt? _ "]"
 
 RxCapture <- "(" _ RxAlt? _ ")"
+
+NamedBackref <- "$<" NameTok ">" !(_ "=")
+
+PosBackref <- "$" Digits
+
+RxAdverb <- RuleAdverb
+
+RxCut <- ":::" / "::" / ":" !NameCont !"!"
 
 RxAngle <- LookaheadPos
          / LookaheadNeg
          / LookbehindPos
          / LookbehindNeg
+         / WordBoundPos
+         / WordBoundNeg
          / StdAngle
 
 LookaheadPos <- "<?" _ "before" !NameCont _ RxAlt _ ">"
@@ -116,13 +142,17 @@ LookbehindPos <- "<?" _ "after" !NameCont _ RxAlt _ ">"
 
 LookbehindNeg <- "<!" _ "after" !NameCont _ RxAlt _ ">"
 
+WordBoundPos <- "<|w>"
+
+WordBoundNeg <- "<!|w>"
+
 StdAngle <- "<" AnglePrefix AngleBody ">"
 
 AnglePrefix <- "?" / "!" / "." / ""
 
-AngleBody <- CharClassExpr / SubruleAlias / HostName / NameTok
+AngleBody <- CharClassExpr / SubruleAlias / "~~" / RxSq / RxDq / HostName / NameTok
 
-SubruleAlias <- NameTok "=" (HostName / NameTok)
+SubruleAlias <- NameTok "=" ("~~" / HostName / NameTok)
 
 # Organic host hatch. Spelled <HOST_name> in .raku.
 HostName <- "HOST_" NameTok

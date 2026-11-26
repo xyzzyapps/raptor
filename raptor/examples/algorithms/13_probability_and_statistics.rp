@@ -1,0 +1,139 @@
+# Mastering Algorithms with Perl - Chapter 13: Probability and Statistics
+# Covers mean/median/variance/stddev, Pearson correlation & OLS linear regression,
+# exact combinatorics (nPr, nCr, binomial PMF), Fisher-Yates shuffle, and Monte Carlo pi.
+
+say "=== Chapter 13: Probability and Statistics ===";
+
+# 1. Descriptive Statistics: Mean, Median, Population & Sample Variance/StdDev
+sub stat_mean(@xs) {
+    return sum(@xs) * 1.0 / elems(@xs);
+}
+
+sub stat_median(@xs) {
+    my @s = sort(@xs);
+    my $n = elems(@s);
+    if ($n % 2) == 1 {
+        return @s[$n div 2] * 1.0;
+    }
+    return (@s[($n div 2) - 1] + @s[$n div 2]) * 0.5;
+}
+
+sub stat_variance(@xs, $sample = False) {
+    my $mu = stat_mean(@xs);
+    my $sq = 0.0;
+    for @xs -> $x {
+        my $d = $x - $mu;
+        $sq += $d * $d;
+    }
+    my $denom = $sample ?? (elems(@xs) - 1) !! elems(@xs);
+    return $sq / $denom;
+}
+
+sub stat_stddev(@xs, $sample = False) {
+    return sqrt(stat_variance(@xs, $sample));
+}
+
+# Classic textbook dataset: [2, 4, 4, 4, 5, 5, 7, 9] -> mean=5, pop_var=4, pop_sd=2
+my @data = [2, 4, 4, 4, 5, 5, 7, 9];
+ASSERT abs(stat_mean(@data) - 5.0) < 1e-9, "Mean == 5.0";
+ASSERT abs(stat_median(@data) - 4.5) < 1e-9, "Median == 4.5";
+ASSERT abs(stat_variance(@data, False) - 4.0) < 1e-9 && abs(stat_stddev(@data, False) - 2.0) < 1e-9, "Pop variance=4, sd=2";
+say "[1] Descriptive Stats: mean={stat_mean(@data)}, median={stat_median(@data)}, sd={stat_stddev(@data, False)}";
+
+# 2. Pearson Correlation Coefficient & Simple Linear Regression (OLS)
+sub pearson_r(@xs, @ys) {
+    my $mx = stat_mean(@xs);
+    my $my = stat_mean(@ys);
+    my $num = 0.0;
+    my $dx2 = 0.0;
+    my $dy2 = 0.0;
+    for 0 ..^ elems(@xs) -> $i {
+        my $dx = @xs[$i] - $mx;
+        my $dy = @ys[$i] - $my;
+        $num += $dx * $dy;
+        $dx2 += $dx * $dx;
+        $dy2 += $dy * $dy;
+    }
+    return $num / sqrt($dx2 * $dy2);
+}
+
+sub linear_regression(@xs, @ys) {
+    my $mx = stat_mean(@xs);
+    my $my = stat_mean(@ys);
+    my $num = 0.0;
+    my $den = 0.0;
+    for 0 ..^ elems(@xs) -> $i {
+        my $dx = @xs[$i] - $mx;
+        $num += $dx * (@ys[$i] - $my);
+        $den += $dx * $dx;
+    }
+    my $slope = $num / $den;
+    my $intercept = $my - $slope * $mx;
+    return { "slope" => $slope, "intercept" => $intercept };
+}
+
+my @rx = [1, 2, 3, 4, 5];
+my @ry = [3, 5, 7, 9, 11]; # y = 2x + 1
+my %fit = linear_regression(@rx, @ry);
+my $r_val = pearson_r(@rx, @ry);
+ASSERT abs(%fit<slope> - 2.0) < 1e-9 && abs(%fit<intercept> - 1.0) < 1e-9 && abs($r_val - 1.0) < 1e-9, "OLS fit y=2x+1, r=1";
+say "[2] Linear Regression: slope={%fit<slope>}, intercept={%fit<intercept>}, Pearson r={$r_val}";
+
+# 3. Combinatorics: Permutations nPr, Combinations nCr, and Binomial PMF
+sub nPr($n, $r) {
+    return 0 if $r < 0 || $r > $n;
+    my $acc = 1;
+    for 0 ..^ $r -> $i { $acc = $acc * ($n - $i); }
+    return $acc;
+}
+
+sub nCr($n, $r) {
+    return 0 if $r < 0 || $r > $n;
+    my $k = ($r < ($n - $r)) ?? $r !! ($n - $r);
+    my $acc = 1;
+    for 1 .. $k -> $i {
+        $acc = ($acc * ($n - $k + $i)) div $i;
+    }
+    return $acc;
+}
+
+sub binomial_pmf($k, $n, $p) {
+    return nCr($n, $k) * ($p ** $k) * ((1.0 - $p) ** ($n - $k));
+}
+
+ASSERT nPr(5, 3) == 60 && nCr(10, 3) == 120 && nCr(20, 10) == 184756, "nPr and nCr";
+# Fair coin: P(X = 5 | n = 10, p = 0.5) = 252 / 1024 = 0.24609375
+ASSERT abs(binomial_pmf(5, 10, 0.5) - 0.24609375) < 1e-9, "Binomial PMF(5; 10, 0.5)";
+say "[3] Combinatorics: 10C3={nCr(10, 3)}, 20C10={nCr(20, 10)}, Binom(5;10,0.5)={binomial_pmf(5, 10, 0.5)}";
+
+# 4. Fisher-Yates Unbiased Shuffle & Seeded Monte Carlo Estimation of Pi
+srand(2026);
+sub fisher_yates(@src) {
+    my @a;
+    for @src -> $x { push(@a, $x); }
+    my $i = elems(@a) - 1;
+    while $i > 0 {
+        my $j = int(rand($i + 1));
+        my $tmp = @a[$i];
+        @a[$i] = @a[$j];
+        @a[$j] = $tmp;
+        $i--;
+    }
+    return @a;
+}
+
+my @deck = fisher_yates(1 .. 10);
+ASSERT elems(@deck) == 10 && sum(@deck) == 55, "Fisher-Yates preserves multiset";
+
+my $samples = 20000;
+my $inside = 0;
+for 1 .. $samples -> $s {
+    my $x = rand(1.0);
+    my $y = rand(1.0);
+    $inside++ if ($x * $x + $y * $y) <= 1.0;
+}
+my $pi_est = 4.0 * $inside / $samples;
+ASSERT abs($pi_est - 3.14159265) < 0.08, "Monte Carlo pi within tolerance";
+say "[4] Fisher-Yates deck=[{join(',', @deck)}], Monte Carlo pi ({$samples} pts) = {sprintf('%.4f', $pi_est)}";
+
+say "All Chapter 13 assertions passed!";

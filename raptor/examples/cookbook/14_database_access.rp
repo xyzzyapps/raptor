@@ -1,0 +1,50 @@
+# Perl Cookbook - Chapter 14: Database Access (Ported to Raptor)
+# Covers SQLite relational CRUD (`sqlite_open`, `sqlite_exec`, `sqlite_query`, `sqlite_query_row`, `sqlite_close`)
+# and persistent JSON/DBM-style key-value stores storing complex nested structures.
+
+say "=== Chapter 14: Database Access ===";
+
+# 14.1 & 14.6 Persistent Key-Value Store (DBM Equivalent with Complex Nested Values)
+my $kv_path = (getenv("TEMP") || getenv("TMP") || ".") ~ "/raptor_cb14_kv_" ~ pid() ~ ".json";
+sub kv_save($path, %store) { spurt($path, json_encode(%store)); }
+sub kv_load($path)         { return (-e $path) ?? json_decode(slurp($path)) !! {}; }
+
+my %users_kv = {
+    "u1" => { "name" => "Linus", "roles" => ["admin", "kernel"] },
+    "u2" => { "name" => "Larry", "roles" => ["creator", "linguist"] }
+};
+kv_save($kv_path, %users_kv);
+my $reloaded = kv_load($kv_path);
+unlink($kv_path);
+ASSERT $reloaded<u2><name> eq "Larry" && $reloaded<u1><roles>[0] eq "admin", "14.6 complex KV persistence";
+say "14.6 KV store roundtrip verified for {$reloaded<u2><name>}";
+
+# 14.9–14.11 Executing SQL Queries Programmatically via SQLite
+my $db = sqlite_open(":memory:");
+sqlite_exec($db, "CREATE TABLE books (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, author TEXT, year INTEGER, price REAL)");
+
+sqlite_exec($db, "INSERT INTO books (title, author, year, price) VALUES ('Perl Cookbook', 'Christiansen & Torkington', 2003, 49.99)");
+sqlite_exec($db, "INSERT INTO books (title, author, year, price) VALUES ('Mastering Algorithms with Perl', 'Orwant et al.', 1999, 44.95)");
+my $ins = sqlite_exec($db, "INSERT INTO books (title, author, year, price) VALUES ('Programming Perl', 'Wall', 2012, 54.99)");
+ASSERT $ins<last_insert_id> == 3, "14.9 SQLite autoincrement ID";
+
+# Query all rows
+my @rows = sqlite_query($db, "SELECT id, title, author, year FROM books");
+ASSERT elems(@rows) == 3, "14.10 SELECT all books";
+say "14.10 Loaded {elems(@rows)} books from SQLite:";
+for @rows -> $r {
+    say "  - [{$r<year>}] {$r<title>} by {$r<author>}";
+}
+
+# UPDATE & filtered SELECT
+sqlite_exec($db, "UPDATE books SET year = 2004 WHERE id = 1");
+my $b1 = sqlite_query_row($db, "SELECT title, year FROM books WHERE id = 1");
+ASSERT defined($b1) && +$b1<year> == 2004, "14.10 UPDATE + sqlite_query_row";
+
+# DELETE
+sqlite_exec($db, "DELETE FROM books WHERE id = 2");
+my @rem = sqlite_query($db, "SELECT id FROM books");
+ASSERT elems(@rem) == 2, "14.10 DELETE row";
+
+sqlite_close($db);
+say "Chapter 14: ALL RECIPES PASSED";

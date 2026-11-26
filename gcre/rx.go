@@ -124,17 +124,26 @@ func isPureDeclarative(p rx) bool {
 		return true
 	}
 	switch t := p.(type) {
-	case *rxNoop, *rxLit, *rxAny, *rxCharClass, *rxAnchor:
+	case *rxNoop, *rxLit, *rxAny, *rxCharClass, *rxAnchor, *rxAdverb:
 		return true
 	case *rxGrp:
 		return isPureDeclarative(t.inner)
 	case *rxCap:
+		return isPureDeclarative(t.inner)
+	case *rxCapSpan:
 		return isPureDeclarative(t.inner)
 	case *rxAlias:
 		return isPureDeclarative(t.inner)
 	case *rxQuant:
 		return isPureDeclarative(t.inner) && isPureDeclarative(t.q.sep)
 	case *rxSeq:
+		for _, e := range t.elts {
+			if !isPureDeclarative(e) {
+				return false
+			}
+		}
+		return true
+	case *rxConj:
 		for _, e := range t.elts {
 			if !isPureDeclarative(e) {
 				return false
@@ -183,6 +192,11 @@ func forceLTM(p rx) rx {
 		}
 		return t
 	case *rxSeq:
+		for i, e := range t.elts {
+			t.elts[i] = forceLTM(e)
+		}
+		return t
+	case *rxConj:
 		for i, e := range t.elts {
 			t.elts[i] = forceLTM(e)
 		}

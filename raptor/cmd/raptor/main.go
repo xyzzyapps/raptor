@@ -23,11 +23,12 @@ func main() {
 	outFlag := flag.String("o", "", "Output binary/bytecode file path")
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 	evalFlag := flag.String("e", "", "Evaluate inline code string")
-	goFlag := flag.Bool("go", false, "Use the Go interpreter backend")
+	goFlag := flag.Bool("go", false, "Use the Go interpreter + superinstruction backend")
 	moarFlag := flag.Bool("moar", false, "Use the native MoarVM opcode backend")
+	ccFlag := flag.Bool("cc", false, "Use the Goose-style native C11 + AVX2 backend")
 	wasmFlag := flag.Bool("wasm", false, "Build raptor.wasm (TinyGo if available, else Go) and enable WASM helpers")
 	wasmCompilerFlag := flag.String("wasm-compiler", "", "WASM toolchain: tinygo, go, or auto (default)")
-	backendFlag := flag.String("backend", "", "Execution backend: go, moar, or wasm")
+	backendFlag := flag.String("backend", "", "Execution backend: go, moar, cc, or wasm")
 	sFlag := flag.String("S", "", "PHP-style RaptorHP server, e.g. -S localhost:8000")
 	tFlag := flag.String("t", ".", "Document root for -S (like php -S -t)")
 	flag.Parse()
@@ -38,6 +39,8 @@ func main() {
 	}
 	if *wasmFlag {
 		backend = "wasm"
+	} else if *ccFlag {
+		backend = "cc"
 	} else if *moarFlag {
 		backend = "moar"
 	} else if *goFlag {
@@ -102,12 +105,31 @@ func main() {
 		}
 		runScript(cmdArgs[0], cmdArgs[1:], *dllFlag, logger)
 
-	case "compile":
+	case "compile", "build":
 		if len(cmdArgs) < 1 {
-			fmt.Fprintf(os.Stderr, "Usage: raptor compile <source.rp> [-o output.moarvm]\n")
+			fmt.Fprintf(os.Stderr, "Usage: raptor compile [--cc] <source.rp> [-o output]\n")
 			os.Exit(1)
 		}
-		compileScript(cmdArgs[0], *outFlag)
+		targetSrc := cmdArgs[0]
+		targetOut := *outFlag
+		nativeCC := backend == "cc"
+		for i := 0; i < len(cmdArgs); i++ {
+			if cmdArgs[i] == "--cc" || cmdArgs[i] == "--native" {
+				nativeCC = true
+			} else if (cmdArgs[i] == "-o" || cmdArgs[i] == "--output") && i+1 < len(cmdArgs) {
+				targetOut = cmdArgs[i+1]
+				i++
+			} else if !strings.HasPrefix(cmdArgs[i], "-") && targetSrc == cmdArgs[0] && i > 0 {
+				// keep targetSrc
+			} else if !strings.HasPrefix(cmdArgs[i], "-") && strings.HasPrefix(targetSrc, "-") {
+				targetSrc = cmdArgs[i]
+			}
+		}
+		if nativeCC {
+			compileNativeScript(targetSrc, targetOut)
+		} else {
+			compileScript(targetSrc, targetOut)
+		}
 
 	case "pack":
 		if len(cmdArgs) < 1 {
@@ -313,6 +335,33 @@ func runREPL(dllPath string, logger *slog.Logger) {
 			fmt.Println(val.String())
 		}
 	}
+}
+
+func compileNativeScript(srcPath, outPath string) {
+	content, err := os.ReadFile(srcPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading source %q: %v\n", srcPath, err)
+		os.Exit(1)
+	}
+	if outPath == "" {
+		ext := filepath.Ext(srcPath)
+		base := strings.TrimSuffix(srcPath, ext)
+		if goruntime.GOOS == "windows" {
+			outPath = base + ".exe"
+		} else {
+			outPath = base
+		}
+	}
+	if err := raptor.CompileScriptToNativeExe(string(content), outPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Native C11 compilation error: %v\n", err)
+		os.Exit(1)
+	}
+	fi, _ := os.Stat(outPath)
+	var sz int64
+	if fi != nil {
+		sz = fi.Size()
+	}
+	fmt.Printf("Compiled native C11+AVX2 binary: %s -> %s (%d bytes)\n", srcPath, outPath, sz)
 }
 
 func compileScript(srcPath, outPath string) {

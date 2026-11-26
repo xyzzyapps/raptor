@@ -1,0 +1,436 @@
+# ==============================================================================
+# Mastering Algorithms with Perl — Chapter 07: Matrices
+# ------------------------------------------------------------------------------
+# Implements dense & sparse linear algebra algorithms:
+#   1. Dense 2D Matrices: creation, identity, addition, scalar multiply, transpose
+#   2. Matrix Multiplication C = A * B
+#   3. Determinant det(A) via Partial-Pivoting Upper Triangular Reduction
+#   4. Gaussian Elimination with Partial Pivoting (Linear System Ax = b)
+#   5. Gauss-Jordan Matrix Inverse (A * A^-1 = I)
+#   6. Sparse Matrices: Dictionary of Keys (DOK) & Compressed Sparse Row (CSR)
+# ==============================================================================
+
+say "=== Chapter 07: Matrices ===";
+
+# ==============================================================================
+# 1. Dense Matrix Utilities
+# ==============================================================================
+
+sub mat_zeros($rows, $cols) {
+    my @m = [];
+    for 0 ..^ $rows -> $r {
+        my @row = [];
+        for 0 ..^ $cols -> $c {
+            push(@row, 0.0);
+        }
+        push(@m, @row);
+    }
+    return @m;
+}
+
+sub mat_identity($n) {
+    my @m = mat_zeros($n, $n);
+    for 0 ..^ $n -> $i {
+        @m[$i][$i] = 1.0;
+    }
+    return @m;
+}
+
+sub mat_clone(@A) {
+    my $rows = elems(@A);
+    my $cols = elems(@A[0]);
+    my @C = mat_zeros($rows, $cols);
+    for 0 ..^ $rows -> $r {
+        for 0 ..^ $cols -> $c {
+            @C[$r][$c] = num(@A[$r][$c]);
+        }
+    }
+    return @C;
+}
+
+sub mat_add(@A, @B) {
+    my $rows = elems(@A);
+    my $cols = elems(@A[0]);
+    ASSERT $rows == elems(@B) && $cols == elems(@B[0]), "mat_add dimension match";
+    my @C = mat_zeros($rows, $cols);
+    for 0 ..^ $rows -> $r {
+        for 0 ..^ $cols -> $c {
+            @C[$r][$c] = num(@A[$r][$c]) + num(@B[$r][$c]);
+        }
+    }
+    return @C;
+}
+
+sub mat_scale(@A, $scalar) {
+    my $rows = elems(@A);
+    my $cols = elems(@A[0]);
+    my $s    = num($scalar);
+    my @C    = mat_zeros($rows, $cols);
+    for 0 ..^ $rows -> $r {
+        for 0 ..^ $cols -> $c {
+            @C[$r][$c] = num(@A[$r][$c]) * $s;
+        }
+    }
+    return @C;
+}
+
+sub mat_transpose(@A) {
+    my $rows = elems(@A);
+    my $cols = elems(@A[0]);
+    my @T    = mat_zeros($cols, $rows);
+    for 0 ..^ $rows -> $r {
+        for 0 ..^ $cols -> $c {
+            @T[$c][$r] = num(@A[$r][$c]);
+        }
+    }
+    return @T;
+}
+
+sub mat_mul(@A, @B) {
+    my $m = elems(@A);
+    my $n = elems(@A[0]);
+    ASSERT $n == elems(@B), "mat_mul inner dimension match";
+    my $p = elems(@B[0]);
+    my @C = mat_zeros($m, $p);
+    for 0 ..^ $m -> $i {
+        for 0 ..^ $n -> $k {
+            my $aik = num(@A[$i][$k]);
+            if $aik != 0.0 {
+                for 0 ..^ $p -> $j {
+                    @C[$i][$j] = @C[$i][$j] + $aik * num(@B[$k][$j]);
+                }
+            }
+        }
+    }
+    return @C;
+}
+
+sub mat_vec_mul(@A, @x) {
+    my $m = elems(@A);
+    my $n = elems(@A[0]);
+    ASSERT $n == elems(@x), "mat_vec_mul dimension match";
+    my @y = [];
+    for 0 ..^ $m -> $i {
+        my $s = 0.0;
+        for 0 ..^ $n -> $j {
+            $s = $s + num(@A[$i][$j]) * num(@x[$j]);
+        }
+        push(@y, $s);
+    }
+    return @y;
+}
+
+sub mat_approx_eq(@A, @B, $eps = 1e-9) {
+    if elems(@A) != elems(@B) || elems(@A[0]) != elems(@B[0]) {
+        return False;
+    }
+    for 0 ..^ elems(@A) -> $r {
+        for 0 ..^ elems(@A[0]) -> $c {
+            if abs(num(@A[$r][$c]) - num(@B[$r][$c])) > $eps {
+                return False;
+            }
+        }
+    }
+    return True;
+}
+
+sub vec_approx_eq(@a, @b, $eps = 1e-9) {
+    if elems(@a) != elems(@b) { return False; }
+    for 0 ..^ elems(@a) -> $i {
+        if abs(num(@a[$i]) - num(@b[$i])) > $eps { return False; }
+    }
+    return True;
+}
+
+my @M1 = [[1, 2, 3], [4, 5, 6]];
+my @M2 = [[7, 8], [9, 10], [11, 12]];
+my @Prod = mat_mul(@M1, @M2);
+ASSERT mat_approx_eq(@Prod, [[58, 64], [139, 154]]), "2x3 * 3x2 matrix multiplication";
+ASSERT mat_approx_eq(mat_transpose(mat_transpose(@M1)), @M1), "(A^T)^T == A";
+ASSERT mat_approx_eq(mat_transpose(@Prod), mat_mul(mat_transpose(@M2), mat_transpose(@M1))), "(AB)^T == B^T A^T";
+say "[1-2] Dense Matrix Ops: (AB)^T == B^T A^T verified; M1*M2[0] = [" ~ @Prod[0][0] ~ ", " ~ @Prod[0][1] ~ "]";
+
+# ==============================================================================
+# 3. Determinant via Gaussian Elimination with Partial Pivoting
+# ==============================================================================
+
+sub mat_det(@A) {
+    my $n = elems(@A);
+    ASSERT $n == elems(@A[0]), "mat_det requires square matrix";
+    my @U = mat_clone(@A);
+    my $sign = 1.0;
+
+    for 0 ..^ $n -> $col {
+        my $piv = $col;
+        my $max_abs = abs(@U[$col][$col]);
+        for ($col + 1) ..^ $n -> $r {
+            if abs(@U[$r][$col]) > $max_abs {
+                $max_abs = abs(@U[$r][$col]);
+                $piv = $r;
+            }
+        }
+        if $max_abs < 1e-14 {
+            return 0.0;
+        }
+        if $piv != $col {
+            my $tmp_row = @U[$col];
+            @U[$col] = @U[$piv];
+            @U[$piv] = $tmp_row;
+            $sign = -$sign;
+        }
+        for ($col + 1) ..^ $n -> $r {
+            my $factor = @U[$r][$col] / @U[$col][$col];
+            for $col ..^ $n -> $c {
+                @U[$r][$c] = @U[$r][$c] - $factor * @U[$col][$c];
+            }
+        }
+    }
+
+    my $det = $sign;
+    for 0 ..^ $n -> $i {
+        $det = $det * @U[$i][$i];
+    }
+    return $det;
+}
+
+# ==============================================================================
+# 4. Gaussian Elimination with Partial Pivoting (Solve Ax = b)
+# ==============================================================================
+
+sub mat_solve(@A, @b) {
+    my $n = elems(@A);
+    ASSERT $n == elems(@A[0]) && $n == elems(@b), "mat_solve dimension check";
+    my @M = mat_zeros($n, $n + 1);
+    for 0 ..^ $n -> $r {
+        for 0 ..^ $n -> $c {
+            @M[$r][$c] = num(@A[$r][$c]);
+        }
+        @M[$r][$n] = num(@b[$r]);
+    }
+
+    for 0 ..^ $n -> $col {
+        my $piv = $col;
+        my $max_abs = abs(@M[$col][$col]);
+        for ($col + 1) ..^ $n -> $r {
+            if abs(@M[$r][$col]) > $max_abs {
+                $max_abs = abs(@M[$r][$col]);
+                $piv = $r;
+            }
+        }
+        ASSERT $max_abs >= 1e-14, "Singular matrix in mat_solve";
+        if $piv != $col {
+            my $tmp = @M[$col];
+            @M[$col] = @M[$piv];
+            @M[$piv] = $tmp;
+        }
+        for ($col + 1) ..^ $n -> $r {
+            my $factor = @M[$r][$col] / @M[$col][$col];
+            for $col .. $n -> $c {
+                @M[$r][$c] = @M[$r][$c] - $factor * @M[$col][$c];
+            }
+        }
+    }
+
+    # Back-substitution
+    my @x = [];
+    for 0 ..^ $n -> $k { push(@x, 0.0); }
+    my $i = $n - 1;
+    while $i >= 0 {
+        my $sum = @M[$i][$n];
+        for ($i + 1) ..^ $n -> $j {
+            $sum = $sum - @M[$i][$j] * @x[$j];
+        }
+        @x[$i] = $sum / @M[$i][$i];
+        $i = $i - 1;
+    }
+    return @x;
+}
+
+# ==============================================================================
+# 5. Gauss-Jordan Matrix Inverse (A * A^-1 = I)
+# ==============================================================================
+
+sub mat_inverse(@A) {
+    my $n = elems(@A);
+    ASSERT $n == elems(@A[0]), "mat_inverse requires square matrix";
+    my @aug = mat_zeros($n, 2 * $n);
+    for 0 ..^ $n -> $r {
+        for 0 ..^ $n -> $c {
+            @aug[$r][$c] = num(@A[$r][$c]);
+        }
+        @aug[$r][$n + $r] = 1.0;
+    }
+
+    for 0 ..^ $n -> $col {
+        my $piv = $col;
+        my $max_abs = abs(@aug[$col][$col]);
+        for ($col + 1) ..^ $n -> $r {
+            if abs(@aug[$r][$col]) > $max_abs {
+                $max_abs = abs(@aug[$r][$col]);
+                $piv = $r;
+            }
+        }
+        ASSERT $max_abs >= 1e-14, "Singular matrix in mat_inverse";
+        if $piv != $col {
+            my $tmp = @aug[$col];
+            @aug[$col] = @aug[$piv];
+            @aug[$piv] = $tmp;
+        }
+        my $piv_val = @aug[$col][$col];
+        for 0 ..^ (2 * $n) -> $c {
+            @aug[$col][$c] = @aug[$col][$c] / $piv_val;
+        }
+        for 0 ..^ $n -> $r {
+            if $r != $col {
+                my $factor = @aug[$r][$col];
+                if $factor != 0.0 {
+                    for 0 ..^ (2 * $n) -> $c {
+                        @aug[$r][$c] = @aug[$r][$c] - $factor * @aug[$col][$c];
+                    }
+                }
+            }
+        }
+    }
+
+    my @inv = mat_zeros($n, $n);
+    for 0 ..^ $n -> $r {
+        for 0 ..^ $n -> $c {
+            @inv[$r][$c] = @aug[$r][$n + $c];
+        }
+    }
+    return @inv;
+}
+
+# Note: A[0][0] == 0 forces partial pivoting to swap rows immediately!
+my @A = [
+    [0.0, 2.0,  1.0],
+    [1.0, -2.0, -3.0],
+    [-1.0, 1.0, 2.0]
+];
+my @b = [-8.0, 0.0, 3.0];
+my @x = mat_solve(@A, @b);
+ASSERT vec_approx_eq(@x, [-4.0, -5.0, 2.0]), "Gaussian elimination with 0-pivot swap solves Ax=b -> [-4, -5, 2]";
+ASSERT vec_approx_eq(mat_vec_mul(@A, @x), @b), "Residual check A*x == b";
+
+my $detA = mat_det(@A);
+ASSERT abs($detA - 1.0) < 1e-9, "det(A) == 1";
+ASSERT abs(mat_det([[1, 2, 3], [2, 4, 6], [1, 1, 1]])) < 1e-12, "Singular matrix has det == 0";
+
+my @A_inv = mat_inverse(@A);
+my @I3    = mat_identity(3);
+ASSERT mat_approx_eq(mat_mul(@A, @A_inv), @I3), "A * A^-1 == I";
+ASSERT mat_approx_eq(mat_mul(@A_inv, @A), @I3), "A^-1 * A == I";
+ASSERT abs($detA * mat_det(@A_inv) - 1.0) < 1e-9, "det(A) * det(A^-1) == 1";
+say sprintf("[3-5] det(A)=%.1f, Solve Ax=b -> [%.1f, %.1f, %.1f], A*A^-1 == I verified", $detA, @x[0], @x[1], @x[2]);
+
+# ==============================================================================
+# 6. Sparse Matrices: Dictionary of Keys (DOK) & Compressed Sparse Row (CSR)
+# ==============================================================================
+
+sub dok_new($rows, $cols) {
+    return { "rows" => $rows, "cols" => $cols, "entries" => {} };
+}
+
+sub dok_set($dok, $r, $c, $val) {
+    my %e = $dok{"entries"};
+    my $k = $r ~ ":" ~ $c;
+    if abs(num($val)) < 1e-15 {
+        delete(%e, $k);
+    } else {
+        %e{$k} = num($val);
+    }
+}
+
+sub dok_get($dok, $r, $c) {
+    my %e = $dok{"entries"};
+    my $k = $r ~ ":" ~ $c;
+    return exists(%e, $k) ?? %e{$k} !! 0.0;
+}
+
+sub csr_from_dense(@A) {
+    my $rows    = elems(@A);
+    my $cols    = elems(@A[0]);
+    my @vals    = [];
+    my @col_idx = [];
+    my @row_ptr = [0];
+    for 0 ..^ $rows -> $r {
+        for 0 ..^ $cols -> $c {
+            my $v = num(@A[$r][$c]);
+            if abs($v) > 1e-15 {
+                push(@vals, $v);
+                push(@col_idx, $c);
+            }
+        }
+        push(@row_ptr, elems(@vals));
+    }
+    return { "rows" => $rows, "cols" => $cols, "vals" => @vals, "col_idx" => @col_idx, "row_ptr" => @row_ptr };
+}
+
+sub csr_matvec($csr, @x) {
+    my $rows    = $csr{"rows"};
+    my @vals    = $csr{"vals"};
+    my @col_idx = $csr{"col_idx"};
+    my @row_ptr = $csr{"row_ptr"};
+    my @y       = [];
+    for 0 ..^ $rows -> $r {
+        my $sum = 0.0;
+        for @row_ptr[$r] ..^ @row_ptr[$r + 1] -> $idx {
+            $sum = $sum + @vals[$idx] * num(@x[@col_idx[$idx]]);
+        }
+        push(@y, $sum);
+    }
+    return @y;
+}
+
+# Sparse CSR * CSR -> Dense (Gustavson row-by-row sparse accumulator)
+sub csr_matmul_dense($A_csr, $B_csr) {
+    ASSERT $A_csr{"cols"} == $B_csr{"rows"}, "csr_matmul dimension match";
+    my $m  = $A_csr{"rows"};
+    my $p  = $B_csr{"cols"};
+    my @C  = mat_zeros($m, $p);
+    my @av = $A_csr{"vals"};
+    my @ac = $A_csr{"col_idx"};
+    my @ar = $A_csr{"row_ptr"};
+    my @bv = $B_csr{"vals"};
+    my @bc = $B_csr{"col_idx"};
+    my @br = $B_csr{"row_ptr"};
+
+    for 0 ..^ $m -> $i {
+        for @ar[$i] ..^ @ar[$i + 1] -> $pa {
+            my $k   = @ac[$pa];
+            my $aik = @av[$pa];
+            for @br[$k] ..^ @br[$k + 1] -> $pb {
+                my $j = @bc[$pb];
+                @C[$i][$j] = @C[$i][$j] + $aik * @bv[$pb];
+            }
+        }
+    }
+    return @C;
+}
+
+my @S1 = [
+    [0, 0, 3, 0],
+    [4, 0, 0, 5],
+    [0, 2, 0, 0],
+    [0, 0, 0, 1]
+];
+my @S2 = [
+    [1, 0, 0, 2],
+    [0, 0, 6, 0],
+    [7, 0, 0, 0],
+    [0, 8, 0, 9]
+];
+my $dok = dok_new(4, 4);
+dok_set($dok, 1, 3, 5.0);
+dok_set($dok, 0, 2, 3.0);
+dok_set($dok, 1, 3, 0.0); # zeroing removes key
+ASSERT elems($dok{"entries"}) == 1 && dok_get($dok, 0, 2) == 3.0 && dok_get($dok, 1, 3) == 0.0, "DOK sparse storage & zero pruning";
+
+my $csr1 = csr_from_dense(@S1);
+my $csr2 = csr_from_dense(@S2);
+ASSERT elems($csr1{"vals"}) == 5, "CSR stores only 5 non-zeros out of 16 entries";
+ASSERT vec_approx_eq(csr_matvec($csr1, [1, 2, 3, 4]), mat_vec_mul(@S1, [1, 2, 3, 4])), "CSR matvec matches dense matvec";
+ASSERT mat_approx_eq(csr_matmul_dense($csr1, $csr2), mat_mul(@S1, @S2)), "CSR Gustavson matmul matches dense matmul";
+say "[6] Sparse DOK & CSR: nnz(S1)=5/16, Gustavson CSR*CSR == Dense S1*S2 verified";
+
+say "All Chapter 07 assertions passed!";

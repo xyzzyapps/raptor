@@ -145,6 +145,16 @@ const (
 	TokInterpString   // double-quoted string with interpolation markers
 	TokBacktick       // backtick raw command string
 	TokInterpBacktick // backtick interpolated command string
+	TokQw             // qw(...) word list literal
+
+	// Increment / Decrement, Exclusive Ranges & Try
+	TokInc               // ++
+	TokDec               // --
+	TokCaret             // ^ (prefix range ^N)
+	TokDotDotCaret       // ..^
+	TokCaretDotDot       // ^..
+	TokCaretDotDotCaret  // ^..^
+	TokTry               // try
 
 	// Delimiters
 	TokSemicolon

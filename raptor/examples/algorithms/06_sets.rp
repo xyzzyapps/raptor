@@ -1,0 +1,345 @@
+# ==============================================================================
+# Mastering Algorithms with Perl — Chapter 06: Sets
+# ------------------------------------------------------------------------------
+# Implements the complete set-theoretic toolkit from Chapter 6:
+#   1. Hash-Based Sets (union, intersection, difference, symmetric diff, subset, eq)
+#   2. Bit-Vector Sets (+&, +|, +^, +<, +>, Kernighan popcount)
+#   3. Power Set Generation (2^N subsets)
+#   4. Disjoint-Set / Union-Find (path compression + union by rank)
+#   5. Multisets (Bags) & Zadeh Fuzzy Sets
+# ==============================================================================
+
+say "=== Chapter 06: Sets ===";
+
+sub arrays_eq(@a, @b) {
+    if elems(@a) != elems(@b) {
+        return False;
+    }
+    for 0 ..^ elems(@a) -> $i {
+        if @a[$i] != @b[$i] {
+            return False;
+        }
+    }
+    return True;
+}
+
+# ==============================================================================
+# 1. Hash-Based Sets
+# ==============================================================================
+
+sub hset_from(@items) {
+    my %s = {};
+    for @items -> $x {
+        %s{$x} = $x;
+    }
+    return %s;
+}
+
+sub hset_contains(%s, $x) {
+    return exists(%s, $x);
+}
+
+sub hset_size(%s) {
+    return elems(%s);
+}
+
+sub hset_to_sorted_ints(%s) {
+    my @ints = [];
+    for values(%s) -> $v {
+        push(@ints, int($v));
+    }
+    return sort(@ints);
+}
+
+sub hset_union(%a, %b) {
+    my %u = {};
+    for keys(%a) -> $k { %u{$k} = %a{$k}; }
+    for keys(%b) -> $k { %u{$k} = %b{$k}; }
+    return %u;
+}
+
+sub hset_intersection(%a, %b) {
+    my %res = {};
+    for keys(%a) -> $k {
+        if exists(%b, $k) {
+            %res{$k} = %a{$k};
+        }
+    }
+    return %res;
+}
+
+sub hset_difference(%a, %b) {
+    my %res = {};
+    for keys(%a) -> $k {
+        if !exists(%b, $k) {
+            %res{$k} = %a{$k};
+        }
+    }
+    return %res;
+}
+
+sub hset_sym_diff(%a, %b) {
+    my %res = {};
+    for keys(%a) -> $k {
+        if !exists(%b, $k) { %res{$k} = %a{$k}; }
+    }
+    for keys(%b) -> $k {
+        if !exists(%a, $k) { %res{$k} = %b{$k}; }
+    }
+    return %res;
+}
+
+sub hset_is_subset(%sub_s, %sup_s) {
+    for keys(%sub_s) -> $k {
+        if !exists(%sup_s, $k) {
+            return False;
+        }
+    }
+    return True;
+}
+
+sub hset_equals(%a, %b) {
+    return elems(%a) == elems(%b) && hset_is_subset(%a, %b);
+}
+
+my %A = hset_from([1, 3, 5, 7, 9, 3]);
+my %B = hset_from([2, 3, 5, 8, 13]);
+
+ASSERT hset_size(%A) == 5, "Duplicate 3 collapsed in hash set";
+ASSERT arrays_eq(hset_to_sorted_ints(hset_union(%A, %B)), [1, 2, 3, 5, 7, 8, 9, 13]), "Hash set union";
+ASSERT arrays_eq(hset_to_sorted_ints(hset_intersection(%A, %B)), [3, 5]), "Hash set intersection";
+ASSERT arrays_eq(hset_to_sorted_ints(hset_difference(%A, %B)), [1, 7, 9]), "Hash set difference A \\ B";
+ASSERT arrays_eq(hset_to_sorted_ints(hset_sym_diff(%A, %B)), [1, 2, 7, 8, 9, 13]), "Hash set symmetric difference";
+ASSERT hset_is_subset(hset_from([3, 5]), %A), "{3,5} subset of A";
+ASSERT !hset_is_subset(%B, %A), "B not subset of A";
+ASSERT hset_equals(hset_sym_diff(%A, %B), hset_difference(hset_union(%A, %B), hset_intersection(%A, %B))), "A ^ B == (A U B) \\ (A n B)";
+say "[1] Hash Sets: A U B = [" ~ join(",", hset_to_sorted_ints(hset_union(%A, %B))) ~ "], A n B = [" ~ join(",", hset_to_sorted_ints(hset_intersection(%A, %B))) ~ "]";
+
+# ==============================================================================
+# 2. Bit-Vector Sets (62-bit Non-Negative Universe 0..61 using +&, +|, +^, +<, +>)
+# ==============================================================================
+
+sub bset_from(@nums) {
+    my $bits = 0;
+    for @nums -> $n {
+        $bits = $bits +| (1 +< $n);
+    }
+    return $bits;
+}
+
+sub bset_add($bits, $n)      { return $bits +| (1 +< $n); }
+sub bset_remove($bits, $n)   { return $bits +& (-1 +^ (1 +< $n)); }
+sub bset_contains($bits, $n) { return (($bits +> $n) +& 1) == 1; }
+sub bset_union($a, $b)       { return $a +| $b; }
+sub bset_intersect($a, $b)   { return $a +& $b; }
+sub bset_diff($a, $b)        { return $a +& (-1 +^ $b); }
+sub bset_sym_diff($a, $b)    { return $a +^ $b; }
+sub bset_is_subset($a, $b)   { return ($a +& $b) == $a; }
+
+# Brian Kernighan's O(popcount) bit counting
+sub bset_popcount($bits) {
+    my $x = $bits;
+    my $cnt = 0;
+    while $x != 0 {
+        $x = $x +& ($x - 1);
+        $cnt = $cnt + 1;
+    }
+    return $cnt;
+}
+
+sub bset_to_array($bits) {
+    my @out = [];
+    my $i = 0;
+    my $x = $bits;
+    while $x > 0 {
+        if ($x +& 1) == 1 {
+            push(@out, $i);
+        }
+        $x = $x +> 1;
+        $i = $i + 1;
+    }
+    return @out;
+}
+
+my $bA = bset_from([1, 3, 5, 7, 9]);
+my $bB = bset_from([2, 3, 5, 8, 13]);
+ASSERT arrays_eq(bset_to_array(bset_union($bA, $bB)), hset_to_sorted_ints(hset_union(%A, %B))), "Bit-vector union matches hash-set union";
+ASSERT arrays_eq(bset_to_array(bset_intersect($bA, $bB)), [3, 5]), "Bit-vector intersection";
+ASSERT arrays_eq(bset_to_array(bset_diff($bA, $bB)), [1, 7, 9]), "Bit-vector difference";
+ASSERT arrays_eq(bset_to_array(bset_sym_diff($bA, $bB)), [1, 2, 7, 8, 9, 13]), "Bit-vector symmetric diff";
+ASSERT bset_popcount(bset_union($bA, $bB)) == 8, "Kernighan popcount == 8";
+ASSERT bset_is_subset(bset_from([3, 5]), $bA), "Bit-vector subset predicate";
+my $bC = bset_remove(bset_add($bA, 20), 5);
+ASSERT bset_contains($bC, 20) && !bset_contains($bC, 5), "Bit-vector add & remove";
+say "[2] Bit-Vector Sets: mask(A U B)=" ~ bset_union($bA, $bB) ~ ", popcount=" ~ bset_popcount(bset_union($bA, $bB));
+
+# ==============================================================================
+# 3. Power Set Generation (P(S), size = 2^|S|)
+# ==============================================================================
+
+sub power_set(@elems) {
+    my $n = elems(@elems);
+    my $total = 1 +< $n;
+    my @pset = [];
+    for 0 ..^ $total -> $mask {
+        my @sub_arr = [];
+        for 0 ..^ $n -> $bit {
+            if (($mask +> $bit) +& 1) == 1 {
+                push(@sub_arr, @elems[$bit]);
+            }
+        }
+        push(@pset, @sub_arr);
+    }
+    return @pset;
+}
+
+my @ps4 = power_set([10, 20, 30, 40]);
+ASSERT elems(@ps4) == 16, "|P({10,20,30,40})| == 16";
+ASSERT elems(@ps4[0]) == 0, "First subset is empty set";
+ASSERT arrays_eq(@ps4[15], [10, 20, 30, 40]), "Last subset is full set";
+say "[3] Power Set: |P({10,20,30,40})| = " ~ elems(@ps4);
+
+# ==============================================================================
+# 4. Disjoint-Set (Union-Find with Path Compression & Union by Rank)
+# ==============================================================================
+
+sub uf_new($n) {
+    my @parent = [];
+    my @rank   = [];
+    for 0 ..^ $n -> $i {
+        push(@parent, $i);
+        push(@rank, 0);
+    }
+    return { "parent" => @parent, "rank" => @rank, "count" => $n };
+}
+
+sub uf_find($uf, $x) {
+    my @p = $uf{"parent"};
+    if @p[$x] != $x {
+        @p[$x] = uf_find($uf, @p[$x]);
+    }
+    return @p[$x];
+}
+
+sub uf_union($uf, $x, $y) {
+    my $rx = uf_find($uf, $x);
+    my $ry = uf_find($uf, $y);
+    if $rx == $ry {
+        return False;
+    }
+    my @p = $uf{"parent"};
+    my @r = $uf{"rank"};
+    if @r[$rx] < @r[$ry] {
+        @p[$rx] = $ry;
+    } elsif @r[$rx] > @r[$ry] {
+        @p[$ry] = $rx;
+    } else {
+        @p[$ry] = $rx;
+        @r[$rx] = @r[$rx] + 1;
+    }
+    $uf{"count"} = $uf{"count"} - 1;
+    return True;
+}
+
+sub uf_connected($uf, $x, $y) {
+    return uf_find($uf, $x) == uf_find($uf, $y);
+}
+
+my $uf = uf_new(8);
+uf_union($uf, 0, 1);
+uf_union($uf, 1, 2);
+uf_union($uf, 3, 4);
+uf_union($uf, 5, 6);
+uf_union($uf, 2, 4);
+ASSERT $uf{"count"} == 3, "Union-Find has 3 connected components: {0,1,2,3,4}, {5,6}, {7}";
+ASSERT uf_connected($uf, 0, 4), "0 and 4 connected transitively";
+ASSERT !uf_connected($uf, 0, 6), "0 and 6 disconnected";
+ASSERT !uf_union($uf, 1, 3), "Redundant union returns False";
+say "[4] Disjoint-Set Union-Find: 8 nodes -> " ~ $uf{"count"} ~ " components after 5 unions";
+
+# ==============================================================================
+# 5. Multisets (Bags) & Zadeh Fuzzy Sets
+# ==============================================================================
+
+sub bag_from(@items) {
+    my %bag = {};
+    for @items -> $x {
+        my $cur = exists(%bag, $x) ?? %bag{$x} !! 0;
+        %bag{$x} = $cur + 1;
+    }
+    return %bag;
+}
+
+sub bag_count(%bag, $x) {
+    return exists(%bag, $x) ?? %bag{$x} !! 0;
+}
+
+sub bag_sum(%a, %b) {
+    my %res = {};
+    for keys(%a) -> $k { %res{$k} = %a{$k}; }
+    for keys(%b) -> $k {
+        %res{$k} = bag_count(%res, $k) + %b{$k};
+    }
+    return %res;
+}
+
+sub bag_intersection(%a, %b) {
+    my %res = {};
+    for keys(%a) -> $k {
+        if exists(%b, $k) {
+            my $ca = %a{$k};
+            my $cb = %b{$k};
+            %res{$k} = $ca < $cb ?? $ca !! $cb;
+        }
+    }
+    return %res;
+}
+
+# Zadeh Fuzzy Set operations: membership grades in [0.0, 1.0]
+sub fuzzy_union(%a, %b) {
+    my %res = {};
+    for keys(%a) -> $k { %res{$k} = %a{$k}; }
+    for keys(%b) -> $k {
+        my $va = exists(%res, $k) ?? %res{$k} !! 0.0;
+        my $vb = %b{$k};
+        %res{$k} = $va > $vb ?? $va !! $vb;
+    }
+    return %res;
+}
+
+sub fuzzy_intersect(%a, %b) {
+    my %res = {};
+    for keys(%a) -> $k {
+        my $va = %a{$k};
+        my $vb = exists(%b, $k) ?? %b{$k} !! 0.0;
+        my $m  = $va < $vb ?? $va !! $vb;
+        if $m > 0.0 {
+            %res{$k} = $m;
+        }
+    }
+    return %res;
+}
+
+sub fuzzy_complement(%a) {
+    my %res = {};
+    for keys(%a) -> $k {
+        %res{$k} = 1.0 - %a{$k};
+    }
+    return %res;
+}
+
+my %bag1 = bag_from(["a", "b", "a", "c", "a"]);
+my %bag2 = bag_from(["a", "a", "b", "b", "d"]);
+my %bsum = bag_sum(%bag1, %bag2);
+my %bint = bag_intersection(%bag1, %bag2);
+ASSERT bag_count(%bsum, "a") == 5 && bag_count(%bint, "a") == 2 && bag_count(%bint, "b") == 1, "Bag sum & min-multiplicity intersection";
+
+my %warm = { "15C" => 0.2, "22C" => 0.8, "30C" => 1.0 };
+my %comfy = { "15C" => 0.5, "22C" => 0.9, "30C" => 0.3 };
+my %f_inter = fuzzy_intersect(%warm, %comfy);
+my %f_union = fuzzy_union(%warm, %comfy);
+my %f_comp  = fuzzy_complement(%warm);
+ASSERT abs(%f_inter{"22C"} - 0.8) < 1e-9 && abs(%f_union{"22C"} - 0.9) < 1e-9 && abs(%f_comp{"15C"} - 0.8) < 1e-9, "Zadeh fuzzy min/max/complement laws";
+say "[5] Bags & Fuzzy Sets: bag_intersect('a')=" ~ bag_count(%bint, "a") ~ ", fuzzy_intersect('22C')=" ~ %f_inter{"22C"};
+
+say "All Chapter 06 assertions passed!";

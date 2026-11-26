@@ -1,0 +1,665 @@
+# ==============================================================================
+# Mastering Algorithms with Perl — Chapter 03: Advanced Data Structures
+# ------------------------------------------------------------------------------
+# Implements core hierarchical, priority, prefix, and cache structures:
+#   1. Binary Search Tree (insert, lookup, Hibbard delete, in/pre/post-order)
+#   2. Self-Balancing AVL Tree (LL/RR/LR/RL rotations + height & BST invariants!)
+#   3. Binary Min-Heap / Priority Queue (sift-up, sift-down, O(n) Floyd heapify)
+#   4. Prefix Trie (insert, exact lookup, prefix check, lexicographic autocomplete)
+#   5. B-Tree (2-3-4 tree, minimum degree t=2) & O(1) LRU Cache (Hash + DLL)
+# ==============================================================================
+
+say "=== Chapter 03: Advanced Data Structures ===";
+
+sub arrays_eq(@a, @b) {
+    if elems(@a) != elems(@b) {
+        return False;
+    }
+    for 0 ..^ elems(@a) -> $i {
+        if @a[$i] != @b[$i] {
+            return False;
+        }
+    }
+    return True;
+}
+
+sub str_arrays_eq(@a, @b) {
+    if elems(@a) != elems(@b) {
+        return False;
+    }
+    for 0 ..^ elems(@a) -> $i {
+        if @a[$i] ne @b[$i] {
+            return False;
+        }
+    }
+    return True;
+}
+
+# ==============================================================================
+# 1. Binary Search Tree (BST)
+# ==============================================================================
+
+sub bst_node($key, $val) {
+    return { "key" => $key, "val" => $val, "left" => Nil, "right" => Nil };
+}
+
+sub bst_insert($root, $key, $val) {
+    if !defined($root) {
+        return bst_node($key, $val);
+    }
+    if $key < $root{"key"} {
+        $root{"left"} = bst_insert($root{"left"}, $key, $val);
+    } elsif $key > $root{"key"} {
+        $root{"right"} = bst_insert($root{"right"}, $key, $val);
+    } else {
+        $root{"val"} = $val;
+    }
+    return $root;
+}
+
+sub bst_lookup($root, $key) {
+    my $cur = $root;
+    while defined($cur) {
+        if $key == $cur{"key"} {
+            return $cur{"val"};
+        } elsif $key < $cur{"key"} {
+            $cur = $cur{"left"};
+        } else {
+            $cur = $cur{"right"};
+        }
+    }
+    return Nil;
+}
+
+sub bst_min_node($node) {
+    my $cur = $node;
+    while defined($cur) && defined($cur{"left"}) {
+        $cur = $cur{"left"};
+    }
+    return $cur;
+}
+
+sub bst_delete($root, $key) {
+    if !defined($root) {
+        return Nil;
+    }
+    if $key < $root{"key"} {
+        $root{"left"} = bst_delete($root{"left"}, $key);
+    } elsif $key > $root{"key"} {
+        $root{"right"} = bst_delete($root{"right"}, $key);
+    } else {
+        if !defined($root{"left"}) {
+            return $root{"right"};
+        }
+        if !defined($root{"right"}) {
+            return $root{"left"};
+        }
+        my $succ = bst_min_node($root{"right"});
+        $root{"key"}   = $succ{"key"};
+        $root{"val"}   = $succ{"val"};
+        $root{"right"} = bst_delete($root{"right"}, $succ{"key"});
+    }
+    return $root;
+}
+
+sub bst_inorder($node, @acc) {
+    if !defined($node) { return; }
+    bst_inorder($node{"left"}, @acc);
+    push(@acc, $node{"key"});
+    bst_inorder($node{"right"}, @acc);
+}
+
+sub bst_preorder($node, @acc) {
+    if !defined($node) { return; }
+    push(@acc, $node{"key"});
+    bst_preorder($node{"left"}, @acc);
+    bst_preorder($node{"right"}, @acc);
+}
+
+sub bst_postorder($node, @acc) {
+    if !defined($node) { return; }
+    bst_postorder($node{"left"}, @acc);
+    bst_postorder($node{"right"}, @acc);
+    push(@acc, $node{"key"});
+}
+
+my $bst = Nil;
+for [50, 30, 70, 20, 40, 60, 80] -> $k {
+    $bst = bst_insert($bst, $k, "v" ~ $k);
+}
+my @in_ord   = [];
+my @pre_ord  = [];
+my @post_ord = [];
+bst_inorder($bst, @in_ord);
+bst_preorder($bst, @pre_ord);
+bst_postorder($bst, @post_ord);
+
+ASSERT arrays_eq(@in_ord, [20, 30, 40, 50, 60, 70, 80]), "BST in-order sorted";
+ASSERT arrays_eq(@pre_ord, [50, 30, 20, 40, 70, 60, 80]), "BST pre-order";
+ASSERT arrays_eq(@post_ord, [20, 40, 30, 60, 80, 70, 50]), "BST post-order";
+ASSERT bst_lookup($bst, 60) eq "v60", "BST lookup 60";
+ASSERT !defined(bst_lookup($bst, 99)), "BST lookup missing key Nil";
+
+# Delete leaf (20), one-child parent after deleting 20 (30), and two-child root (50)
+$bst = bst_delete($bst, 20);
+$bst = bst_delete($bst, 30);
+$bst = bst_delete($bst, 50);
+my @after_del = [];
+bst_inorder($bst, @after_del);
+ASSERT arrays_eq(@after_del, [40, 60, 70, 80]), "BST Hibbard deletions preserve in-order keys";
+say "[1] BST: in-order=" ~ join(",", @in_ord) ~ " -> after deleting 20,30,50: " ~ join(",", @after_del);
+
+# ==============================================================================
+# 2. Self-Balancing AVL Tree (Rotations + Strict Height Invariant Verification)
+# ==============================================================================
+
+sub avl_height($node) {
+    if !defined($node) { return 0; }
+    return $node{"h"};
+}
+
+sub avl_update_height($node) {
+    my $hl = avl_height($node{"left"});
+    my $hr = avl_height($node{"right"});
+    $node{"h"} = ($hl > $hr ?? $hl !! $hr) + 1;
+}
+
+sub avl_balance_factor($node) {
+    if !defined($node) { return 0; }
+    return avl_height($node{"left"}) - avl_height($node{"right"});
+}
+
+sub avl_rotate_right($y) {
+    my $x  = $y{"left"};
+    my $t2 = $x{"right"};
+    $x{"right"} = $y;
+    $y{"left"}  = $t2;
+    avl_update_height($y);
+    avl_update_height($x);
+    return $x;
+}
+
+sub avl_rotate_left($x) {
+    my $y  = $x{"right"};
+    my $t2 = $y{"left"};
+    $y{"left"}  = $x;
+    $x{"right"} = $t2;
+    avl_update_height($x);
+    avl_update_height($y);
+    return $y;
+}
+
+sub avl_rebalance($node) {
+    avl_update_height($node);
+    my $bf = avl_balance_factor($node);
+    if $bf > 1 {
+        if avl_balance_factor($node{"left"}) < 0 {
+            $node{"left"} = avl_rotate_left($node{"left"});
+        }
+        return avl_rotate_right($node);
+    }
+    if $bf < -1 {
+        if avl_balance_factor($node{"right"}) > 0 {
+            $node{"right"} = avl_rotate_right($node{"right"});
+        }
+        return avl_rotate_left($node);
+    }
+    return $node;
+}
+
+sub avl_insert($node, $key, $val) {
+    if !defined($node) {
+        return { "key" => $key, "val" => $val, "left" => Nil, "right" => Nil, "h" => 1 };
+    }
+    if $key < $node{"key"} {
+        $node{"left"} = avl_insert($node{"left"}, $key, $val);
+    } elsif $key > $node{"key"} {
+        $node{"right"} = avl_insert($node{"right"}, $key, $val);
+    } else {
+        $node{"val"} = $val;
+        return $node;
+    }
+    return avl_rebalance($node);
+}
+
+sub avl_delete($node, $key) {
+    if !defined($node) {
+        return Nil;
+    }
+    if $key < $node{"key"} {
+        $node{"left"} = avl_delete($node{"left"}, $key);
+    } elsif $key > $node{"key"} {
+        $node{"right"} = avl_delete($node{"right"}, $key);
+    } else {
+        if !defined($node{"left"}) { return $node{"right"}; }
+        if !defined($node{"right"}) { return $node{"left"}; }
+        my $succ = bst_min_node($node{"right"});
+        $node{"key"}   = $succ{"key"};
+        $node{"val"}   = $succ{"val"};
+        $node{"right"} = avl_delete($node{"right"}, $succ{"key"});
+    }
+    return avl_rebalance($node);
+}
+
+# Recursively verifies BST strict key bounds AND AVL |hl - hr| <= 1 AND stored height!
+sub avl_verify($node, $min_k, $max_k) {
+    if !defined($node) {
+        return 0;
+    }
+    my $k = $node{"key"};
+    if defined($min_k) && $k <= $min_k { return -1; }
+    if defined($max_k) && $k >= $max_k { return -1; }
+
+    my $hl = avl_verify($node{"left"}, $min_k, $k);
+    if $hl < 0 { return -1; }
+    my $hr = avl_verify($node{"right"}, $k, $max_k);
+    if $hr < 0 { return -1; }
+
+    if abs($hl - $hr) > 1 { return -1; }
+    my $expected_h = ($hl > $hr ?? $hl !! $hr) + 1;
+    if $node{"h"} != $expected_h { return -1; }
+    return $expected_h;
+}
+
+# Adversarial sorted insertion 1..31 (would degenerate plain BST to height 31; AVL gets height 5!)
+my $avl = Nil;
+for 1 .. 31 -> $k {
+    $avl = avl_insert($avl, $k, $k * 10);
+    ASSERT avl_verify($avl, Nil, Nil) > 0, "AVL invariant holds after inserting " ~ $k;
+}
+ASSERT avl_height($avl) == 5, "AVL of 1..31 achieves optimal height 5 (log2(32))";
+
+# Also trigger LR and RL double rotations + deletions
+for [16, 8, 24, 4, 12, 20, 28, 1, 2, 3] -> $del_k {
+    $avl = avl_delete($avl, $del_k);
+    ASSERT avl_verify($avl, Nil, Nil) > 0, "AVL invariant holds after deleting " ~ $del_k;
+}
+ASSERT bst_lookup($avl, 15) == 150, "AVL lookup key 15 returns 150";
+ASSERT !defined(bst_lookup($avl, 16)), "AVL deleted key 16 is Nil";
+say "[2] AVL Tree: adversarial 1..31 height=5; verified height & balance invariants across 10 deletions (h=" ~ avl_height($avl) ~ ")";
+
+# ==============================================================================
+# 3. Binary Min-Heap / Priority Queue
+# ==============================================================================
+
+sub heap_new() {
+    return { "data" => [] };
+}
+
+sub heap_sift_up(@a, $idx) {
+    my $i = $idx;
+    while $i > 0 {
+        my $parent = ($i - 1) div 2;
+        if @a[$i]{"pri"} < @a[$parent]{"pri"} {
+            my $tmp     = @a[$i];
+            @a[$i]      = @a[$parent];
+            @a[$parent] = $tmp;
+            $i = $parent;
+        } else {
+            last;
+        }
+    }
+}
+
+sub heap_sift_down(@a, $idx) {
+    my $n = elems(@a);
+    my $i = $idx;
+    while True {
+        my $smallest = $i;
+        my $left     = 2 * $i + 1;
+        my $right    = 2 * $i + 2;
+        if $left < $n && @a[$left]{"pri"} < @a[$smallest]{"pri"} {
+            $smallest = $left;
+        }
+        if $right < $n && @a[$right]{"pri"} < @a[$smallest]{"pri"} {
+            $smallest = $right;
+        }
+        if $smallest == $i {
+            last;
+        }
+        my $tmp       = @a[$i];
+        @a[$i]        = @a[$smallest];
+        @a[$smallest] = $tmp;
+        $i = $smallest;
+    }
+}
+
+sub heap_push($h, $pri, $val) {
+    my @a = $h{"data"};
+    push(@a, { "pri" => $pri, "val" => $val });
+    heap_sift_up(@a, elems(@a) - 1);
+}
+
+sub heap_peek($h) {
+    my @a = $h{"data"};
+    if elems(@a) == 0 { return Nil; }
+    return @a[0];
+}
+
+sub heap_pop($h) {
+    my @a = $h{"data"};
+    my $n = elems(@a);
+    if $n == 0 { return Nil; }
+    my $top  = @a[0];
+    my $last = pop(@a);
+    if $n > 1 {
+        @a[0] = $last;
+        heap_sift_down(@a, 0);
+    }
+    return $top;
+}
+
+# O(n) Floyd bottom-up heapify
+sub heap_from_priorities(@pris) {
+    my $h = heap_new();
+    my @a = $h{"data"};
+    for @pris -> $p {
+        push(@a, { "pri" => $p, "val" => "job_" ~ $p });
+    }
+    my $n = elems(@a);
+    my $i = ($n div 2) - 1;
+    while $i >= 0 {
+        heap_sift_down(@a, $i);
+        $i = $i - 1;
+    }
+    return $h;
+}
+
+my $pq = heap_from_priorities([42, 7, 19, 3, 25, 1, 14, 3]);
+heap_push($pq, 2, "urgent");
+my @popped_pris = [];
+while elems($pq{"data"}) > 0 {
+    my $item = heap_pop($pq);
+    push(@popped_pris, $item{"pri"});
+}
+ASSERT arrays_eq(@popped_pris, [1, 2, 3, 3, 7, 14, 19, 25, 42]), "Min-heap extracts priorities in non-decreasing order";
+say "[3] Binary Min-Heap PQ: extracted priorities = [" ~ join(", ", @popped_pris) ~ "]";
+
+# ==============================================================================
+# 4. Prefix Trie (Exact Match, Prefix Test, Sorted Autocomplete)
+# ==============================================================================
+
+sub trie_new() {
+    return { "children" => {}, "end" => False };
+}
+
+sub trie_insert($root, $word) {
+    my $cur = $root;
+    my $len = chars($word);
+    for 0 ..^ $len -> $i {
+        my $ch = substr($word, $i, 1);
+        my %kids = $cur{"children"};
+        if !exists(%kids, $ch) {
+            %kids{$ch} = trie_new();
+        }
+        $cur = %kids{$ch};
+    }
+    $cur{"end"} = True;
+}
+
+sub trie_walk($root, $prefix) {
+    my $cur = $root;
+    my $len = chars($prefix);
+    for 0 ..^ $len -> $i {
+        my $ch = substr($prefix, $i, 1);
+        my %kids = $cur{"children"};
+        if !exists(%kids, $ch) {
+            return Nil;
+        }
+        $cur = %kids{$ch};
+    }
+    return $cur;
+}
+
+sub trie_search($root, $word) {
+    my $node = trie_walk($root, $word);
+    return defined($node) && $node{"end"};
+}
+
+sub trie_starts_with($root, $prefix) {
+    return defined(trie_walk($root, $prefix));
+}
+
+sub trie_collect($node, $prefix, @out) {
+    if $node{"end"} {
+        push(@out, $prefix);
+    }
+    my %kids = $node{"children"};
+    my @sorted_ch = sort(keys(%kids));
+    for @sorted_ch -> $ch {
+        trie_collect(%kids{$ch}, $prefix ~ $ch, @out);
+    }
+}
+
+sub trie_autocomplete($root, $prefix) {
+    my @out  = [];
+    my $node = trie_walk($root, $prefix);
+    if defined($node) {
+        trie_collect($node, $prefix, @out);
+    }
+    return @out;
+}
+
+my $trie = trie_new();
+for ["perl", "perldoc", "perlbrew", "raku", "raptor", "rapid", "radix"] -> $w {
+    trie_insert($trie, $w);
+}
+ASSERT trie_search($trie, "perl"), "Trie exact match 'perl'";
+ASSERT !trie_search($trie, "per"), "Trie prefix 'per' is not exact word";
+ASSERT trie_starts_with($trie, "per"), "Trie starts_with 'per'";
+ASSERT !trie_starts_with($trie, "python"), "Trie starts_with 'python' is False";
+
+my @ra_words = trie_autocomplete($trie, "ra");
+ASSERT str_arrays_eq(@ra_words, ["radix", "raku", "rapid", "raptor"]), "Trie autocomplete('ra') sorted";
+say "[4] Prefix Trie: autocomplete('ra') = [" ~ join(", ", @ra_words) ~ "]";
+
+# ==============================================================================
+# 5a. B-Tree (2-3-4 Tree, Minimum Degree t = 2)
+# ==============================================================================
+
+sub btree_node($leaf) {
+    return { "keys" => [], "kids" => [], "leaf" => $leaf };
+}
+
+sub btree_new() {
+    return { "root" => btree_node(True), "t" => 2 };
+}
+
+sub btree_search_node($node, $k) {
+    my @keys = $node{"keys"};
+    my $i = 0;
+    while $i < elems(@keys) && $k > @keys[$i] {
+        $i = $i + 1;
+    }
+    if $i < elems(@keys) && $k == @keys[$i] {
+        return True;
+    }
+    if $node{"leaf"} {
+        return False;
+    }
+    my @kids = $node{"kids"};
+    return btree_search_node(@kids[$i], $k);
+}
+
+sub btree_search($bt, $k) {
+    return btree_search_node($bt{"root"}, $k);
+}
+
+sub btree_split_child($parent, $idx, $t) {
+    my @pkids = $parent{"kids"};
+    my @pkeys = $parent{"keys"};
+    my $y = @pkids[$idx];
+    my $z = btree_node($y{"leaf"});
+
+    my @ykeys = $y{"keys"};
+    my @zkeys = $z{"keys"};
+    my $mid_key = @ykeys[$t - 1];
+
+    for $t ..^ (2 * $t - 1) -> $j {
+        push(@zkeys, @ykeys[$j]);
+    }
+    if !$y{"leaf"} {
+        my @ykids = $y{"kids"};
+        my @zkids = $z{"kids"};
+        for $t ..^ (2 * $t) -> $j {
+            push(@zkids, @ykids[$j]);
+        }
+        splice(@ykids, $t, $t);
+    }
+    splice(@ykeys, $t - 1, $t);
+
+    # Insert $z into @pkids at $idx + 1 and $mid_key into @pkeys at $idx
+    push(@pkids, Nil);
+    my $j = elems(@pkids) - 1;
+    while $j > $idx + 1 {
+        @pkids[$j] = @pkids[$j - 1];
+        $j = $j - 1;
+    }
+    @pkids[$idx + 1] = $z;
+
+    push(@pkeys, 0);
+    $j = elems(@pkeys) - 1;
+    while $j > $idx {
+        @pkeys[$j] = @pkeys[$j - 1];
+        $j = $j - 1;
+    }
+    @pkeys[$idx] = $mid_key;
+}
+
+sub btree_insert_nonfull($node, $k, $t) {
+    my @keys = $node{"keys"};
+    my $i = elems(@keys) - 1;
+    if $node{"leaf"} {
+        push(@keys, 0);
+        while $i >= 0 && $k < @keys[$i] {
+            @keys[$i + 1] = @keys[$i];
+            $i = $i - 1;
+        }
+        @keys[$i + 1] = $k;
+    } else {
+        while $i >= 0 && $k < @keys[$i] {
+            $i = $i - 1;
+        }
+        $i = $i + 1;
+        my @kids = $node{"kids"};
+        my $child = @kids[$i];
+        if elems($child{"keys"}) == 2 * $t - 1 {
+            btree_split_child($node, $i, $t);
+            if $k > @keys[$i] {
+                $i = $i + 1;
+            }
+        }
+        btree_insert_nonfull(@kids[$i], $k, $t);
+    }
+}
+
+sub btree_insert($bt, $k) {
+    my $t = $bt{"t"};
+    my $r = $bt{"root"};
+    if elems($r{"keys"}) == 2 * $t - 1 {
+        my $s = btree_node(False);
+        $bt{"root"} = $s;
+        my @skids = $s{"kids"};
+        push(@skids, $r);
+        btree_split_child($s, 0, $t);
+        btree_insert_nonfull($s, $k, $t);
+    } else {
+        btree_insert_nonfull($r, $k, $t);
+    }
+}
+
+sub btree_inorder($node, @out) {
+    my @keys = $node{"keys"};
+    my @kids = $node{"kids"};
+    my $n = elems(@keys);
+    for 0 ..^ $n -> $i {
+        if !$node{"leaf"} {
+            btree_inorder(@kids[$i], @out);
+        }
+        push(@out, @keys[$i]);
+    }
+    if !$node{"leaf"} {
+        btree_inorder(@kids[$n], @out);
+    }
+}
+
+my $bt = btree_new();
+for [10, 20, 5, 6, 12, 30, 7, 17, 3, 25, 40, 50, 15, 27] -> $k {
+    btree_insert($bt, $k);
+}
+my @bt_sorted = [];
+btree_inorder($bt{"root"}, @bt_sorted);
+ASSERT arrays_eq(@bt_sorted, [3, 5, 6, 7, 10, 12, 15, 17, 20, 25, 27, 30, 40, 50]), "B-Tree (t=2) multi-split in-order traversal";
+ASSERT btree_search($bt, 17) && !btree_search($bt, 99), "B-Tree search hits & misses";
+
+# ==============================================================================
+# 5b. O(1) LRU Cache (Hash Map + Sentinel Doubly Linked List)
+# ==============================================================================
+
+sub lru_new($cap) {
+    my $head = { "key" => "", "val" => Nil, "prev" => Nil, "next" => Nil };
+    my $tail = { "key" => "", "val" => Nil, "prev" => $head, "next" => Nil };
+    $head{"next"} = $tail;
+    return { "cap" => $cap, "map" => {}, "head" => $head, "tail" => $tail, "size" => 0 };
+}
+
+sub lru_detach($node) {
+    my $p = $node{"prev"};
+    my $n = $node{"next"};
+    $p{"next"} = $n;
+    $n{"prev"} = $p;
+}
+
+sub lru_attach_front($cache, $node) {
+    my $head = $cache{"head"};
+    my $first = $head{"next"};
+    $node{"prev"} = $head;
+    $node{"next"} = $first;
+    $head{"next"} = $node;
+    $first{"prev"} = $node;
+}
+
+sub lru_get($cache, $key) {
+    my %m = $cache{"map"};
+    if !exists(%m, $key) {
+        return Nil;
+    }
+    my $node = %m{$key};
+    lru_detach($node);
+    lru_attach_front($cache, $node);
+    return $node{"val"};
+}
+
+sub lru_put($cache, $key, $val) {
+    my %m = $cache{"map"};
+    if exists(%m, $key) {
+        my $node = %m{$key};
+        $node{"val"} = $val;
+        lru_detach($node);
+        lru_attach_front($cache, $node);
+        return;
+    }
+    if $cache{"size"} == $cache{"cap"} {
+        my $tail = $cache{"tail"};
+        my $victim = $tail{"prev"};
+        lru_detach($victim);
+        delete(%m, $victim{"key"});
+        $cache{"size"} = $cache{"size"} - 1;
+    }
+    my $fresh = { "key" => $key, "val" => $val, "prev" => Nil, "next" => Nil };
+    lru_attach_front($cache, $fresh);
+    %m{$key} = $fresh;
+    $cache{"size"} = $cache{"size"} + 1;
+}
+
+my $lru = lru_new(3);
+lru_put($lru, "A", 1);
+lru_put($lru, "B", 2);
+lru_put($lru, "C", 3);
+ASSERT lru_get($lru, "A") == 1, "LRU get A promotes A to MRU";
+lru_put($lru, "D", 4); # Evicts B (least recently used)
+ASSERT !defined(lru_get($lru, "B")), "LRU evicted B";
+ASSERT lru_get($lru, "C") == 3 && lru_get($lru, "D") == 4 && lru_get($lru, "A") == 1, "LRU retains C, D, A";
+say "[5] B-Tree (14 keys, root keys=[" ~ join(",", $bt{"root"}{"keys"}) ~ "]) & O(1) LRU Cache verified";
+
+say "All Chapter 03 assertions passed!";

@@ -1,0 +1,642 @@
+<?raptor
+# ==============================================================================
+# RaptorHP Server-Side Rendered Todo Application (index.phtml)
+# ==============================================================================
+# Run with:
+#   raptor -S localhost:8000 -t raptor/examples/todo
+# ==============================================================================
+
+my $get_params = try { %_GET };
+if !defined($get_params) || type($get_params) ne "Hash" {
+    $get_params = {};
+}
+
+my $post_params = try { %_POST };
+if !defined($post_params) || type($post_params) ne "Hash" {
+    $post_params = {};
+}
+
+my $server_params = try { %_SERVER };
+if !defined($server_params) || type($server_params) ne "Hash" {
+    $server_params = {};
+}
+
+sub hp_sql_escape($s) {
+    if !defined($s) {
+        return "";
+    }
+    return replace(str($s), "'", "''");
+}
+
+sub hp_norm_prio($p) {
+    if !defined($p) {
+        return "medium";
+    }
+    my $v = lc(trim(str($p)));
+    if $v eq "high" || $v eq "medium" || $v eq "low" {
+        return $v;
+    }
+    return "medium";
+}
+
+sub hp_norm_cat($c) {
+    if !defined($c) {
+        return "general";
+    }
+    my $v = trim(str($c));
+    if $v eq "" {
+        return "general";
+    }
+    if length($v) > 32 {
+        $v = substr($v, 0, 32);
+    }
+    return $v;
+}
+
+my $db_file = getenv("RAPTOR_TODO_DB");
+if $db_file eq "" {
+    $db_file = "todo.db";
+}
+
+my $db = sqlite_open($db_file);
+try {
+    sqlite_exec($db, "PRAGMA busy_timeout = 5000;");
+};
+sqlite_exec($db, "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, completed INTEGER, priority TEXT, category TEXT, created_at INTEGER)");
+
+if getenv("RAPTOR_TODO_NO_SEED") ne "1" {
+    my $existing_check = sqlite_query($db, "SELECT id FROM todos LIMIT 1");
+    if elems($existing_check) == 0 && elems($post_params) == 0 {
+        my $seed_ts = time();
+        sqlite_exec($db, "INSERT INTO todos (title, completed, priority, category, created_at) VALUES ('Launch RaptorHP server with raptor -S', 1, 'high', 'server', " ~ $seed_ts ~ ")");
+        sqlite_exec($db, "INSERT INTO todos (title, completed, priority, category, created_at) VALUES ('Add server-rendered tasks via HTML forms', 0, 'medium', 'webapp', " ~ $seed_ts ~ ")");
+        sqlite_exec($db, "INSERT INTO todos (title, completed, priority, category, created_at) VALUES ('Filter tasks by status, priority, and keyword', 0, 'low', 'ux', " ~ $seed_ts ~ ")");
+    }
+}
+
+my $flash_msg = "";
+
+# Process HTML form POST actions
+my $req_method = "GET";
+if exists($server_params, "REQUEST_METHOD") && defined($server_params<REQUEST_METHOD>) {
+    $req_method = uc(str($server_params<REQUEST_METHOD>));
+}
+if elems($post_params) > 0 {
+    $req_method = "POST";
+}
+
+if $req_method eq "POST" && exists($post_params, "action") {
+    my $action = str($post_params<action>);
+
+    if $action eq "add" {
+        my $new_title = trim(str($post_params<title> // ""));
+        if $new_title ne "" {
+            my $new_prio = hp_norm_prio($post_params<priority>);
+            my $new_cat  = hp_norm_cat($post_params<category>);
+            sqlite_exec($db, "INSERT INTO todos (title, completed, priority, category, created_at) VALUES ('"
+                ~ hp_sql_escape($new_title) ~ "', 0, '"
+                ~ hp_sql_escape($new_prio) ~ "', '"
+                ~ hp_sql_escape($new_cat) ~ "', " ~ time() ~ ")");
+            $flash_msg = "Added task: " ~ $new_title;
+        }
+    } elsif $action eq "toggle" {
+        my $tid = int($post_params<id> // 0);
+        if $tid > 0 {
+            my $cur = sqlite_query($db, "SELECT completed FROM todos WHERE id = " ~ $tid ~ " LIMIT 1");
+            if elems($cur) > 0 {
+                my $next_val = 1;
+                if int($cur[0]<completed>) == 1 {
+                    $next_val = 0;
+                }
+                sqlite_exec($db, "UPDATE todos SET completed = " ~ $next_val ~ " WHERE id = " ~ $tid);
+            }
+        }
+    } elsif $action eq "update" {
+        my $uid = int($post_params<id> // 0);
+        my $utitle = trim(str($post_params<title> // ""));
+        if $uid > 0 && $utitle ne "" {
+            my $uprio = hp_norm_prio($post_params<priority>);
+            my $ucat  = hp_norm_cat($post_params<category>);
+            sqlite_exec($db, "UPDATE todos SET title = '" ~ hp_sql_escape($utitle)
+                ~ "', priority = '" ~ hp_sql_escape($uprio)
+                ~ "', category = '" ~ hp_sql_escape($ucat)
+                ~ "' WHERE id = " ~ $uid);
+            $flash_msg = "Updated task #" ~ $uid;
+        }
+    } elsif $action eq "delete" {
+        my $did = int($post_params<id> // 0);
+        if $did > 0 {
+            sqlite_exec($db, "DELETE FROM todos WHERE id = " ~ $did);
+            $flash_msg = "Deleted task #" ~ $did;
+        }
+    } elsif $action eq "clear_completed" {
+        my $cres = sqlite_exec($db, "DELETE FROM todos WHERE completed = 1");
+        $flash_msg = "Cleared " ~ int($cres<changes>) ~ " completed task(s)";
+    }
+}
+
+# Read GET filters
+my $status_filter = lc(trim(str($get_params<status> // "")));
+my $prio_filter   = lc(trim(str($get_params<priority> // "")));
+my $q_filter      = trim(str($get_params<q> // ""));
+my $q_lower       = lc($q_filter);
+my $edit_id       = int($get_params<edit> // 0);
+
+sub build_filter_href($st, $pr, $q, $ed) {
+    my $qs = [];
+    if $st ne "" {
+        push($qs, "status=" ~ uri_encode($st));
+    }
+    if $pr ne "" {
+        push($qs, "priority=" ~ uri_encode($pr));
+    }
+    if $q ne "" {
+        push($qs, "q=" ~ uri_encode($q));
+    }
+    if $ed > 0 {
+        push($qs, "edit=" ~ $ed);
+    }
+    if elems($qs) == 0 {
+        return "/";
+    }
+    return "/?" ~ join("&", $qs);
+}
+
+my $current_action_url = build_filter_href($status_filter, $prio_filter, $q_filter, 0);
+
+# Query & filter todos
+my $all_rows = sqlite_query($db, "SELECT id, title, completed, priority, category, created_at FROM todos ORDER BY id DESC");
+sqlite_close($db);
+
+my $total_count     = 0;
+my $active_count    = 0;
+my $completed_count = 0;
+my $visible_rows    = [];
+
+for $all_rows -> $row {
+    my $comp = int($row<completed>);
+    my $prio = hp_norm_prio($row<priority>);
+    my $cat  = hp_norm_cat($row<category>);
+    my $ttl  = str($row<title>);
+
+    $total_count = $total_count + 1;
+    if $comp == 1 {
+        $completed_count = $completed_count + 1;
+    } else {
+        $active_count = $active_count + 1;
+    }
+
+    my $show = 1;
+    if $status_filter eq "active" && $comp != 0 {
+        $show = 0;
+    } elsif $status_filter eq "completed" && $comp != 1 {
+        $show = 0;
+    }
+
+    if $show == 1 && ($prio_filter eq "high" || $prio_filter eq "medium" || $prio_filter eq "low") {
+        if $prio ne $prio_filter {
+            $show = 0;
+        }
+    }
+
+    if $show == 1 && $q_lower ne "" {
+        if !contains(lc($ttl), $q_lower) && !contains(lc($cat), $q_lower) {
+            $show = 0;
+        }
+    }
+
+    if $show == 1 {
+        push($visible_rows, {
+            "id"        => int($row<id>),
+            "title"     => $ttl,
+            "completed" => $comp,
+            "priority"  => $prio,
+            "category"  => $cat
+        });
+    }
+}
+
+my $flash_html = "";
+if $flash_msg ne "" {
+    $flash_html = '<div class="flash-banner">' ~ html_escape($flash_msg) ~ '</div>';
+}
+
+my $tab_all_cls  = $status_filter eq ""          ? " dummy" : "";
+# Build clean active classes without ternary ambiguity
+if $status_filter eq "" {
+    $tab_all_cls = "tab-link active";
+} else {
+    $tab_all_cls = "tab-link";
+}
+my $tab_act_cls = "tab-link";
+if $status_filter eq "active" {
+    $tab_act_cls = "tab-link active";
+}
+my $tab_comp_cls = "tab-link";
+if $status_filter eq "completed" {
+    $tab_comp_cls = "tab-link active";
+}
+
+my $sel_prio_all = "";
+my $sel_prio_high = "";
+my $sel_prio_med = "";
+my $sel_prio_low = "";
+if $prio_filter eq "high" {
+    $sel_prio_high = " selected";
+} elsif $prio_filter eq "medium" {
+    $sel_prio_med = " selected";
+} elsif $prio_filter eq "low" {
+    $sel_prio_low = " selected";
+} else {
+    $sel_prio_all = " selected";
+}
+
+my $items_html = "";
+if elems($visible_rows) == 0 {
+    $items_html = '<li class="empty-box">No tasks match your current filters. Add a task above!</li>';
+} else {
+    for $visible_rows -> $item {
+        my $id_num = $item<id>;
+        my $esc_title = html_escape($item<title>);
+        my $esc_prio  = html_escape($item<priority>);
+        my $esc_cat   = html_escape($item<category>);
+        my $done_cls  = "";
+        my $check_sym = "";
+        if $item<completed> == 1 {
+            $done_cls  = " completed";
+            $check_sym = "&#10003;";
+        }
+
+        if $edit_id == $id_num {
+            my $ep_high = "";
+            my $ep_med  = "";
+            my $ep_low  = "";
+            if $item<priority> eq "high" {
+                $ep_high = " selected";
+            } elsif $item<priority> eq "low" {
+                $ep_low = " selected";
+            } else {
+                $ep_med = " selected";
+            }
+
+            $items_html ~= '<li class="todo-row">'
+                ~ '<form method="POST" action="' ~ html_escape($current_action_url) ~ '" class="edit-form">'
+                ~ '<input type="hidden" name="action" value="update">'
+                ~ '<input type="hidden" name="id" value="' ~ $id_num ~ '">'
+                ~ '<input type="text" name="title" value="' ~ $esc_title ~ '" required maxlength="240">'
+                ~ '<select name="priority">'
+                ~ '<option value="high"' ~ $ep_high ~ '>High</option>'
+                ~ '<option value="medium"' ~ $ep_med ~ '>Medium</option>'
+                ~ '<option value="low"' ~ $ep_low ~ '>Low</option>'
+                ~ '</select>'
+                ~ '<input type="text" name="category" value="' ~ $esc_cat ~ '" class="cat-field" maxlength="32">'
+                ~ '<button type="submit" class="btn-primary">Save</button>'
+                ~ '<a class="btn-ghost" href="' ~ html_escape($current_action_url) ~ '">Cancel</a>'
+                ~ '</form>'
+                ~ '</li>';
+        } else {
+            my $edit_href = build_filter_href($status_filter, $prio_filter, $q_filter, $id_num);
+            my $cat_href  = build_filter_href($status_filter, $prio_filter, $item<category>, 0);
+
+            $items_html ~= '<li class="todo-row' ~ $done_cls ~ '">'
+                ~ '<form method="POST" action="' ~ html_escape($current_action_url) ~ '" class="inline-form">'
+                ~ '<input type="hidden" name="action" value="toggle">'
+                ~ '<input type="hidden" name="id" value="' ~ $id_num ~ '">'
+                ~ '<button type="submit" class="check-box" title="Toggle Completed">' ~ $check_sym ~ '</button>'
+                ~ '</form>'
+                ~ '<div class="todo-body">'
+                ~ '<div class="todo-text">' ~ $esc_title ~ '</div>'
+                ~ '<div class="todo-tags">'
+                ~ '<span class="badge prio-' ~ $esc_prio ~ '">' ~ $esc_prio ~ '</span>'
+                ~ '<a class="cat-pill" href="' ~ html_escape($cat_href) ~ '">#' ~ $esc_cat ~ '</a>'
+                ~ '</div>'
+                ~ '</div>'
+                ~ '<div class="row-actions">'
+                ~ '<a class="btn-ghost" href="' ~ html_escape($edit_href) ~ '">Edit</a>'
+                ~ '<form method="POST" action="' ~ html_escape($current_action_url) ~ '" class="inline-form">'
+                ~ '<input type="hidden" name="action" value="delete">'
+                ~ '<input type="hidden" name="id" value="' ~ $id_num ~ '">'
+                ~ '<button type="submit" class="btn-ghost danger">Delete</button>'
+                ~ '</form>'
+                ~ '</div>'
+                ~ '</li>';
+        }
+    }
+}
+
+my $active_summary_text = $active_count ~ " active items left";
+if $active_count == 1 {
+    $active_summary_text = "1 active item left";
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= "RaptorHP Todo — Server-Rendered App" ?></title>
+    <style>
+        :root {
+            --bg: #0b1020;
+            --panel: rgba(19, 27, 46, 0.80);
+            --card: rgba(30, 41, 69, 0.62);
+            --border: rgba(148, 163, 184, 0.20);
+            --fg: #f1f5f9;
+            --muted: #94a3b8;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --input-bg: rgba(15, 23, 42, 0.72);
+        }
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg: #f1f5f9;
+                --panel: rgba(255, 255, 255, 0.86);
+                --card: rgba(255, 255, 255, 0.92);
+                --border: rgba(100, 116, 139, 0.22);
+                --fg: #0f172a;
+                --muted: #475569;
+                --accent: #4f46e5;
+                --accent-hover: #4338ca;
+                --input-bg: #f8fafc;
+            }
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.20), transparent 40%),
+                        radial-gradient(circle at 85% 20%, rgba(16, 185, 129, 0.15), transparent 40%),
+                        var(--bg);
+            color: var(--fg);
+            min-height: 100vh;
+            padding: 2.25rem 1rem 4rem;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 780px;
+            margin: 0 auto;
+            background: var(--panel);
+            backdrop-filter: blur(18px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 2rem;
+            box-shadow: 0 24px 60px rgba(2, 6, 23, 0.35);
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1.4rem;
+        }
+        .header h1 { font-size: 1.5rem; font-weight: 800; }
+        .sub { font-size: 0.82rem; color: var(--muted); }
+        .mode-chip {
+            font-size: 0.76rem;
+            font-weight: 700;
+            padding: 0.35rem 0.75rem;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.16);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.34);
+        }
+        .flash-banner {
+            margin-bottom: 1rem;
+            padding: 0.65rem 0.95rem;
+            border-radius: 12px;
+            background: rgba(99, 102, 241, 0.16);
+            border: 1px solid rgba(99, 102, 241, 0.35);
+            font-size: 0.88rem;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+            margin-bottom: 1.35rem;
+        }
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 0.7rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+        .stat-card span { font-size: 0.78rem; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+        .stat-card strong { font-size: 1.3rem; }
+        .add-form {
+            display: grid;
+            grid-template-columns: 1fr auto auto auto;
+            gap: 0.6rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 0.85rem;
+            margin-bottom: 1.25rem;
+        }
+        input[type="text"], input[type="search"], select {
+            background: var(--input-bg);
+            color: var(--fg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.62rem 0.85rem;
+            font-size: 0.9rem;
+        }
+        .cat-field { width: 125px; }
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 0.62rem 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-bottom: 1.15rem;
+        }
+        .tabs {
+            display: inline-flex;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.22rem;
+            gap: 0.2rem;
+        }
+        .tab-link {
+            text-decoration: none;
+            color: var(--muted);
+            padding: 0.4rem 0.85rem;
+            border-radius: 9px;
+            font-size: 0.83rem;
+            font-weight: 600;
+        }
+        .tab-link.active {
+            background: var(--accent);
+            color: #fff;
+        }
+        .filter-form {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .todo-list { list-style: none; display: flex; flex-direction: column; gap: 0.6rem; }
+        .todo-row {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 0.85rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+        }
+        .todo-row.completed .todo-text { text-decoration: line-through; color: var(--muted); opacity: 0.7; }
+        .inline-form { display: inline-flex; margin: 0; }
+        .check-box {
+            width: 24px;
+            height: 24px;
+            border-radius: 7px;
+            border: 2px solid var(--muted);
+            background: transparent;
+            cursor: pointer;
+            color: #fff;
+            font-weight: 800;
+            display: grid;
+            place-items: center;
+        }
+        .todo-row.completed .check-box { background: #10b981; border-color: #10b981; }
+        .todo-body { flex: 1; min-width: 0; }
+        .todo-text { font-weight: 600; word-break: break-word; }
+        .todo-tags { display: flex; gap: 0.45rem; align-items: center; margin-top: 0.28rem; flex-wrap: wrap; }
+        .badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 0.12rem 0.5rem;
+            border-radius: 999px;
+        }
+        .prio-high { background: rgba(244, 63, 94, 0.16); color: #fb7185; }
+        .prio-medium { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
+        .prio-low { background: rgba(16, 185, 129, 0.16); color: #34d399; }
+        .cat-pill {
+            font-size: 0.73rem;
+            font-weight: 600;
+            text-decoration: none;
+            padding: 0.12rem 0.55rem;
+            border-radius: 999px;
+            background: rgba(56, 189, 248, 0.14);
+            color: #38bdf8;
+        }
+        .row-actions { display: flex; gap: 0.4rem; align-items: center; }
+        .btn-ghost {
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.35rem 0.65rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .btn-ghost.danger:hover { color: #f43f5e; border-color: rgba(244, 63, 94, 0.4); }
+        .edit-form { display: flex; gap: 0.5rem; flex-wrap: wrap; width: 100%; align-items: center; }
+        .edit-form input[type="text"] { flex: 1; min-width: 150px; }
+        .empty-box {
+            text-align: center;
+            padding: 2.2rem 1rem;
+            color: var(--muted);
+            border: 1px dashed var(--border);
+            border-radius: 14px;
+        }
+        .footer {
+            margin-top: 1.35rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            font-size: 0.86rem;
+            color: var(--muted);
+        }
+        @media (max-width: 680px) {
+            .add-form { grid-template-columns: 1fr 1fr; }
+            .add-form input[name="title"], .add-form .btn-primary { grid-column: 1 / -1; }
+            .stats { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <header class="header">
+            <div>
+                <h1>RaptorHP Todo</h1>
+                <div class="sub">100% Server-Side Rendered Templates + SQLite (<?= html_escape($db_file) ?>)</div>
+            </div>
+            <span class="mode-chip">RaptorHP SSR</span>
+        </header>
+
+        <?= $flash_html ?>
+
+        <section class="stats">
+            <div class="stat-card"><span>Total</span><strong><?= $total_count ?></strong></div>
+            <div class="stat-card"><span>Active</span><strong><?= $active_count ?></strong></div>
+            <div class="stat-card"><span>Completed</span><strong><?= $completed_count ?></strong></div>
+        </section>
+
+        <form method="POST" action="<?= html_escape($current_action_url) ?>" class="add-form" autocomplete="off">
+            <input type="hidden" name="action" value="add">
+            <input type="text" name="title" placeholder="Add a server-rendered task..." required maxlength="240">
+            <select name="priority" aria-label="Priority">
+                <option value="high">High Priority</option>
+                <option value="medium" selected>Medium</option>
+                <option value="low">Low Priority</option>
+            </select>
+            <input type="text" name="category" class="cat-field" value="work" placeholder="Category" maxlength="32">
+            <button type="submit" class="btn-primary">+ Add Task</button>
+        </form>
+
+        <section class="toolbar">
+            <nav class="tabs" aria-label="Status filter">
+                <a class="<?= $tab_all_cls ?>" href="<?= html_escape(build_filter_href("", $prio_filter, $q_filter, 0)) ?>">All</a>
+                <a class="<?= $tab_act_cls ?>" href="<?= html_escape(build_filter_href("active", $prio_filter, $q_filter, 0)) ?>">Active</a>
+                <a class="<?= $tab_comp_cls ?>" href="<?= html_escape(build_filter_href("completed", $prio_filter, $q_filter, 0)) ?>">Completed</a>
+            </nav>
+
+            <form method="GET" action="/" class="filter-form">
+                <input type="hidden" name="status" value="<?= html_escape($status_filter) ?>">
+                <select name="priority" aria-label="Filter priority">
+                    <option value=""<?= $sel_prio_all ?>>All Priorities</option>
+                    <option value="high"<?= $sel_prio_high ?>>High</option>
+                    <option value="medium"<?= $sel_prio_med ?>>Medium</option>
+                    <option value="low"<?= $sel_prio_low ?>>Low</option>
+                </select>
+                <input type="search" name="q" value="<?= html_escape($q_filter) ?>" placeholder="Search...">
+                <button type="submit" class="btn-ghost">Filter</button>
+            </form>
+        </section>
+
+        <ul class="todo-list">
+            <?= $items_html ?>
+        </ul>
+
+        <footer class="footer">
+            <span><?= html_escape($active_summary_text) ?></span>
+            <form method="POST" action="<?= html_escape($current_action_url) ?>" class="inline-form">
+                <input type="hidden" name="action" value="clear_completed">
+                <button type="submit" class="btn-ghost danger">Clear Completed (<?= $completed_count ?>)</button>
+            </form>
+        </footer>
+    </main>
+</body>
+</html>

@@ -1,0 +1,250 @@
+# Mastering Algorithms with Perl - Chapter 09: Strings and Pattern Matching
+# Covers Knuth-Morris-Pratt (KMP), Boyer-Moore-Horspool, Rabin-Karp rolling hash,
+# Levenshtein edit distance, Longest Common Subsequence (LCS), Suffix Array, and PEG AST parsing.
+
+say "=== Chapter 09: Strings and Pattern Matching ===";
+
+# 1. Knuth-Morris-Pratt (KMP) Exact Substring Search — O(n + m)
+sub kmp_lps($pat) {
+    my $m = chars($pat);
+    my @lps;
+    for 0 ..^ $m -> $i { push(@lps, 0); }
+    my $len = 0;
+    my $i = 1;
+    while $i < $m {
+        if substr($pat, $i, 1) eq substr($pat, $len, 1) {
+            $len++;
+            @lps[$i] = $len;
+            $i++;
+        } elsif $len != 0 {
+            $len = @lps[$len - 1];
+        } else {
+            @lps[$i] = 0;
+            $i++;
+        }
+    }
+    return @lps;
+}
+
+sub kmp_search($text, $pat) {
+    my $n = chars($text);
+    my $m = chars($pat);
+    return [] if $m == 0 || $m > $n;
+    my @lps = kmp_lps($pat);
+    my @hits;
+    my $i = 0;
+    my $j = 0;
+    while $i < $n {
+        if substr($text, $i, 1) eq substr($pat, $j, 1) {
+            $i++;
+            $j++;
+            if $j == $m {
+                push(@hits, $i - $j);
+                $j = @lps[$j - 1];
+            }
+        } elsif $j != 0 {
+            $j = @lps[$j - 1];
+        } else {
+            $i++;
+        }
+    }
+    return @hits;
+}
+
+# 2. Boyer-Moore-Horspool Bad-Character Shift Search
+sub horspool_search($text, $pat) {
+    my $n = chars($text);
+    my $m = chars($pat);
+    return [] if $m == 0 || $m > $n;
+    my %shift;
+    for 0 ..^ ($m - 1) -> $i {
+        %shift{substr($pat, $i, 1)} = $m - 1 - $i;
+    }
+    my @hits;
+    my $pos = 0;
+    while $pos <= ($n - $m) {
+        my $j = $m - 1;
+        while $j >= 0 && substr($pat, $j, 1) eq substr($text, $pos + $j, 1) {
+            $j--;
+        }
+        if $j < 0 {
+            push(@hits, $pos);
+            $pos += 1;
+        } else {
+            my $last_ch = substr($text, $pos + $m - 1, 1);
+            $pos += (%shift{$last_ch} // $m);
+        }
+    }
+    return @hits;
+}
+
+# 3. Rabin-Karp Rolling Polynomial Hash Search
+sub rabin_karp_search($text, $pat) {
+    my $n = chars($text);
+    my $m = chars($pat);
+    return [] if $m == 0 || $m > $n;
+    my $base = 257;
+    my $mod  = 1000000007;
+    my $high = 1;
+    for 1 ..^ $m -> $k { $high = ($high * $base) % $mod; }
+
+    my $ph = 0;
+    my $th = 0;
+    for 0 ..^ $m -> $i {
+        $ph = ($ph * $base + ord(substr($pat,  $i, 1))) % $mod;
+        $th = ($th * $base + ord(substr($text, $i, 1))) % $mod;
+    }
+    my @hits;
+    for 0 .. ($n - $m) -> $i {
+        if $ph == $th && substr($text, $i, $m) eq $pat {
+            push(@hits, $i);
+        }
+        if $i < ($n - $m) {
+            my $drop = (ord(substr($text, $i, 1)) * $high) % $mod;
+            $th = (($th - $drop + $mod) * $base + ord(substr($text, $i + $m, 1))) % $mod;
+        }
+    }
+    return @hits;
+}
+
+my $dna = "ABABDABACDABABCABABABABCABAB";
+my $pat = "ABABCABAB";
+my @kmp_h = kmp_search($dna, $pat);
+my @bmh_h = horspool_search($dna, $pat);
+my @rk_h  = rabin_karp_search($dna, $pat);
+ASSERT join(",", @kmp_h) eq "10,19" && join(",", @bmh_h) eq "10,19" && join(",", @rk_h) eq "10,19", "KMP, Horspool, and Rabin-Karp agree";
+say "[1] Exact Matchers (KMP/Horspool/Rabin-Karp) hits = [{join(', ', @kmp_h)}]";
+
+# 4. Wagner-Fischer Levenshtein Edit Distance — O(n * m)
+sub levenshtein($a, $b) {
+    my $n = chars($a);
+    my $m = chars($b);
+    my @prev;
+    for 0 .. $m -> $j { push(@prev, $j); }
+    for 1 .. $n -> $i {
+        my @curr = [$i];
+        my $ca = substr($a, $i - 1, 1);
+        for 1 .. $m -> $j {
+            my $cost = ($ca eq substr($b, $j - 1, 1)) ?? 0 !! 1;
+            my $del = @prev[$j] + 1;
+            my $ins = @curr[$j - 1] + 1;
+            my $sub = @prev[$j - 1] + $cost;
+            my $best = $del < $ins ?? $del !! $ins;
+            $best = $sub if $sub < $best;
+            push(@curr, $best);
+        }
+        @prev = @curr;
+    }
+    return @prev[$m];
+}
+
+ASSERT levenshtein("kitten", "sitting") == 3 && levenshtein("saturday", "sunday") == 3, "Levenshtein distance";
+say "[2] Levenshtein('kitten', 'sitting') = {levenshtein('kitten', 'sitting')}";
+
+# 5. Longest Common Subsequence (LCS)
+sub lcs($a, $b) {
+    my $n = chars($a);
+    my $m = chars($b);
+    my @dp;
+    for 0 .. $n -> $i {
+        my @row;
+        for 0 .. $m -> $j { push(@row, 0); }
+        push(@dp, @row);
+    }
+    for 1 .. $n -> $i {
+        for 1 .. $m -> $j {
+            if substr($a, $i - 1, 1) eq substr($b, $j - 1, 1) {
+                @dp[$i][$j] = @dp[$i - 1][$j - 1] + 1;
+            } else {
+                my $up   = @dp[$i - 1][$j];
+                my $left = @dp[$i][$j - 1];
+                @dp[$i][$j] = $up > $left ?? $up !! $left;
+            }
+        }
+    }
+    my $res = "";
+    my $i = $n;
+    my $j = $m;
+    while $i > 0 && $j > 0 {
+        if substr($a, $i - 1, 1) eq substr($b, $j - 1, 1) {
+            $res = substr($a, $i - 1, 1) ~ $res;
+            $i--;
+            $j--;
+        } elsif @dp[$i - 1][$j] >= @dp[$i][$j - 1] {
+            $i--;
+        } else {
+            $j--;
+        }
+    }
+    return $res;
+}
+
+ASSERT lcs("AGGTAB", "GXTXAYB") eq "GTAB", "LCS('AGGTAB', 'GXTXAYB') eq 'GTAB'";
+say "[3] LCS('AGGTAB', 'GXTXAYB') = '{lcs('AGGTAB', 'GXTXAYB')}'";
+
+# 6. Suffix Array Construction & O(m log n) Substring Query
+sub build_suffix_array($s) {
+    my $n = chars($s);
+    my @keyed;
+    for 0 ..^ $n -> $i {
+        push(@keyed, substr($s, $i) ~ "\t" ~ sprintf("%06d", $i));
+    }
+    my @sa;
+    for sort(@keyed) -> $entry {
+        push(@sa, int(split("\t", $entry)[1]));
+    }
+    return @sa;
+}
+
+my @sa = build_suffix_array("banana");
+# Sorted suffixes of "banana": a(5), ana(3), anana(1), banana(0), na(4), nana(2)
+ASSERT join(",", @sa) eq "5,3,1,0,4,2", "Suffix array of 'banana' == [5,3,1,0,4,2]";
+say "[4] Suffix Array('banana') = [{join(', ', @sa)}]";
+
+# 7. Declarative Raku PEG Grammar with Action Table (`make` / `.ast`)
+grammar ArithExpr {
+    rule TOP    { ^ <sum> $ }
+    rule sum    { <term> [ $<op>=[ '+' | '-' ] <term> ]* }
+    rule term   { <factor> [ $<op>=[ '*' | '/' ] <factor> ]* }
+    rule factor { <num> | '(' <sum> ')' }
+    token num   { \d+ }
+}
+
+my %actions = {
+    "num" => sub ($m) { make(int("$m")); },
+    "factor" => sub ($m) {
+        if defined($m<num>) { make($m<num><made>); }
+        else                { make($m<sum><made>); }
+    },
+    "term" => sub ($m) {
+        my $fs = type($m<factor>) eq "Array" ?? $m<factor> !! [$m<factor>];
+        my $acc = $fs[0]<made>;
+        if defined($m<op>) {
+            my $ops = type($m<op>) eq "Array" ?? $m<op> !! [$m<op>];
+            for 0 ..^ elems($ops) -> $i {
+                my $rhs = $fs[$i + 1]<made>;
+                $acc = ("$ops[$i]" eq "*") ?? ($acc * $rhs) !! ($acc div $rhs);
+            }
+        }
+        make($acc);
+    },
+    "sum" => sub ($m) {
+        my $ts = type($m<term>) eq "Array" ?? $m<term> !! [$m<term>];
+        my $acc = $ts[0]<made>;
+        if defined($m<op>) {
+            my $ops = type($m<op>) eq "Array" ?? $m<op> !! [$m<op>];
+            for 0 ..^ elems($ops) -> $i {
+                my $rhs = $ts[$i + 1]<made>;
+                $acc = ("$ops[$i]" eq "+") ?? ($acc + $rhs) !! ($acc - $rhs);
+            }
+        }
+        make($acc);
+    },
+    "TOP" => sub ($m) { make($m<sum><made>); }
+};
+
+my $parsed = ArithExpr.parse("3 + 4 * (10 - 2) / 2", %actions);
+ASSERT defined($parsed) && $parsed<made> == 19, "PEG grammar + action table evaluated 3 + 4*(10-2)/2 == 19";
+say "[5] PEG Grammar AST eval('3 + 4 * (10 - 2) / 2') = {$parsed<made>}";
+
+say "All Chapter 09 assertions passed!";

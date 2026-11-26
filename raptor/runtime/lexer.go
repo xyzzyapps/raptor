@@ -8,11 +8,12 @@ import (
 
 // Lexer scans source code into a token stream for Raku5.
 type Lexer struct {
-	src     []rune
-	pos     int
-	line    int
-	col     int
-	pending []Token
+	src         []rune
+	pos         int
+	line        int
+	col         int
+	pending     []Token
+	lastTokType TokenType
 }
 
 // Pos is the current rune offset (after the last token).
@@ -34,6 +35,7 @@ func (l *Lexer) NextToken() Token {
 	if len(l.pending) > 0 {
 		tok := l.pending[0]
 		l.pending = l.pending[1:]
+		l.lastTokType = tok.Type
 		return tok
 	}
 
@@ -43,6 +45,7 @@ func (l *Lexer) NextToken() Token {
 	tok := l.nextTokenCore()
 	tok.From = startPos
 	tok.To = l.pos
+	l.lastTokType = tok.Type
 	return tok
 }
 
@@ -57,6 +60,9 @@ func (l *Lexer) nextTokenCore() Token {
 
 	// Sigils: $, @, %
 	if ch == '$' || ch == '@' || ch == '%' {
+		if ch == '$' && l.hasNamedCaptureVar() {
+			return l.scanNamedCaptureVar()
+		}
 		if l.pos+1 < len(l.src) && (unicode.IsLetter(l.src[l.pos+1]) || l.src[l.pos+1] == '_' || l.src[l.pos+1] == '*' || l.src[l.pos+1] == '!' || l.src[l.pos+1] == '?' || unicode.IsDigit(l.src[l.pos+1]) || (ch == '$' && (l.src[l.pos+1] == '$' || l.src[l.pos+1] == '/'))) {
 			return l.scanVariable()
 		}
@@ -92,6 +98,19 @@ func (l *Lexer) nextTokenCore() Token {
 		return l.scanIdentOrKeyword()
 	}
 
+	// Four-character operators
+	if l.pos+3 < len(l.src) && string(l.src[l.pos:l.pos+4]) == "^..^" {
+		l.advance(); l.advance(); l.advance(); l.advance()
+		return Token{Type: TokCaretDotDotCaret, Literal: "^..^", Line: curLine, Col: curCol}
+	}
+
+	// Regex literal /pattern/flags right after =~, !~, ~~
+	if ch == '/' && (l.lastTokType == TokRegexMatch || l.lastTokType == TokRegexNotMatch || l.lastTokType == TokSmartMatch) {
+		if !(l.pos+1 < len(l.src) && (l.src[l.pos+1] == '/' || l.src[l.pos+1] == '=')) {
+			return l.scanRegexLiteral()
+		}
+	}
+
 	// Three-character operators
 	if l.pos+2 < len(l.src) {
 		triplet := string(l.src[l.pos : l.pos+3])
@@ -106,6 +125,14 @@ func (l *Lexer) nextTokenCore() Token {
 		if triplet == "<=>" {
 			l.advance(); l.advance(); l.advance()
 			return Token{Type: TokCmp, Literal: "<=>", Line: curLine, Col: curCol}
+		}
+		if triplet == "..^" {
+			l.advance(); l.advance(); l.advance()
+			return Token{Type: TokDotDotCaret, Literal: "..^", Line: curLine, Col: curCol}
+		}
+		if triplet == "^.." {
+			l.advance(); l.advance(); l.advance()
+			return Token{Type: TokCaretDotDot, Literal: "^..", Line: curLine, Col: curCol}
 		}
 	}
 
@@ -124,6 +151,12 @@ func (l *Lexer) nextTokenCore() Token {
 	if l.pos+1 < len(l.src) {
 		pair := string(l.src[l.pos : l.pos+2])
 		switch pair {
+		case "++":
+			l.advance(); l.advance()
+			return Token{Type: TokInc, Literal: "++", Line: curLine, Col: curCol}
+		case "--":
+			l.advance(); l.advance()
+			return Token{Type: TokDec, Literal: "--", Line: curLine, Col: curCol}
 		case "==":
 			l.advance(); l.advance()
 			return Token{Type: TokEqual, Literal: "==", Line: curLine, Col: curCol}
@@ -276,6 +309,8 @@ func (l *Lexer) nextTokenCore() Token {
 		return Token{Type: TokQuestion, Literal: "?", Line: curLine, Col: curCol}
 	case '\\':
 		return Token{Type: TokBackslash, Literal: "\\", Line: curLine, Col: curCol}
+	case '^':
+		return Token{Type: TokCaret, Literal: "^", Line: curLine, Col: curCol}
 
 	default:
 		return Token{Type: TokError, Literal: fmt.Sprintf("unexpected character %c", ch), Line: curLine, Col: curCol}
@@ -307,6 +342,36 @@ func (l *Lexer) skipWhitespaceAndComments() {
 			break
 		}
 	}
+}
+
+func (l *Lexer) hasNamedCaptureVar() bool {
+	if l.pos+3 >= len(l.src) || l.src[l.pos] != '$' || l.src[l.pos+1] != '<' {
+		return false
+	}
+	p := l.pos + 2
+	if !(unicode.IsLetter(l.src[p]) || l.src[p] == '_') {
+		return false
+	}
+	p++
+	for p < len(l.src) && (unicode.IsLetter(l.src[p]) || unicode.IsDigit(l.src[p]) || l.src[p] == '_' || l.src[p] == '-') {
+		p++
+	}
+	return p < len(l.src) && l.src[p] == '>'
+}
+
+func (l *Lexer) scanNamedCaptureVar() Token {
+	curLine := l.line
+	curCol := l.col
+	var sb strings.Builder
+	for l.pos < len(l.src) {
+		ch := l.src[l.pos]
+		sb.WriteRune(ch)
+		l.advance()
+		if ch == '>' {
+			break
+		}
+	}
+	return Token{Type: TokScalar, Literal: sb.String(), Line: curLine, Col: curCol}
 }
 
 func (l *Lexer) scanVariable() Token {
@@ -455,6 +520,46 @@ func (l *Lexer) scanNumber() Token {
 	return Token{Type: TokInt, Literal: lit, Line: curLine, Col: curCol}
 }
 
+func (l *Lexer) scanRegexLiteral() Token {
+	curLine := l.line
+	curCol := l.col
+	var sb strings.Builder
+	sb.WriteRune('/')
+	l.advance() // consume opening '/'
+	inCharClass := false
+	for l.pos < len(l.src) {
+		ch := l.src[l.pos]
+		if ch == '\\' && l.pos+1 < len(l.src) {
+			next := l.src[l.pos+1]
+			if next == '/' {
+				sb.WriteRune('/')
+			} else {
+				sb.WriteRune('\\')
+				sb.WriteRune(next)
+			}
+			l.advance()
+			l.advance()
+			continue
+		}
+		if ch == '[' {
+			inCharClass = true
+		} else if ch == ']' {
+			inCharClass = false
+		} else if ch == '/' && !inCharClass {
+			sb.WriteRune('/')
+			l.advance()
+			for l.pos < len(l.src) && unicode.IsLetter(l.src[l.pos]) {
+				sb.WriteRune(l.src[l.pos])
+				l.advance()
+			}
+			break
+		}
+		sb.WriteRune(ch)
+		l.advance()
+	}
+	return Token{Type: TokString, Literal: sb.String(), Line: curLine, Col: curCol}
+}
+
 func (l *Lexer) scanString(quote rune) Token {
 	curLine := l.line
 	curCol := l.col
@@ -494,7 +599,7 @@ func (l *Lexer) scanString(quote rune) Token {
 			continue
 		}
 		// Detect interpolation markers in double-quoted strings
-		if quote == '"' && (ch == '$' || ch == '{') {
+		if quote == '"' && (ch == '$' || ch == '{' || ch == '@' || ch == '%') {
 			hasInterp = true
 		}
 		sb.WriteRune(ch)
@@ -589,6 +694,78 @@ func (l *Lexer) scanIdentOrKeyword() Token {
 	}
 
 	lit := sb.String()
+
+	// Check for q, qq, qw quote-like operators: qw(a b c), qw<a b>, q[raw], qq[interp]
+	if (lit == "qw" || lit == "q" || lit == "qq") && l.pos < len(l.src) {
+		delim := l.src[l.pos]
+		if delim == '(' || delim == '[' || delim == '{' || delim == '<' || delim == '/' || delim == '!' || delim == '|' {
+			closeDelim := delim
+			switch delim {
+			case '{':
+				closeDelim = '}'
+			case '(':
+				closeDelim = ')'
+			case '[':
+				closeDelim = ']'
+			case '<':
+				closeDelim = '>'
+			}
+			l.advance()
+			var qSb strings.Builder
+			hasInterp := false
+			depth := 1
+			for l.pos < len(l.src) {
+				ch := l.src[l.pos]
+				if delim != closeDelim && ch == delim {
+					depth++
+				} else if ch == closeDelim {
+					depth--
+					if depth == 0 {
+						l.advance()
+						break
+					}
+				}
+				if ch == '\\' && l.pos+1 < len(l.src) {
+					l.advance()
+					next := l.src[l.pos]
+					if lit == "qq" {
+						switch next {
+						case 'n':
+							qSb.WriteRune('\n')
+						case 't':
+							qSb.WriteRune('\t')
+						case 'r':
+							qSb.WriteRune('\r')
+						case '$', '{':
+							qSb.WriteRune('\\')
+							qSb.WriteRune(next)
+						default:
+							qSb.WriteRune(next)
+						}
+					} else if next == closeDelim || next == delim || next == '\\' {
+						qSb.WriteRune(next)
+					} else {
+						qSb.WriteRune('\\')
+						qSb.WriteRune(next)
+					}
+					l.advance()
+					continue
+				}
+				if lit == "qq" && (ch == '$' || ch == '{') {
+					hasInterp = true
+				}
+				qSb.WriteRune(ch)
+				l.advance()
+			}
+			if lit == "qw" {
+				return Token{Type: TokQw, Literal: qSb.String(), Line: curLine, Col: curCol}
+			}
+			if lit == "qq" && hasInterp {
+				return Token{Type: TokInterpString, Literal: qSb.String(), Line: curLine, Col: curCol}
+			}
+			return Token{Type: TokString, Literal: qSb.String(), Line: curLine, Col: curCol}
+		}
+	}
 
 	// Check for qx command execution operator: qx{cmd}, qx/cmd/, qx(cmd), qx[cmd]
 	if lit == "qx" && l.pos < len(l.src) && (l.src[l.pos] == '{' || l.src[l.pos] == '/' || l.src[l.pos] == '(' || l.src[l.pos] == '[' || l.src[l.pos] == '!' || l.src[l.pos] == '\'' || l.src[l.pos] == '"' || l.src[l.pos] == '`') {
@@ -702,8 +879,10 @@ func (l *Lexer) scanIdentOrKeyword() Token {
 		return Token{Type: TokWhile, Literal: lit, Line: curLine, Col: curCol}
 	case "until":
 		return Token{Type: TokUntil, Literal: lit, Line: curLine, Col: curCol}
-	case "for":
+	case "for", "foreach":
 		return Token{Type: TokFor, Literal: lit, Line: curLine, Col: curCol}
+	case "try":
+		return Token{Type: TokTry, Literal: lit, Line: curLine, Col: curCol}
 	case "loop":
 		return Token{Type: TokLoop, Literal: lit, Line: curLine, Col: curCol}
 	case "use":

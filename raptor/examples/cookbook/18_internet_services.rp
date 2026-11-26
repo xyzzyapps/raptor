@@ -1,0 +1,122 @@
+# Perl Cookbook - Chapter 18: Internet Services (Ported to Raptor)
+# Covers URI/DNS host parsing via PEG grammar, HTTP REST service discovery,
+# RFC 5322 / SMTP wire message formatting, and HMAC-SHA256 + Base64 API token auth.
+
+say "=== Chapter 18: Internet Services ===";
+
+# ------------------------------------------------------------------------------
+# 18.1 Parsing URLs & Service Endpoints with a Declarative PEG Grammar
+# ------------------------------------------------------------------------------
+grammar ServiceURI {
+    token TOP    { ^ <scheme> '://' <host> [ ':' <port> ]? <path>? [ '?' <query> ]? $ }
+    token scheme { <[a..zA..Z]> <[a..zA..Z0..9+.-]>* }
+    token host   { <-[:/?#]>+ }
+    token port   { \d+ }
+    token path   { '/' <-[?#]>* }
+    token query  { <-[#]>* }
+}
+
+my $u = ServiceURI.parse("https://api.raptor-lang.org:8443/v1/whois?domain=example.com");
+ASSERT defined($u), "18.1 URI parsed cleanly";
+ASSERT "$u<scheme>" eq "https" && "$u<host>" eq "api.raptor-lang.org" && int($u<port>) == 8443, "18.1 host and port";
+ASSERT "$u<path>" eq "/v1/whois" && "$u<query>" eq "domain=example.com", "18.1 path and query";
+say "18.1 Parsed service URI -> scheme={$u<scheme>} host={$u<host>} port={$u<port>} path={$u<path>}";
+
+# ------------------------------------------------------------------------------
+# 18.5 Formatting RFC 5322 Email / SMTP Wire Messages with MIME Headers
+# ------------------------------------------------------------------------------
+sub build_smtp_message(%hdrs, $body) {
+    my $encoded_body = base64_encode($body);
+    my $msg_id = "<" ~ substr(sha256($hdrs<From> ~ ":" ~ $hdrs<Subject>), 0, 16) ~ "@raptor.local>";
+    my @lines = [
+        "From: " ~ $hdrs<From>,
+        "To: " ~ $hdrs<To>,
+        "Subject: " ~ $hdrs<Subject>,
+        "Message-ID: " ~ $msg_id,
+        "MIME-Version: 1.0",
+        "Content-Type: text/plain; charset=utf-8",
+        "Content-Transfer-Encoding: base64",
+        "",
+        $encoded_body
+    ];
+    return join("\r\n", @lines) ~ "\r\n.\r\n";
+}
+
+my $wire_mail = build_smtp_message({
+    "From"    => "ops@raptor.local",
+    "To"      => "admin@raptor.local",
+    "Subject" => "Nightly Build Green"
+}, "All 20 Cookbook chapters verified!");
+
+ASSERT contains($wire_mail, "Content-Transfer-Encoding: base64\r\n\r\n"), "18.5 RFC 5322 header/body separator";
+ASSERT ends_with($wire_mail, "\r\n.\r\n"), "18.5 SMTP end-of-data dot terminator";
+my @mail_parts = split("\r\n\r\n", $wire_mail);
+my $b64_line = split("\r\n", @mail_parts[1])[0];
+ASSERT base64_decode($b64_line) eq "All 20 Cookbook chapters verified!", "18.5 MIME Base64 roundtrip";
+say "18.5 Built RFC 5322 / SMTP wire payload ({chars($wire_mail)} bytes)";
+
+# ------------------------------------------------------------------------------
+# 18.8 & 18.9 Signed Token Verification & Local Directory / Whois Microservice
+# ------------------------------------------------------------------------------
+my $secret = "raptor-service-hmac-key";
+
+sub sign_token($subject, $exp) {
+    my $payload = base64_encode(json_encode({ "sub" => $subject, "exp" => $exp }));
+    my $sig = hmac_sha256($payload, $secret);
+    return $payload ~ "." ~ $sig;
+}
+
+sub verify_token($tok) {
+    my @pcs = split(".", $tok);
+    return Nil if elems(@pcs) != 2;
+    my $expected = hmac_sha256(@pcs[0], $secret);
+    return Nil if $expected ne @pcs[1];
+    return json_decode(base64_decode(@pcs[0]));
+}
+
+my $tok = sign_token("svc-directory", 1999999999);
+my $claims = verify_token($tok);
+ASSERT defined($claims) && $claims<sub> eq "svc-directory", "18.8 HMAC-SHA256 token verified";
+ASSERT !defined(verify_token($tok ~ "tampered")), "18.8 tampered token rejected";
+
+my %whois_db = {
+    "raptor.local" => { "owner" => "Raptor Core", "ns" => "ns1.raptor.local", "status" => "ACTIVE" },
+    "moarvm.local" => { "owner" => "MoarVM Team", "ns" => "ns1.moarvm.local", "status" => "ACTIVE" }
+};
+
+my $svc_handler = sub ($req) {
+    if $req<path> eq "/whois" {
+        my $dom = $req<query><domain> // "";
+        if exists(%whois_db, $dom) {
+            return {
+                "status"  => 200,
+                "headers" => { "Content-Type" => "application/json" },
+                "body"    => json_encode(%whois_db{$dom})
+            };
+        }
+        return { "status" => 404, "body" => json_encode({ "error" => "domain not found" }) };
+    }
+    return { "status" => 200, "body" => "OK" };
+};
+
+my $srv = Nil;
+my $port = 0;
+for 19810 .. 19830 -> $cand {
+    my $s = try { http_server_listen($cand, $svc_handler) };
+    if defined($s) {
+        $srv = $s;
+        $port = $cand;
+        last;
+    }
+}
+ASSERT defined($srv), "18.9 bound local internet service";
+
+my $resp = http_get("http://127.0.0.1:$port/whois?domain=raptor.local");
+http_server_close($srv);
+
+ASSERT $resp<status> == 200, "18.9 HTTP 200 from whois service";
+my $rec = json_decode($resp<body>);
+ASSERT $rec<owner> eq "Raptor Core" && $rec<status> eq "ACTIVE", "18.9 whois JSON record";
+say "18.9 Local WHOIS lookup raptor.local -> owner={$rec<owner>} ns={$rec<ns>}";
+
+say "Chapter 18: ALL RECIPES PASSED";

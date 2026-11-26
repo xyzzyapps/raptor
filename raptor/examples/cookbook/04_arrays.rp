@@ -1,0 +1,251 @@
+# ==============================================================================
+# Perl Cookbook - Chapter 4: Arrays (Ported to Idiomatic Raptor)
+# ==============================================================================
+# Recipes:
+#   4.1  Specifying a List in Your Program (qw(...), <...>, [...], Ranges)
+#   4.2  Printing a List with Commas (Oxford Comma Series Formatter)
+#   4.3  Changing Array Size & Splicing (push, pop, shift, unshift, splice)
+#   4.4  Doing Something with Every Element (for, foreach, map, grep, reduce)
+#   4.6  Extracting Unique Elements (unique & %seen)
+#   4.7  Finding Elements in One Array and Not Another (Set ∪, ∩, Difference)
+#   4.10 Reversing an Array
+#   4.14 Sorting an Array Numerically & with Custom Comparators / Schwartzian
+#   4.16 Implementing a Circular List
+#   4.17 Randomizing an Array (Fisher-Yates Shuffle)
+# ==============================================================================
+
+say "=== Perl Cookbook Chapter 04: Arrays ===";
+
+# ------------------------------------------------------------------------------
+# Recipe 4.1: Specifying Lists & Ranges
+# ------------------------------------------------------------------------------
+say "\n[4.1] List Literals & Ranges:";
+my @qw_list    = qw(red green blue yellow);
+my @angle_list = <mercury venus earth mars>;
+my @bracket    = [10, 20, 30];
+my @excl_range = 1 ..^ 6; # 1, 2, 3, 4, 5
+
+say "  qw(...)   : " ~ join(", ", @qw_list);
+say "  <...>     : " ~ join(", ", @angle_list);
+say "  1 ..^ 6   : " ~ join(", ", @excl_range);
+
+ASSERT @qw_list.elems() == 4 && @qw_list[2] eq "blue", "4.1 qw() word list";
+ASSERT @angle_list.elems() == 4 && @angle_list[0] eq "mercury", "4.1 <...> word list";
+ASSERT @bracket.elems() == 3 && ∑(@excl_range) == 15, "4.1 bracket list and exclusive range";
+
+# ------------------------------------------------------------------------------
+# Recipe 4.2: Printing a List with Commas (commify_series)
+# ------------------------------------------------------------------------------
+say "\n[4.2] Commifying Lists for Prose:";
+
+sub commify_series(@items) {
+    my $n = @items.elems();
+    if $n == 0 { return ""; }
+    if $n == 1 { return "" ~ @items[0]; }
+    if $n == 2 { return @items[0] ~ " and " ~ @items[1]; }
+    my @leading = [];
+    for 0 ..^ ($n - 1) -> $i {
+        push(@leading, @items[$i]);
+    }
+    return join(", ", @leading) ~ ", and " ~ @items[$n - 1];
+}
+
+say "  1 item : " ~ commify_series(["just one"]);
+say "  2 items: " ~ commify_series(["Mutt", "Jeff"]);
+say "  3 items: " ~ commify_series(["Huey", "Dewey", "Louie"]);
+
+ASSERT commify_series(["solo"]) eq "solo", "4.2 1-item series";
+ASSERT commify_series(["Mutt", "Jeff"]) eq "Mutt and Jeff", "4.2 2-item series";
+ASSERT commify_series(["Huey", "Dewey", "Louie"]) eq "Huey, Dewey, and Louie", "4.2 Oxford comma series";
+
+# ------------------------------------------------------------------------------
+# Recipe 4.3: Pushing, Popping, Shifting, Unshifting, and Splicing
+# ------------------------------------------------------------------------------
+say "\n[4.3] Resizing & Splicing Arrays:";
+my @friends = <Crosby Stills Nash>;
+push(@friends, "Young");
+my $last_out  = pop(@friends);
+unshift(@friends, "Buffalo");
+my $first_out = shift(@friends);
+
+# Replace middle element ("Stills") with two elements
+my @removed = splice(@friends, 1, 1, ["Stills", "Taylor"]);
+
+say "  Popped: " ~ $last_out ~ ", Shifted: " ~ $first_out;
+say "  Removed via splice: " ~ join(", ", @removed);
+say "  Updated @friends  : " ~ join(", ", @friends);
+
+ASSERT $last_out eq "Young" && $first_out eq "Buffalo", "4.3 pop and shift";
+ASSERT @removed.elems() == 1 && @removed[0] eq "Stills", "4.3 splice return value";
+ASSERT join(",", @friends) eq "Crosby,Stills,Taylor,Nash", "4.3 splice replacement";
+
+# ------------------------------------------------------------------------------
+# Recipe 4.4: Iterating Over Arrays (for, foreach, map, grep, reduce)
+# ------------------------------------------------------------------------------
+say "\n[4.4] Iterating & Transforming:";
+my @temps_c = [0, 20, 37, 100];
+my @temps_f = [];
+for @temps_c -> $c {
+    push(@temps_f, ($c * 9 div 5) + 32);
+}
+
+my $total_p5 = 0;
+foreach my $t (@temps_f) {
+    $total_p5 += $t;
+}
+
+my @hot_f = @temps_f.grep(sub ($f) { return $f > 90; });
+
+say "  Fahrenheit : " ~ join(", ", @temps_f);
+say "  Hot (>90F) : " ~ join(", ", @hot_f);
+
+ASSERT join(",", @temps_f) eq "32,68,98,212", "4.4 Celsius to Fahrenheit";
+ASSERT $total_p5 == 410, "4.4 Perl 5 foreach sum";
+ASSERT @hot_f.elems() == 2 && @hot_f[0] == 98 && @hot_f[1] == 212, "4.4 grep filter";
+
+# ------------------------------------------------------------------------------
+# Recipe 4.6: Extracting Unique Elements
+# ------------------------------------------------------------------------------
+say "\n[4.6] Deduplicating Lists (unique & %seen):";
+my @raw_tags = <perl raku raptor perl go raku raptor>;
+my @dedup_builtin = unique(@raw_tags);
+
+my %seen = {};
+my @dedup_hash = [];
+for @raw_tags -> $tag {
+    if !exists(%seen, $tag) {
+        %seen{$tag} = 1;
+        push(@dedup_hash, $tag);
+    }
+}
+
+say "  Unique tags: " ~ join(", ", @dedup_builtin);
+
+ASSERT join(",", @dedup_builtin) eq "perl,raku,raptor,go", "4.6 builtin unique preserves first-seen order";
+ASSERT join(",", @dedup_hash) eq join(",", @dedup_builtin), "4.6 %seen hash matches builtin unique";
+
+# ------------------------------------------------------------------------------
+# Recipe 4.7 & 4.8: Union, Intersection, and Set Difference
+# ------------------------------------------------------------------------------
+say "\n[4.7 & 4.8] Set Union (∪), Intersection (∩), and Difference:";
+my @set_a = [1, 3, 5, 6, 7, 8];
+my @set_b = [2, 3, 5, 7, 9];
+
+my @union_ab = @set_a ∪ @set_b;
+my @inter_ab = @set_a ∩ @set_b;
+
+# Difference: in @set_a but not in @set_b
+my %in_b = {};
+for @set_b -> $x { %in_b{$x} = 1; }
+my @diff_ab = @set_a.grep(sub ($x) { return !exists(%in_b, $x); });
+
+say "  Union (A ∪ B)       : " ~ join(", ", sort(@union_ab));
+say "  Intersection (A ∩ B): " ~ join(", ", @inter_ab);
+say "  Difference (A - B)  : " ~ join(", ", @diff_ab);
+
+ASSERT join(",", sort(@union_ab)) eq "1,2,3,5,6,7,8,9", "4.8 set union";
+ASSERT join(",", @inter_ab) eq "3,5,7", "4.8 set intersection";
+ASSERT join(",", @diff_ab) eq "1,6,8", "4.7 set difference";
+
+# ------------------------------------------------------------------------------
+# Recipe 4.10 & 4.14: Reversing and Sorting (Numeric & Custom Comparator)
+# ------------------------------------------------------------------------------
+say "\n[4.10 & 4.14] Reversing, Numeric Sort, and Custom Comparator Sort:";
+my @unsorted_nums = [100, 3, 25, 8, 42, 1];
+my @asc_nums  = sort(@unsorted_nums);
+my @desc_nums = reverse(@asc_nums);
+
+# Custom merge-sort accepting any ($a, $b) -> -1 | 0 | 1 comparator
+sub custom_sort(@arr, $cmp) {
+    my $n = @arr.elems();
+    if $n <= 1 {
+        return @arr;
+    }
+    my $mid = $n div 2;
+    my @left = [];
+    my @right = [];
+    for 0 ..^ $mid -> $i { push(@left, @arr[$i]); }
+    for $mid ..^ $n -> $i { push(@right, @arr[$i]); }
+
+    my @sl = custom_sort(@left, $cmp);
+    my @sr = custom_sort(@right, $cmp);
+
+    my @merged = [];
+    my $li = 0;
+    my $ri = 0;
+    while $li < @sl.elems() && $ri < @sr.elems() {
+        if $cmp->(@sl[$li], @sr[$ri]) <= 0 {
+            push(@merged, @sl[$li]);
+            $li += 1;
+        } else {
+            push(@merged, @sr[$ri]);
+            $ri += 1;
+        }
+    }
+    while $li < @sl.elems() { push(@merged, @sl[$li]); $li += 1; }
+    while $ri < @sr.elems() { push(@merged, @sr[$ri]); $ri += 1; }
+    return @merged;
+}
+
+my @words_in = <Plankton whale bat Albatross>;
+my @by_len_ci = custom_sort(@words_in, sub ($a, $b) {
+    my $c = chars($a) <=> chars($b);
+    if $c != 0 { return $c; }
+    return lc($a) cmp lc($b);
+});
+
+say "  Sorted asc  : " ~ join(", ", @asc_nums);
+say "  Sorted desc : " ~ join(", ", @desc_nums);
+say "  By length   : " ~ join(", ", @by_len_ci);
+
+ASSERT join(",", @asc_nums) eq "1,3,8,25,42,100", "4.14 numeric ascending sort";
+ASSERT join(",", @desc_nums) eq "100,42,25,8,3,1", "4.10 reversed descending sort";
+ASSERT join(",", @by_len_ci) eq "bat,whale,Plankton,Albatross", "4.14 custom comparator sort";
+
+# ------------------------------------------------------------------------------
+# Recipe 4.16: Implementing a Circular List
+# ------------------------------------------------------------------------------
+say "\n[4.16] Circular Round-Robin List:";
+my @processes = <web-1 web-2 web-3>;
+my @schedule = [];
+for 1..5 -> $tick {
+    my $current = shift(@processes);
+    push(@schedule, $current);
+    push(@processes, $current);
+}
+
+say "  5 round-robin ticks: " ~ join(" -> ", @schedule);
+
+ASSERT join(",", @schedule) eq "web-1,web-2,web-3,web-1,web-2", "4.16 circular list rotation";
+
+# ------------------------------------------------------------------------------
+# Recipe 4.17: Randomizing an Array (Fisher-Yates Shuffle)
+# ------------------------------------------------------------------------------
+say "\n[4.17] Fisher-Yates Shuffle:";
+
+sub fisher_yates_shuffle(@source) {
+    my @deck = [];
+    for @source -> $x { push(@deck, $x); }
+    my $i = @deck.elems() - 1;
+    while $i > 0 {
+        my $j = floor(rand($i + 1));
+        my $tmp = @deck[$i];
+        @deck[$i] = @deck[$j];
+        @deck[$j] = $tmp;
+        $i -= 1;
+    }
+    return @deck;
+}
+
+srand(42);
+my @cards = 1..10;
+my @shuffled = fisher_yates_shuffle(@cards);
+
+say "  Original : " ~ join(", ", @cards);
+say "  Shuffled : " ~ join(", ", @shuffled);
+
+ASSERT @shuffled.elems() == 10 && ∑(@shuffled) == 55, "4.17 shuffle preserves all elements";
+ASSERT join(",", sort(@shuffled)) eq join(",", @cards), "4.17 shuffle is a valid permutation";
+ASSERT join(",", @shuffled) ne join(",", @cards), "4.17 seeded shuffle reordered elements";
+
+say "\nChapter 04: All array recipes verified successfully!";

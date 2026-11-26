@@ -177,8 +177,20 @@ type Context struct {
 	Host any
 	// SymVal holds the active :sym<...> symbol string when inside a multi/sym rule.
 	SymVal string
+	// CurRule holds the active rule name for `<~~>` self-recursion.
+	CurRule string
 	// GoalErr holds the diagnostic message from a failed '~' goal expectation or non-associative op.
 	GoalErr string
+	// IgnoreCase and IgnoreMark implement :i / :ignorecase and :m / :ignoremark.
+	IgnoreCase bool
+	IgnoreMark bool
+	// Cut flags implement PEG/Raku ':' / '::' / ':::' backtracking commit operators.
+	cutGroup bool
+	cutRule  bool
+	// Capture result markers implement Raku '<( ... )>' match span overrides.
+	hasSpan  bool
+	spanFrom int
+	spanTo   int
 }
 
 func (c *Context) IsAtEnd() bool {
@@ -325,7 +337,10 @@ func (g *Grammar) ParseRule(ruleName string, input string, actions any) (*Match,
 
 func (g *Grammar) invokeRule(name string, fn RuleFunc, ctx *Context) *Match {
 	startPos := ctx.Pos
+	prevRule := ctx.CurRule
+	ctx.CurRule = name
 	m := fn(g, ctx)
+	ctx.CurRule = prevRule
 	if m != nil && m.Ok {
 		if m.Rule == "" {
 			m.Rule = name
@@ -392,6 +407,9 @@ func sanitizeIdent(s string) string {
 func (g *Grammar) Subrule(name string, ctx *Context) *Match {
 	if name == "sym" && ctx.SymVal != "" {
 		return g.ExactLit(ctx.SymVal, ctx)
+	}
+	if name == "~~" && ctx.CurRule != "" {
+		return g.Subrule(ctx.CurRule, ctx)
 	}
 	if fn, ok := g.Rules[name]; ok {
 		return g.invokeRule(name, fn, ctx)
@@ -466,6 +484,27 @@ func (g *Grammar) builtinSubrule(name string, ctx *Context) *Match {
 			return NewMatch(string(r), start, ctx.Pos, true)
 		}
 		return NewMatch("", start, start, false)
+	case "graph":
+		if ctx.Pos < len(ctx.Src) && unicode.IsGraphic(ctx.Src[ctx.Pos]) && !unicode.IsSpace(ctx.Src[ctx.Pos]) {
+			r := ctx.Src[ctx.Pos]
+			ctx.Pos++
+			return NewMatch(string(r), start, ctx.Pos, true)
+		}
+		return NewMatch("", start, start, false)
+	case "print":
+		if ctx.Pos < len(ctx.Src) && unicode.IsPrint(ctx.Src[ctx.Pos]) {
+			r := ctx.Src[ctx.Pos]
+			ctx.Pos++
+			return NewMatch(string(r), start, ctx.Pos, true)
+		}
+		return NewMatch("", start, start, false)
+	case "ascii":
+		if ctx.Pos < len(ctx.Src) && ctx.Src[ctx.Pos] >= 0 && ctx.Src[ctx.Pos] <= 0x7F {
+			r := ctx.Src[ctx.Pos]
+			ctx.Pos++
+			return NewMatch(string(r), start, ctx.Pos, true)
+		}
+		return NewMatch("", start, start, false)
 	case "ws":
 		// NQP default token ws: <!ww> \s*
 		prevW := ctx.Pos > 0 && isWordRune(ctx.Src[ctx.Pos-1])
@@ -503,18 +542,137 @@ func (g *Grammar) Lit(lit string, ctx *Context) *Match {
 	return g.ExactLit(lit, ctx)
 }
 
-// ExactLit matches literal string without skipping whitespace.
+func stripMarkRune(r rune) rune {
+	if r < 0x80 {
+		return r
+	}
+	switch r {
+	case 'à', 'á', 'â', 'ã', 'ä', 'å', 'ā', 'ă', 'ą', 'ǎ':
+		return 'a'
+	case 'À', 'Á', 'Â', 'Ã', 'Ä', 'Å', 'Ā', 'Ă', 'Ą', 'Ǎ':
+		return 'A'
+	case 'ç', 'ć', 'ĉ', 'ċ', 'č':
+		return 'c'
+	case 'Ç', 'Ć', 'Ĉ', 'Ċ', 'Č':
+		return 'C'
+	case 'ď', 'đ':
+		return 'd'
+	case 'Ď', 'Đ':
+		return 'D'
+	case 'è', 'é', 'ê', 'ë', 'ē', 'ĕ', 'ė', 'ę', 'ě':
+		return 'e'
+	case 'È', 'É', 'Ê', 'Ë', 'Ē', 'Ĕ', 'Ė', 'Ę', 'Ě':
+		return 'E'
+	case 'ĝ', 'ğ', 'ġ', 'ģ':
+		return 'g'
+	case 'Ĝ', 'Ğ', 'Ġ', 'Ģ':
+		return 'G'
+	case 'ĥ', 'ħ':
+		return 'h'
+	case 'Ĥ', 'Ħ':
+		return 'H'
+	case 'ì', 'í', 'î', 'ï', 'ĩ', 'ī', 'ĭ', 'į', 'ı', 'ǐ':
+		return 'i'
+	case 'Ì', 'Í', 'Î', 'Ï', 'Ĩ', 'Ī', 'Ĭ', 'Į', 'İ', 'Ǐ':
+		return 'I'
+	case 'ĵ':
+		return 'j'
+	case 'Ĵ':
+		return 'J'
+	case 'ķ':
+		return 'k'
+	case 'Ķ':
+		return 'K'
+	case 'ĺ', 'ļ', 'ľ', 'ŀ', 'ł':
+		return 'l'
+	case 'Ĺ', 'Ļ', 'Ľ', 'Ŀ', 'Ł':
+		return 'L'
+	case 'ñ', 'ń', 'ņ', 'ň':
+		return 'n'
+	case 'Ñ', 'Ń', 'Ņ', 'Ň':
+		return 'N'
+	case 'ò', 'ó', 'ô', 'õ', 'ö', 'ø', 'ō', 'ŏ', 'ő', 'ǒ':
+		return 'o'
+	case 'Ò', 'Ó', 'Ô', 'Õ', 'Ö', 'Ø', 'Ō', 'Ŏ', 'Ő', 'Ǒ':
+		return 'O'
+	case 'ŕ', 'ŗ', 'ř':
+		return 'r'
+	case 'Ŕ', 'Ŗ', 'Ř':
+		return 'R'
+	case 'ś', 'ŝ', 'ş', 'š':
+		return 's'
+	case 'Ś', 'Ŝ', 'Ş', 'Š':
+		return 'S'
+	case 'ţ', 'ť', 'ŧ':
+		return 't'
+	case 'Ţ', 'Ť', 'Ŧ':
+		return 'T'
+	case 'ù', 'ú', 'û', 'ü', 'ũ', 'ū', 'ŭ', 'ů', 'ű', 'ų', 'ǔ':
+		return 'u'
+	case 'Ù', 'Ú', 'Û', 'Ü', 'Ũ', 'Ū', 'Ŭ', 'Ů', 'Ű', 'Ų', 'Ǔ':
+		return 'U'
+	case 'ŵ':
+		return 'w'
+	case 'Ŵ':
+		return 'W'
+	case 'ý', 'ÿ', 'ŷ':
+		return 'y'
+	case 'Ý', 'Ÿ', 'Ŷ':
+		return 'Y'
+	case 'ź', 'ż', 'ž':
+		return 'z'
+	case 'Ź', 'Ż', 'Ž':
+		return 'Z'
+	}
+	return r
+}
+
+func runesMatch(a, b rune, ignoreCase, ignoreMark bool) bool {
+	if !ignoreCase && !ignoreMark {
+		return a == b
+	}
+	if ignoreMark {
+		a = stripMarkRune(a)
+		b = stripMarkRune(b)
+	}
+	if a == b {
+		return true
+	}
+	if ignoreCase {
+		return unicode.ToLower(a) == unicode.ToLower(b)
+	}
+	return false
+}
+
+// ExactLit matches literal string without skipping whitespace (honoring :i and :m if active).
 func (g *Grammar) ExactLit(lit string, ctx *Context) *Match {
 	start := ctx.Pos
-	runes := []rune(lit)
-	for _, r := range runes {
-		if ctx.Pos >= len(ctx.Src) || ctx.Src[ctx.Pos] != r {
+	if !ctx.IgnoreCase && !ctx.IgnoreMark {
+		for _, r := range lit {
+			if ctx.Pos >= len(ctx.Src) || ctx.Src[ctx.Pos] != r {
+				ctx.Pos = start
+				return NewMatch("", start, start, false)
+			}
+			ctx.Pos++
+		}
+		return NewMatch(lit, start, ctx.Pos, true)
+	}
+	for _, r := range lit {
+		if ctx.IgnoreMark && unicode.Is(unicode.Mn, r) {
+			continue
+		}
+		if ctx.Pos >= len(ctx.Src) || !runesMatch(ctx.Src[ctx.Pos], r, ctx.IgnoreCase, ctx.IgnoreMark) {
 			ctx.Pos = start
 			return NewMatch("", start, start, false)
 		}
 		ctx.Pos++
+		if ctx.IgnoreMark {
+			for ctx.Pos < len(ctx.Src) && unicode.Is(unicode.Mn, ctx.Src[ctx.Pos]) {
+				ctx.Pos++
+			}
+		}
 	}
-	return NewMatch(lit, start, ctx.Pos, true)
+	return NewMatch(string(ctx.Src[start:ctx.Pos]), start, ctx.Pos, true)
 }
 
 // Ident matches a Perl 6 identifier (\w+) after skipping whitespace.
@@ -716,7 +874,7 @@ func (g *Grammar) CharClass(spec string, ctx *Context) *Match {
 	clean = strings.TrimPrefix(clean, "[")
 	clean = strings.TrimSuffix(clean, "]")
 
-	matched := classContains(clean, ch)
+	matched := classContainsCI(clean, ch, ctx.IgnoreCase, ctx.IgnoreMark)
 	if negated {
 		matched = !matched
 	}
@@ -892,7 +1050,28 @@ func classContains(spec string, ch rune) bool {
 	return false
 }
 
-// ListWithSep matches modified quantified lists: <item> % <sep>
+func classContainsCI(spec string, ch rune, ignoreCase, ignoreMark bool) bool {
+	if !ignoreCase && !ignoreMark {
+		return classContains(spec, ch)
+	}
+	if ignoreMark {
+		ch = stripMarkRune(ch)
+	}
+	if classContains(spec, ch) {
+		return true
+	}
+	if ignoreCase {
+		lo := unicode.ToLower(ch)
+		if lo != ch && classContains(spec, lo) {
+			return true
+		}
+		hi := unicode.ToUpper(ch)
+		if hi != ch && classContains(spec, hi) {
+			return true
+		}
+	}
+	return false
+}
 func (g *Grammar) ListWithSep(itemRule string, sepRule string, ctx *Context) *Match {
 	start := ctx.Pos
 	first := g.Subrule(itemRule, ctx)

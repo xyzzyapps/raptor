@@ -1,0 +1,295 @@
+# ==============================================================================
+# Perl Cookbook - Chapter 1: Strings (Ported to Idiomatic Raptor)
+# ==============================================================================
+# Recipes:
+#   1.1  Accessing Substrings (substr)
+#   1.2  Establishing a Default Value (// and //=)
+#   1.3  Exchanging Values Without Temp Variables & Binary pack/unpack
+#   1.4  Converting Between Characters and Values (ord, chr, codes)
+#   1.6  Reversing a String by Word or Character (flip, reverse, words)
+#   1.7  Expanding and Compressing Tabs
+#   1.8  Expanding Variables & Expressions in Strings (Interpolation)
+#   1.9  Controlling Case (uc, lc, ucfirst, lcfirst)
+#   1.14 Trimming Blanks & Line Endings (trim, trim_left, trim_right, chomp, chop)
+#   1.15 Parsing Comma-Separated Data (Declarative NQP Grammar)
+#   1.16 Soundex Phonetic Matching
+# ==============================================================================
+
+say "=== Perl Cookbook Chapter 01: Strings ===";
+
+# ------------------------------------------------------------------------------
+# Recipe 1.1: Accessing Substrings
+# ------------------------------------------------------------------------------
+say "\n[1.1] Accessing Substrings:";
+my $banner = "The quick brown fox jumps over the lazy dog";
+my $first_three = substr($banner, 0, 3);
+my $animal      = substr($banner, 16, 3);
+my $last_dog    = substr($banner, -3);
+my $middle_part = substr($banner, 4, -9);
+
+say "  Original : " ~ $banner;
+say "  First 3  : " ~ $first_three;
+say "  Offset 16: " ~ $animal;
+say "  Last 3   : " ~ $last_dog;
+say "  4 .. -9  : " ~ $middle_part;
+
+ASSERT $first_three eq "The", "1.1 prefix substr";
+ASSERT $animal eq "fox", "1.1 middle substr";
+ASSERT $last_dog eq "dog", "1.1 negative start substr";
+ASSERT $middle_part eq "quick brown fox jumps over the", "1.1 negative length substr";
+
+# ------------------------------------------------------------------------------
+# Recipe 1.2: Establishing a Default Value (// and //=)
+# ------------------------------------------------------------------------------
+say "\n[1.2] Defaulting Undefined Values:";
+my $unset = Nil;
+my $fallback = $unset // "anonymous";
+$unset //= "initialized";
+my $empty_preserved = "" // "should-not-use";
+
+say "  Fallback from Nil : " ~ $fallback;
+say "  After //=         : " ~ $unset;
+say "  Empty str kept    : '" ~ $empty_preserved ~ "'";
+
+ASSERT $fallback eq "anonymous", "1.2 defined-or fallback";
+ASSERT $unset eq "initialized", "1.2 defined-or assignment";
+ASSERT $empty_preserved eq "", "1.2 empty string is defined";
+
+# ------------------------------------------------------------------------------
+# Recipe 1.3 & 1.4: pack / unpack & Character Code Conversions
+# ------------------------------------------------------------------------------
+say "\n[1.3 & 1.4] Binary pack/unpack & Character Codes:";
+my $code_A = ord("A");
+my $char_Z = chr(90);
+my @unicode_pts = codes("Raptor");
+
+# Fixed-width record packing: 16-bit big-endian ID, 2 bytes, 8-char padded label
+my $record = pack("n C2 A8", 0xCAFE, 7, 42, "RAPTOR");
+my @fields = unpack("n C2 A8", $record);
+
+say "  ord('A') = " ~ $code_A ~ ", chr(90) = " ~ $char_Z;
+say "  codes('Raptor') = " ~ join(", ", @unicode_pts);
+say "  Unpacked record = id:" ~ @fields[0] ~ " v:" ~ @fields[1] ~ "." ~ @fields[2] ~ " tag:" ~ @fields[3];
+
+ASSERT $code_A == 65, "1.4 ord('A') == 65";
+ASSERT $char_Z eq "Z", "1.4 chr(90) eq 'Z'";
+ASSERT @unicode_pts[0] == 82 && @unicode_pts.elems() == 6, "1.4 codes('Raptor')";
+ASSERT @fields[0] == 51966 && @fields[1] == 7 && @fields[2] == 42 && @fields[3] eq "RAPTOR", "1.3 pack/unpack roundtrip";
+
+# ------------------------------------------------------------------------------
+# Recipe 1.6: Reversing a String by Character or by Word
+# ------------------------------------------------------------------------------
+say "\n[1.6] Reversing Characters and Words:";
+my $word = "stressed";
+my $flipped = flip($word);
+my $rev_str = reverse("desserts");
+
+my $sentence = "is this life real or just fantasy";
+my @word_list = words($sentence);
+my $reversed_words = join(" ", reverse(@word_list));
+
+say "  flip('stressed')   : " ~ $flipped;
+say "  reverse('desserts'): " ~ $rev_str;
+say "  Reversed words     : " ~ $reversed_words;
+
+ASSERT $flipped eq "desserts", "1.6 flip reverses characters";
+ASSERT $rev_str eq "stressed", "1.6 reverse on string reverses characters";
+ASSERT $reversed_words eq "fantasy just or real life this is", "1.6 reverse word order";
+
+# ------------------------------------------------------------------------------
+# Recipe 1.7: Expanding and Compressing Tabs
+# ------------------------------------------------------------------------------
+say "\n[1.7] Expanding and Compressing Tabs:";
+
+sub expand_tabs($text, $tabstop = 8) {
+    my $out = "";
+    my $col = 0;
+    for comb($text) -> $ch {
+        if $ch eq "\t" {
+            my $spaces = $tabstop - ($col % $tabstop);
+            $out ~= (" " x $spaces);
+            $col += $spaces;
+        } elsif $ch eq "\n" {
+            $out ~= "\n";
+            $col = 0;
+        } else {
+            $out ~= $ch;
+            $col += 1;
+        }
+    }
+    return $out;
+}
+
+sub compress_tabs($text, $tabstop = 8) {
+    my $out = "";
+    my $len = chars($text);
+    my $i = 0;
+    while $i < $len {
+        my $chunk = substr($text, $i, $tabstop);
+        if chars($chunk) == $tabstop && $chunk =~ /^(.*?)  +$/ {
+            my $prefix = subst($chunk, " +$", "");
+            if chars($prefix) < $tabstop {
+                $out ~= $prefix ~ "\t";
+            } else {
+                $out ~= $chunk;
+            }
+        } else {
+            $out ~= $chunk;
+        }
+        $i += $tabstop;
+    }
+    return $out;
+}
+
+my $tabbed   = "Col1\tCol22\tEnd";
+my $expanded = expand_tabs($tabbed, 8);
+my $recomp   = compress_tabs($expanded, 8);
+
+say "  Expanded   : '" ~ $expanded ~ "' (len=" ~ chars($expanded) ~ ")";
+say "  Compressed : '" ~ replace($recomp, "\t", "\\t") ~ "'";
+
+ASSERT $expanded eq "Col1    Col22   End", "1.7 expand_tabs aligns to 8-char tabstops";
+ASSERT $recomp eq $tabbed, "1.7 compress_tabs restores tabs";
+
+# ------------------------------------------------------------------------------
+# Recipe 1.8 & 1.9: Interpolation & Case Conversion
+# ------------------------------------------------------------------------------
+say "\n[1.8 & 1.9] String Interpolation & Case Control:";
+my $item = "quantum widget";
+my $qty  = 3;
+my $unit_price = 14.5;
+my $interpolated = "Order: $qty x {ucfirst($item)} = \${$qty * $unit_price}";
+
+my $upper  = uc("raptor runtime");
+my $lower  = lc("PERL COOKBOOK");
+my $ucf    = ucfirst("camelCase");
+my $lcf    = lcfirst("PascalCase");
+
+say "  Interpolated: " ~ $interpolated;
+say "  uc / lc     : " ~ $upper ~ " / " ~ $lower;
+say "  ucfirst/lcfirst: " ~ $ucf ~ " / " ~ $lcf;
+
+ASSERT $interpolated eq 'Order: 3 x Quantum widget = $43.5', "1.8 expression interpolation";
+ASSERT $upper eq "RAPTOR RUNTIME" && $lower eq "perl cookbook", "1.9 uc and lc";
+ASSERT $ucf eq "CamelCase" && $lcf eq "pascalCase", "1.9 ucfirst and lcfirst";
+
+# ------------------------------------------------------------------------------
+# Recipe 1.14: Trimming Whitespace, chomp, and chop
+# ------------------------------------------------------------------------------
+say "\n[1.14] Trimming, chomp, and chop:";
+my $padded = "   \t  surrounded by blanks  \r\n";
+my $trimmed   = trim($padded);
+my $left_tr   = trim_left("   left");
+my $right_tr  = trim_right("right   \n");
+my $chomped   = chomp("line with CRLF\r\n");
+my $chopped   = chop("ABCD!");
+
+say "  trim   : '" ~ $trimmed ~ "'";
+say "  chomp  : '" ~ $chomped ~ "'";
+say "  chop   : '" ~ $chopped ~ "'";
+
+ASSERT $trimmed eq "surrounded by blanks", "1.14 trim both sides";
+ASSERT $left_tr eq "left" && $right_tr eq "right", "1.14 trim_left and trim_right";
+ASSERT $chomped eq "line with CRLF", "1.14 chomp strips CRLF";
+ASSERT $chopped eq "ABCD", "1.14 chop drops final character";
+
+# ------------------------------------------------------------------------------
+# Recipe 1.15: Parsing Comma-Separated Data (CSV) via Declarative Grammar
+# ------------------------------------------------------------------------------
+say "\n[1.15] Parsing Quoted CSV Records with Grammar:";
+
+grammar CSVGrammar {
+    token TOP    { ^ <field>+ % ',' $ }
+    token field  { <quoted> || <bare> }
+    token quoted { '"' [ '""' || <-["]> ]* '"' }
+    token bare   { <!before '"'> <-[,]>* }
+}
+
+sub parse_csv_line($line) {
+    my $m = CSVGrammar.parse($line);
+    ASSERT defined($m), "CSV line must parse cleanly";
+    my $raw_fields = $m<field>;
+    if type($raw_fields) eq "Hash" {
+        $raw_fields = [$raw_fields];
+    }
+    my @out = [];
+    for @$raw_fields -> $f {
+        if defined($f<quoted>) {
+            my $s = $f<quoted><Str>;
+            # Strip outer quotes and unescape doubled quotes
+            my $inner = substr($s, 1, chars($s) - 2);
+            push(@out, replace($inner, '""', '"'));
+        } else {
+            push(@out, $f<Str>);
+        }
+    }
+    return @out;
+}
+
+my $csv_sample = 'XYZZY,"","O\'Reilly, Inc","Wall, Larry","a ""glug"" bit,",5';
+my @csv_cols = parse_csv_line($csv_sample);
+say "  CSV Columns (" ~ @csv_cols.elems() ~ "): " ~ join(" | ", @csv_cols);
+
+ASSERT @csv_cols.elems() == 6, "1.15 parsed 6 CSV fields";
+ASSERT @csv_cols[0] eq "XYZZY", "1.15 bare field";
+ASSERT @csv_cols[1] eq "", "1.15 empty quoted field";
+ASSERT @csv_cols[2] eq "O'Reilly, Inc", "1.15 comma inside quotes";
+ASSERT @csv_cols[4] eq 'a "glug" bit,', "1.15 escaped quotes inside field";
+ASSERT @csv_cols[5] eq "5", "1.15 trailing numeric field";
+
+# ------------------------------------------------------------------------------
+# Recipe 1.16: Soundex Phonetic Matching
+# ------------------------------------------------------------------------------
+say "\n[1.16] Soundex Phonetic Encoding:";
+
+sub soundex($name) {
+    my $clean = subst(uc($name), "[^A-Z]", "");
+    if chars($clean) == 0 {
+        return "0000";
+    }
+    my %map = {
+        "B" => "1", "F" => "1", "P" => "1", "V" => "1",
+        "C" => "2", "G" => "2", "J" => "2", "K" => "2",
+        "Q" => "2", "S" => "2", "X" => "2", "Z" => "2",
+        "D" => "3", "T" => "3",
+        "L" => "4",
+        "M" => "5", "N" => "5",
+        "R" => "6"
+    };
+    my @letters = comb($clean);
+    my $first = @letters[0];
+    my $prev_digit = %map{$first} // "";
+    my $code = $first;
+
+    for 1 ..^ @letters.elems() -> $i {
+        my $ch = @letters[$i];
+        if $ch eq "H" || $ch eq "W" {
+            next;
+        }
+        my $digit = %map{$ch} // "0";
+        if $digit ne "0" && $digit ne $prev_digit {
+            $code ~= $digit;
+            if chars($code) == 4 {
+                last;
+            }
+        }
+        $prev_digit = $digit;
+    }
+    while chars($code) < 4 {
+        $code ~= "0";
+    }
+    return substr($code, 0, 4);
+}
+
+my $sx_robert = soundex("Robert");
+my $sx_rupert = soundex("Rupert");
+my $sx_euler  = soundex("Euler");
+my $sx_ellery = soundex("Ellery");
+
+say "  Robert -> " ~ $sx_robert ~ ", Rupert -> " ~ $sx_rupert;
+say "  Euler  -> " ~ $sx_euler  ~ ", Ellery -> " ~ $sx_ellery;
+
+ASSERT $sx_robert eq "R163" && $sx_rupert eq "R163", "1.16 Robert and Rupert share Soundex R163";
+ASSERT $sx_euler eq "E460" && $sx_ellery eq "E460", "1.16 Euler and Ellery share Soundex E460";
+
+say "\nChapter 01: All string recipes verified successfully!";

@@ -1,0 +1,55 @@
+# Perl Cookbook - Chapter 15: User Interfaces & Terminal Formatting (Ported to Raptor)
+# Covers Getopt-style CLI argument parsing, ANSI color styling, box-drawing tables, and ASCII sparklines/charts.
+
+say "=== Chapter 15: User Interfaces & Terminal Formatting ===";
+
+# 15.1 Parsing Program Arguments (Getopt::Long style)
+sub parse_cli_opts(@argv) {
+    my %opts = { "verbose" => False, "port" => 8080, "host" => "localhost", "rest" => [] };
+    my $i = 0;
+    while $i < elems(@argv) {
+        my $arg = @argv[$i];
+        if $arg eq "-v" || $arg eq "--verbose" {
+            %opts<verbose> = True;
+        } elsif $arg =~ /^--(\w+)=(.+)$/ {
+            %opts{$1} = $2;
+        } elsif ($arg eq "-p" || $arg eq "--port") && $i + 1 < elems(@argv) {
+            %opts<port> = +@argv[++$i];
+        } else {
+            push(%opts<rest>, $arg);
+        }
+        $i++;
+    }
+    return %opts;
+}
+
+my %parsed = parse_cli_opts(qw(--verbose -p 9090 --host=0.0.0.0 app.rp));
+ASSERT %parsed<verbose> && %parsed<port> == 9090 && %parsed<host> eq "0.0.0.0" && %parsed<rest>[0] eq "app.rp", "15.1 CLI option parser";
+say "15.1 Parsed CLI: host={%parsed<host>} port={%parsed<port>} verbose={%parsed<verbose>}";
+
+# 15.5 Coloring Text with ANSI Escape Sequences
+sub ansi_color($text, $code) {
+    return chr(27) ~ "[" ~ $code ~ "m" ~ $text ~ chr(27) ~ "[0m";
+}
+my $styled = ansi_color("SUCCESS", "32;1");
+ASSERT contains($styled, "SUCCESS") && starts_with($styled, chr(27) ~ "[32;1m"), "15.5 ANSI escape sequence";
+
+# 15.12 & 15.17 Formatted ASCII Table & Horizontal Bar Chart
+sub render_bar_chart(%metrics, $width = 20) {
+    my $max_v = 1;
+    for values(%metrics) -> $v { $max_v = $v if $v > $max_v; }
+    my @lines_out;
+    for sort(keys(%metrics)) -> $k {
+        my $v = %metrics{$k};
+        my $filled = int(($v * $width) / $max_v);
+        my $bar = ("#" x $filled) ~ ("-" x ($width - $filled));
+        push(@lines_out, sprintf("%-10s [%s] %d", $k, $bar, $v));
+    }
+    return join("\n", @lines_out);
+}
+
+my $chart = render_bar_chart({ "Raptor" => 100, "Perl5" => 45, "Raku" => 12 }, 20);
+ASSERT contains($chart, "Raptor") && contains($chart, "[####################] 100"), "15.17 ASCII bar chart";
+say "15.17 Terminal Benchmark Chart:\n$chart";
+
+say "Chapter 15: ALL RECIPES PASSED";

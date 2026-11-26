@@ -1,0 +1,256 @@
+# Mastering Algorithms with Perl - Chapter 04: Sorting
+# Covers Insertion, Selection, Bubble, Shellsort, Mergesort, Quicksort,
+# Heapsort, Counting Sort, LSD Radix Sort, Schwartzian Transform, and `psort`.
+
+say "=== Chapter 04: Sorting ===";
+
+sub arrays_eq(@a, @b) {
+    return False if elems(@a) != elems(@b);
+    for 0 ..^ elems(@a) -> $i {
+        return False if @a[$i] != @b[$i];
+    }
+    return True;
+}
+
+sub clone_arr(@src) {
+    my @cp;
+    for @src -> $x { push(@cp, $x); }
+    return @cp;
+}
+
+# 1. Insertion Sort — O(n^2) worst, O(n) on nearly-sorted input
+sub insertion_sort(@src) {
+    my @a = clone_arr(@src);
+    for 1 ..^ elems(@a) -> $i {
+        my $key = @a[$i];
+        my $j = $i - 1;
+        while $j >= 0 && @a[$j] > $key {
+            @a[$j + 1] = @a[$j];
+            $j--;
+        }
+        @a[$j + 1] = $key;
+    }
+    return @a;
+}
+
+# 2. Selection Sort — O(n^2) comparisons, at most n-1 swaps
+sub selection_sort(@src) {
+    my @a = clone_arr(@src);
+    my $n = elems(@a);
+    for 0 ..^ ($n - 1) -> $i {
+        my $min_idx = $i;
+        for ($i + 1) ..^ $n -> $j {
+            $min_idx = $j if @a[$j] < @a[$min_idx];
+        }
+        if $min_idx != $i {
+            my $tmp = @a[$i];
+            @a[$i] = @a[$min_idx];
+            @a[$min_idx] = $tmp;
+        }
+    }
+    return @a;
+}
+
+# 3. Bubble Sort (with early-exit swap flag)
+sub bubble_sort(@src) {
+    my @a = clone_arr(@src);
+    my $n = elems(@a);
+    for 0 ..^ $n -> $pass {
+        my $swapped = False;
+        for 0 ..^ ($n - 1 - $pass) -> $j {
+            if @a[$j] > @a[$j + 1] {
+                my $tmp = @a[$j];
+                @a[$j] = @a[$j + 1];
+                @a[$j + 1] = $tmp;
+                $swapped = True;
+            }
+        }
+        last unless $swapped;
+    }
+    return @a;
+}
+
+# 4. Shellsort (Knuth 3k+1 diminishing increments)
+sub shell_sort(@src) {
+    my @a = clone_arr(@src);
+    my $n = elems(@a);
+    my $gap = 1;
+    while $gap < ($n div 3) {
+        $gap = $gap * 3 + 1;
+    }
+    while $gap >= 1 {
+        for $gap ..^ $n -> $i {
+            my $temp = @a[$i];
+            my $j = $i;
+            while $j >= $gap && @a[$j - $gap] > $temp {
+                @a[$j] = @a[$j - $gap];
+                $j -= $gap;
+            }
+            @a[$j] = $temp;
+        }
+        $gap = $gap div 3;
+    }
+    return @a;
+}
+
+# 5. Mergesort — Stable O(n log n)
+sub merge_halves(@left, @right) {
+    my @res;
+    my $i = 0;
+    my $j = 0;
+    while $i < elems(@left) && $j < elems(@right) {
+        if @left[$i] <= @right[$j] {
+            push(@res, @left[$i]);
+            $i++;
+        } else {
+            push(@res, @right[$j]);
+            $j++;
+        }
+    }
+    while $i < elems(@left)  { push(@res, @left[$i]);  $i++; }
+    while $j < elems(@right) { push(@res, @right[$j]); $j++; }
+    return @res;
+}
+
+sub merge_sort(@a) {
+    my $n = elems(@a);
+    return clone_arr(@a) if $n <= 1;
+    my $mid = $n div 2;
+    my @left;
+    my @right;
+    for 0 ..^ $mid -> $i    { push(@left,  @a[$i]); }
+    for $mid ..^ $n -> $i   { push(@right, @a[$i]); }
+    return merge_halves(merge_sort(@left), merge_sort(@right));
+}
+
+# 6. Quicksort — Average O(n log n)
+sub quick_sort(@a) {
+    my $n = elems(@a);
+    return clone_arr(@a) if $n <= 1;
+    my $pivot = @a[$n div 2];
+    my @lt;
+    my @eq;
+    my @gt;
+    for @a -> $x {
+        if $x < $pivot      { push(@lt, $x); }
+        elsif $x > $pivot   { push(@gt, $x); }
+        else                { push(@eq, $x); }
+    }
+    my @out;
+    for quick_sort(@lt) -> $x { push(@out, $x); }
+    for @eq             -> $x { push(@out, $x); }
+    for quick_sort(@gt) -> $x { push(@out, $x); }
+    return @out;
+}
+
+# 7. Heapsort — Worst-case O(n log n) in-place binary max-heap
+sub sift_down($arr, $root, $end) {
+    my $r = $root;
+    while ($r * 2 + 1) <= $end {
+        my $child = $r * 2 + 1;
+        my $swap  = $r;
+        if $arr[$swap] < $arr[$child] {
+            $swap = $child;
+        }
+        if ($child + 1) <= $end && $arr[$swap] < $arr[$child + 1] {
+            $swap = $child + 1;
+        }
+        return if $swap == $r;
+        my $tmp = $arr[$r];
+        $arr[$r] = $arr[$swap];
+        $arr[$swap] = $tmp;
+        $r = $swap;
+    }
+}
+
+sub heap_sort(@src) {
+    my $a = clone_arr(@src);
+    my $n = elems($a);
+    return $a if $n <= 1;
+    my $start = ($n - 2) div 2;
+    while $start >= 0 {
+        sift_down($a, $start, $n - 1);
+        $start--;
+    }
+    my $end = $n - 1;
+    while $end > 0 {
+        my $tmp = $a[0];
+        $a[0] = $a[$end];
+        $a[$end] = $tmp;
+        $end--;
+        sift_down($a, 0, $end);
+    }
+    return $a;
+}
+
+# 8. Counting Sort & Base-10 LSD Radix Sort — O(n + k) / O(d * n)
+sub counting_sort(@src) {
+    return [] if elems(@src) == 0;
+    my $mn = @src[0];
+    my $mx = @src[0];
+    for @src -> $x {
+        $mn = $x if $x < $mn;
+        $mx = $x if $x > $mx;
+    }
+    my $range = $mx - $mn + 1;
+    my @counts;
+    for 0 ..^ $range -> $i { push(@counts, 0); }
+    for @src -> $x { @counts[$x - $mn] = @counts[$x - $mn] + 1; }
+    my @out;
+    for 0 ..^ $range -> $i {
+        for 0 ..^ @counts[$i] -> $c {
+            push(@out, $i + $mn);
+        }
+    }
+    return @out;
+}
+
+sub radix_sort_nonneg(@src) {
+    my @a = clone_arr(@src);
+    return @a if elems(@a) <= 1;
+    my $mx = @a[0];
+    for @a -> $x { $mx = $x if $x > $mx; }
+    my $exp = 1;
+    while ($mx div $exp) > 0 {
+        my @buckets;
+        for 0 .. 9 -> $d { push(@buckets, []); }
+        for @a -> $x {
+            my $digit = ($x div $exp) % 10;
+            push(@buckets[$digit], $x);
+        }
+        my @next;
+        for 0 .. 9 -> $d {
+            for @buckets[$d] -> $v { push(@next, $v); }
+        }
+        @a = @next;
+        $exp = $exp * 10;
+    }
+    return @a;
+}
+
+my @unsorted = [42, -5, 12, 0, 8, 3, 9, 1, 5, 2, 8];
+my @expected = [-5, 0, 1, 2, 3, 5, 8, 8, 9, 12, 42];
+
+ASSERT arrays_eq(insertion_sort(@unsorted), @expected), "Insertion sort";
+ASSERT arrays_eq(selection_sort(@unsorted), @expected), "Selection sort";
+ASSERT arrays_eq(bubble_sort(@unsorted),    @expected), "Bubble sort";
+ASSERT arrays_eq(shell_sort(@unsorted),     @expected), "Shellsort";
+ASSERT arrays_eq(merge_sort(@unsorted),     @expected), "Mergesort";
+ASSERT arrays_eq(quick_sort(@unsorted),     @expected), "Quicksort";
+ASSERT arrays_eq(heap_sort(@unsorted),      @expected), "Heapsort";
+ASSERT arrays_eq(counting_sort(@unsorted),  @expected), "Counting sort";
+ASSERT arrays_eq(sort(@unsorted),           @expected), "Builtin radix/pdq sort";
+ASSERT arrays_eq(psort(@unsorted),          @expected), "Multi-core psort";
+ASSERT arrays_eq(radix_sort_nonneg([170, 45, 75, 90, 802, 24, 2, 66]), [2, 24, 45, 66, 75, 90, 170, 802]), "LSD Radix sort";
+say "[1] All 10 comparison & linear-time integer sorters verified!";
+
+# 9. Classic Perl Schwartzian Transform (Decorate -> Sort -> Undecorate)
+my @words = qw(pear fig pineapple kiwi banana apricot);
+my @by_len = map(
+    sub ($keyed) { return split(":", $keyed)[1]; },
+    sort(map(sub ($w) { return sprintf("%04d:%s", chars($w), $w); }, @words))
+);
+ASSERT join(",", @by_len) eq "fig,kiwi,pear,banana,apricot,pineapple", "Schwartzian transform by length then alpha";
+say "[2] Schwartzian Transform -> {join(', ', @by_len)}";
+
+say "All Chapter 04 assertions passed!";

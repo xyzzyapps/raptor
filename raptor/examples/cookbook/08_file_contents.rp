@@ -1,0 +1,82 @@
+# Perl Cookbook - Chapter 8: File Contents (Ported to Raptor)
+# Covers continuation lines, word/line/paragraph counts, reading backwards, reservoir sampling, binary records, INI files.
+
+say "=== Chapter 8: File Contents ===";
+
+# 8.1 Reading Lines with Continuation Characters (\ at EOL)
+my $raw_cont = "CFLAGS = -O3 \\\n    -Wall \\\n    -march=native\nCC = gcc\n";
+sub join_continuations($text) {
+    my @logical;
+    my $buf = "";
+    for lines($text) -> $ln {
+        if ends_with($ln, "\\") {
+            $buf ~= substr($ln, 0, chars($ln) - 1) ~ " ";
+        } else {
+            $buf ~= $ln;
+            push(@logical, subst(trim($buf), "\\s+", " "));
+            $buf = "";
+        }
+    }
+    push(@logical, trim($buf)) if $buf ne "";
+    return @logical;
+}
+my @joined = join_continuations($raw_cont);
+ASSERT elems(@joined) == 2 && @joined[0] eq "CFLAGS = -O3 -Wall -march=native", "8.1 continuation lines";
+say "8.1 Joined continuation: {@joined[0]}";
+
+# 8.2 Counting Lines, Words, and Characters
+my $doc = "Raptor is fast.\nPEG grammars rock.\n\nThird paragraph here.";
+my $n_lines = elems(lines($doc));
+my $n_words = elems(words($doc));
+my @paras = split("\n\n", $doc);
+ASSERT $n_lines == 4 && $n_words == 9 && elems(@paras) == 2, "8.2 line/word/paragraph counts";
+say "8.2 Stats: lines=$n_lines words=$n_words paragraphs={elems(@paras)}";
+
+# 8.4 Reading a File Backwards by Line
+my @rev_lines = reverse(lines("one\ntwo\nthree\nfour"));
+ASSERT join(",", @rev_lines) eq "four,three,two,one", "8.4 reverse lines";
+
+# 8.6 Picking a Random Line from a Stream (Algorithm R Reservoir Sampling)
+srand(42);
+sub random_line(@stream) {
+    my $chosen = Nil;
+    my $n = 0;
+    for @stream -> $line {
+        $n++;
+        $chosen = $line if rand($n) < 1.0;
+    }
+    return $chosen;
+}
+my $pick = random_line(qw(alpha beta gamma delta epsilon));
+ASSERT defined($pick) && ($pick ~~ qw(alpha beta gamma delta epsilon)), "8.6 reservoir pick";
+say "8.6 Reservoir sampled line: $pick";
+
+# 8.12 Reading Fixed-Length Binary Records (pack / unpack)
+my $rec1 = pack("A10 n N", "ALICE", 31, 125000);
+my $rec2 = pack("A10 n N", "BOB",   28, 98000);
+my $bin_file = $rec1 ~ $rec2;
+my ($name2, $age2, $sal2) = unpack("A10 n N", substr($bin_file, 16, 16));
+ASSERT $name2 eq "BOB" && $age2 == 28 && $sal2 == 98000, "8.12 binary fixed-length record";
+say "8.12 Unpacked record #2: name=$name2 age=$age2 salary=$sal2";
+
+# 8.16 Reading Configuration / INI Files
+my $ini = "[server]\nhost = 127.0.0.1\nport = 8080\n# comment\n[db]\npath = app.db\n";
+sub parse_ini($src) {
+    my %cfg;
+    my $sec = "default";
+    for lines($src) -> $raw {
+        my $ln = trim($raw);
+        next if $ln eq "" || starts_with($ln, "#") || starts_with($ln, ";");
+        if $ln =~ /^\[(\w+)\]$/ {
+            $sec = $1;
+        } elsif $ln =~ /^(\w+)\s*=\s*(.+)$/ {
+            %cfg{"$sec.$1"} = trim($2);
+        }
+    }
+    return %cfg;
+}
+my %conf = parse_ini($ini);
+ASSERT %conf{"server.port"} eq "8080" && %conf{"db.path"} eq "app.db", "8.16 INI config parser";
+say "8.16 INI server.host={%conf{'server.host'}} port={%conf{'server.port'}}";
+
+say "Chapter 8: ALL RECIPES PASSED";

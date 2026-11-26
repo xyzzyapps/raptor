@@ -4,7 +4,10 @@ package raptor
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"unsafe"
@@ -63,8 +66,14 @@ func (s *sqliteEngine) tryLoadDLL() error {
 		"sqlite3.dll",
 		"winsqlite3.dll",
 		"libsqlite3-0.dll",
+		`C:\Windows\System32\winsqlite3.dll`,
+		`C:\msys64\ucrt64\bin\libsqlite3-0.dll`,
 		"libsqlite3.so",
 		"libsqlite3.so.0",
+		"libsqlite3.dylib",
+	}
+	if sysRoot := os.Getenv("SystemRoot"); sysRoot != "" {
+		dlls = append(dlls, filepath.Join(sysRoot, "System32", "winsqlite3.dll"))
 	}
 
 	for _, name := range dlls {
@@ -303,38 +312,284 @@ func (in *Interp) registerSQLiteBuiltins() {
 	}
 }
 
-func (m *memoryDB) exec(sql string) (*Value, error) {
-	trimmed := strings.TrimSpace(sql)
-	upper := strings.ToUpper(trimmed)
+var (
+	reCreateTable = regexp.MustCompile(`(?is)^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'\x60]?(\w+)["'\x60]?\s*\((.+)\)`)
+	reDropTable   = regexp.MustCompile(`(?is)^DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["'\x60]?(\w+)["'\x60]?`)
+	reInsertInto  = regexp.MustCompile(`(?is)^INSERT\s+INTO\s+["'\x60]?(\w+)["'\x60]?\s*(?:\(([^)]+)\))?\s*VALUES\s*\((.+)\)`)
+	reDeleteFrom  = regexp.MustCompile(`(?is)^DELETE\s+FROM\s+["'\x60]?(\w+)["'\x60]?(?:\s+WHERE\s+(.+))?`)
+	reUpdateTable = regexp.MustCompile(`(?is)^UPDATE\s+["'\x60]?(\w+)["'\x60]?\s+SET\s+(.+?)(?:\s+WHERE\s+(.+))?$`)
+	reSelectFrom  = regexp.MustCompile(`(?is)^SELECT\s+(.+?)\s+FROM\s+["'\x60]?(\w+)["'\x60]?(?:\s+WHERE\s+(.+?))?(?:\s+ORDER\s+BY\s+(.+?))?(?:\s+LIMIT\s+(\d+))?$`)
+)
 
-	if strings.HasPrefix(upper, "CREATE TABLE") {
-		parts := strings.Fields(trimmed)
-		if len(parts) >= 3 {
-			tName := strings.Trim(parts[2], "();,`\"'")
-			m.tables[tName] = &memTable{columns: []string{"id", "data"}}
+func parseSQLLiteral(raw string) *Value {
+	s := strings.TrimSpace(raw)
+	if strings.EqualFold(s, "NULL") {
+		return NilValue()
+	}
+	if len(s) >= 2 && ((s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"')) {
+		inner := s[1 : len(s)-1]
+		inner = strings.ReplaceAll(inner, "''", "'")
+		return StringValue(inner)
+	}
+	if iv, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return IntValue(iv)
+	}
+	if fv, err := strconv.ParseFloat(s, 64); err == nil {
+		return FloatValue(fv)
+	}
+	return StringValue(s)
+}
+
+func splitSQLCSV(s string) []string {
+	var out []string
+	var cur strings.Builder
+	inQuote := byte(0)
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inQuote != 0 {
+			cur.WriteByte(c)
+			if c == inQuote {
+				if i+1 < len(s) && s[i+1] == inQuote {
+					cur.WriteByte(s[i+1])
+					i++
+				} else {
+					inQuote = 0
+				}
+			}
+			continue
 		}
-		res := make(map[string]*Value)
-		res["changes"] = IntValue(0)
-		res["last_insert_id"] = IntValue(0)
-		return HashValue(res), nil
+		if c == '\'' || c == '"' {
+			inQuote = c
+			cur.WriteByte(c)
+			continue
+		}
+		if c == '(' {
+			depth++
+		} else if c == ')' {
+			depth--
+		} else if c == ',' && depth == 0 {
+			out = append(out, strings.TrimSpace(cur.String()))
+			cur.Reset()
+			continue
+		}
+		cur.WriteByte(c)
 	}
+	if cur.Len() > 0 {
+		out = append(out, strings.TrimSpace(cur.String()))
+	}
+	return out
+}
 
-	if strings.HasPrefix(upper, "INSERT INTO") {
+func matchSQLWhere(row map[string]*Value, where string) bool {
+	where = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(where), ";"))
+	if where == "" {
+		return true
+	}
+	for _, cond := range regexp.MustCompile(`(?i)\s+AND\s+`).Split(where, -1) {
+		cond = strings.TrimSpace(cond)
+		for _, op := range []string{"!=", "<>", "<=", ">=", "=", "<", ">"} {
+			if idx := strings.Index(cond, op); idx > 0 {
+				col := strings.Trim(strings.TrimSpace(cond[:idx]), "`\"'")
+				rhs := parseSQLLiteral(cond[idx+len(op):])
+				lv, ok := row[col]
+				if !ok || lv == nil {
+					lv = NilValue()
+				}
+				switch op {
+				case "=":
+					if lv.String() != rhs.String() {
+						return false
+					}
+				case "!=", "<>":
+					if lv.String() == rhs.String() {
+						return false
+					}
+				case "<":
+					lf, _ := strconv.ParseFloat(lv.String(), 64)
+					rf, _ := strconv.ParseFloat(rhs.String(), 64)
+					if !(lf < rf) {
+						return false
+					}
+				case "<=":
+					lf, _ := strconv.ParseFloat(lv.String(), 64)
+					rf, _ := strconv.ParseFloat(rhs.String(), 64)
+					if !(lf <= rf) {
+						return false
+					}
+				case ">":
+					lf, _ := strconv.ParseFloat(lv.String(), 64)
+					rf, _ := strconv.ParseFloat(rhs.String(), 64)
+					if !(lf > rf) {
+						return false
+					}
+				case ">=":
+					lf, _ := strconv.ParseFloat(lv.String(), 64)
+					rf, _ := strconv.ParseFloat(rhs.String(), 64)
+					if !(lf >= rf) {
+						return false
+					}
+				}
+				break
+			}
+		}
+	}
+	return true
+}
+
+func (m *memoryDB) exec(sql string) (*Value, error) {
+	trimmed := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(sql), ";"))
+	if mc := reCreateTable.FindStringSubmatch(trimmed); mc != nil {
+		tName := strings.ToLower(mc[1])
+		if _, exists := m.tables[tName]; !exists {
+			var cols []string
+			for _, colDef := range splitSQLCSV(mc[2]) {
+				fields := strings.Fields(colDef)
+				if len(fields) > 0 {
+					cName := strings.Trim(fields[0], "`\"'")
+					upperC := strings.ToUpper(cName)
+					if upperC != "PRIMARY" && upperC != "UNIQUE" && upperC != "FOREIGN" && upperC != "CHECK" {
+						cols = append(cols, cName)
+					}
+				}
+			}
+			m.tables[tName] = &memTable{columns: cols}
+		}
+		return HashValue(map[string]*Value{"changes": IntValue(0), "last_insert_id": IntValue(m.lastID)}), nil
+	}
+	if md := reDropTable.FindStringSubmatch(trimmed); md != nil {
+		delete(m.tables, strings.ToLower(md[1]))
+		return HashValue(map[string]*Value{"changes": IntValue(0), "last_insert_id": IntValue(m.lastID)}), nil
+	}
+	if mi := reInsertInto.FindStringSubmatch(trimmed); mi != nil {
+		tName := strings.ToLower(mi[1])
+		tbl, ok := m.tables[tName]
+		if !ok {
+			tbl = &memTable{}
+			m.tables[tName] = tbl
+		}
+		var cols []string
+		if strings.TrimSpace(mi[2]) != "" {
+			for _, c := range splitSQLCSV(mi[2]) {
+				cols = append(cols, strings.Trim(c, "`\"' "))
+			}
+		} else {
+			cols = tbl.columns
+		}
+		vals := splitSQLCSV(mi[3])
 		m.lastID++
-		m.change++
-		res := make(map[string]*Value)
-		res["changes"] = IntValue(1)
-		res["last_insert_id"] = IntValue(m.lastID)
-		return HashValue(res), nil
+		row := make(map[string]*Value)
+		for i, col := range cols {
+			if i < len(vals) {
+				row[col] = parseSQLLiteral(vals[i])
+			}
+		}
+		if _, hasID := row["id"]; !hasID {
+			for _, c := range tbl.columns {
+				if strings.EqualFold(c, "id") {
+					row[c] = IntValue(m.lastID)
+				}
+			}
+		}
+		tbl.rows = append(tbl.rows, row)
+		m.change = 1
+		return HashValue(map[string]*Value{"changes": IntValue(1), "last_insert_id": IntValue(m.lastID)}), nil
 	}
-
-	res := make(map[string]*Value)
-	res["changes"] = IntValue(0)
-	res["last_insert_id"] = IntValue(0)
-	return HashValue(res), nil
+	if mu := reUpdateTable.FindStringSubmatch(trimmed); mu != nil {
+		tName := strings.ToLower(mu[1])
+		tbl, ok := m.tables[tName]
+		if !ok {
+			return HashValue(map[string]*Value{"changes": IntValue(0), "last_insert_id": IntValue(m.lastID)}), nil
+		}
+		assigns := splitSQLCSV(mu[2])
+		where := mu[3]
+		var chg int64
+		for _, r := range tbl.rows {
+			if matchSQLWhere(r, where) {
+				for _, as := range assigns {
+					if eq := strings.IndexByte(as, '='); eq > 0 {
+						col := strings.Trim(strings.TrimSpace(as[:eq]), "`\"'")
+						r[col] = parseSQLLiteral(as[eq+1:])
+					}
+				}
+				chg++
+			}
+		}
+		return HashValue(map[string]*Value{"changes": IntValue(chg), "last_insert_id": IntValue(m.lastID)}), nil
+	}
+	if mdel := reDeleteFrom.FindStringSubmatch(trimmed); mdel != nil {
+		tName := strings.ToLower(mdel[1])
+		tbl, ok := m.tables[tName]
+		if !ok {
+			return HashValue(map[string]*Value{"changes": IntValue(0), "last_insert_id": IntValue(m.lastID)}), nil
+		}
+		where := mdel[2]
+		var kept []map[string]*Value
+		var chg int64
+		for _, r := range tbl.rows {
+			if matchSQLWhere(r, where) {
+				chg++
+			} else {
+				kept = append(kept, r)
+			}
+		}
+		tbl.rows = kept
+		return HashValue(map[string]*Value{"changes": IntValue(chg), "last_insert_id": IntValue(m.lastID)}), nil
+	}
+	return HashValue(map[string]*Value{"changes": IntValue(0), "last_insert_id": IntValue(m.lastID)}), nil
 }
 
 func (m *memoryDB) query(sql string) (*Value, error) {
-	var rows []*Value
-	return ArrayValue(rows), nil
+	trimmed := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(sql), ";"))
+	ms := reSelectFrom.FindStringSubmatch(trimmed)
+	if ms == nil {
+		return ArrayValue(nil), nil
+	}
+	selCols := strings.TrimSpace(ms[1])
+	tName := strings.ToLower(ms[2])
+	where := ms[3]
+	limitStr := ms[5]
+	tbl, ok := m.tables[tName]
+	if !ok {
+		return ArrayValue(nil), nil
+	}
+	var matched []map[string]*Value
+	for _, r := range tbl.rows {
+		if matchSQLWhere(r, where) {
+			matched = append(matched, r)
+		}
+	}
+	if strings.HasPrefix(strings.ToUpper(selCols), "COUNT(") {
+		colKey := selCols
+		if idx := strings.Index(strings.ToUpper(selCols), " AS "); idx > 0 {
+			colKey = strings.Trim(strings.TrimSpace(selCols[idx+4:]), "`\"'")
+		}
+		return ArrayValue([]*Value{HashValue(map[string]*Value{colKey: IntValue(int64(len(matched)))})}), nil
+	}
+	limit := len(matched)
+	if limitStr != "" {
+		if lv, err := strconv.Atoi(limitStr); err == nil && lv < limit {
+			limit = lv
+		}
+	}
+	var out []*Value
+	for i := 0; i < limit; i++ {
+		cp := make(map[string]*Value)
+		if selCols == "*" {
+			for k, v := range matched[i] {
+				cp[k] = v
+			}
+		} else {
+			for _, c := range splitSQLCSV(selCols) {
+				cn := strings.Trim(c, "`\"' ")
+				if v, exists := matched[i][cn]; exists {
+					cp[cn] = v
+				} else {
+					cp[cn] = NilValue()
+				}
+			}
+		}
+		out = append(out, HashValue(cp))
+	}
+	return ArrayValue(out), nil
 }

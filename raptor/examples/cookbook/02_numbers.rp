@@ -1,0 +1,252 @@
+# ==============================================================================
+# Perl Cookbook - Chapter 2: Numbers (Ported to Idiomatic Raptor)
+# ==============================================================================
+# Recipes:
+#   2.1  Checking Whether a String Is a Valid Number
+#   2.2  Comparing & Rounding Floating-Point Numbers (round, floor, ceil, sprintf)
+#   2.4  Converting Between Binary, Octal, Decimal, and Hexadecimal (hex, oct, 0b, 0x)
+#   2.6  Working with Roman Numerals
+#   2.7  Generating Repeatable Random Numbers (srand, rand)
+#   2.11 Doing Trigonometry in Degrees & Radians (sin, cos, atan2, pi)
+#   2.13 Taking Logarithms (log, log10, Arbitrary Base)
+#   2.14 Multiplying Matrices
+#   2.17 Putting Commas in Numbers (Commifying)
+# ==============================================================================
+
+say "=== Perl Cookbook Chapter 02: Numbers ===";
+
+# ------------------------------------------------------------------------------
+# Recipe 2.1: Checking Whether a String Is a Valid Number
+# ------------------------------------------------------------------------------
+say "\n[2.1] Validating Numeric Strings:";
+
+sub is_integer($s) {
+    return ?($s =~ /^[+-]?\d+$/);
+}
+
+sub is_decimal($s) {
+    return ?($s =~ /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/);
+}
+
+say "  is_integer('-42')     : " ~ is_integer("-42");
+say "  is_decimal('6.022e23'): " ~ is_decimal("6.022e23");
+say "  is_decimal('12abc')   : " ~ is_decimal("12abc");
+
+ASSERT is_integer("-42") && is_integer("0") && !is_integer("3.14"), "2.1 integer validation";
+ASSERT is_decimal("3.14159") && is_decimal("-0.5") && is_decimal("6.022e23"), "2.1 float validation";
+ASSERT !is_decimal("abc") && !is_decimal(""), "2.1 non-numeric rejection";
+
+# ------------------------------------------------------------------------------
+# Recipe 2.2 & 2.3: Comparing & Rounding Floating-Point Numbers
+# ------------------------------------------------------------------------------
+say "\n[2.2 & 2.3] Rounding Floats & Epsilon Comparison:";
+
+sub approx_equal($a, $b, $eps = 0.000001) {
+    return abs($a - $b) < $eps;
+}
+
+my $val = 3.75;
+my $neg = -2.3;
+my $fmt2 = sprintf("%.2f", 2.7182818);
+
+say "  round(3.75)=" ~ round($val) ~ ", floor(3.75)=" ~ floor($val) ~ ", ceil(3.75)=" ~ ceil($val);
+say "  floor(-2.3)=" ~ floor($neg) ~ ", ceil(-2.3)=" ~ ceil($neg);
+say "  sprintf('%.2f', e) = " ~ $fmt2;
+
+ASSERT approx_equal(0.1 + 0.2, 0.3), "2.2 epsilon float equality";
+ASSERT round($val) == 4 && floor($val) == 3 && ceil($val) == 4, "2.3 positive rounding";
+ASSERT floor($neg) == -3 && ceil($neg) == -2, "2.3 negative floor/ceil";
+ASSERT $fmt2 eq "2.72", "2.3 sprintf fixed precision";
+
+# ------------------------------------------------------------------------------
+# Recipe 2.4: Radix Conversions (Binary, Octal, Hexadecimal)
+# ------------------------------------------------------------------------------
+say "\n[2.4] Radix Conversions:";
+my $from_hex_lit = 0xDEAD;
+my $from_bin_lit = 0b1010_1100;
+my $from_oct_lit = 0o755;
+
+my $parsed_hex = hex("0xFF");
+my $parsed_oct = oct("0755");
+my $parsed_bin = oct("0b11110000");
+
+my $as_hex = sprintf("0x%X", 255);
+my $as_oct = sprintf("0o%o", 493);
+my $as_bin = sprintf("0b%b", 42);
+
+say "  Literals: 0xDEAD=" ~ $from_hex_lit ~ ", 0b1010_1100=" ~ $from_bin_lit ~ ", 0o755=" ~ $from_oct_lit;
+say "  Formatted: 255->" ~ $as_hex ~ ", 493->" ~ $as_oct ~ ", 42->" ~ $as_bin;
+
+ASSERT $from_hex_lit == 57005 && $from_bin_lit == 172 && $from_oct_lit == 493, "2.4 numeric literals";
+ASSERT $parsed_hex == 255 && $parsed_oct == 493 && $parsed_bin == 240, "2.4 hex() and oct()";
+ASSERT $as_hex eq "0xFF" && $as_oct eq "0o755" && $as_bin eq "0b101010", "2.4 sprintf radix formatting";
+
+# ------------------------------------------------------------------------------
+# Recipe 2.6: Working with Roman Numerals
+# ------------------------------------------------------------------------------
+say "\n[2.6] Roman Numerals (to_roman & from_roman):";
+
+sub to_roman($num) {
+    PRE $num > 0 && $num < 4000, "Roman numerals require 1..3999";
+    my @vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+    my @syms = <M CM D CD C XC L XL X IX V IV I>;
+    my $n = $num;
+    my $res = "";
+    for 0 ..^ @vals.elems() -> $i {
+        while $n >= @vals[$i] {
+            $res ~= @syms[$i];
+            $n -= @vals[$i];
+        }
+    }
+    return $res;
+}
+
+sub from_roman($rom) {
+    my %val = {
+        "I" => 1, "V" => 5, "X" => 10, "L" => 50,
+        "C" => 100, "D" => 500, "M" => 1000
+    };
+    my @chars = comb(uc($rom));
+    my $total = 0;
+    my $n = @chars.elems();
+    for 0 ..^ $n -> $i {
+        my $cur = %val{@chars[$i]};
+        my $nxt = ($i + 1 < $n) ?? %val{@chars[$i + 1]} !! 0;
+        if $cur < $nxt {
+            $total -= $cur;
+        } else {
+            $total += $cur;
+        }
+    }
+    return $total;
+}
+
+my $r_2026 = to_roman(2026);
+my $r_1999 = to_roman(1999);
+say "  2026 -> " ~ $r_2026 ~ " -> " ~ from_roman($r_2026);
+say "  1999 -> " ~ $r_1999 ~ " -> " ~ from_roman($r_1999);
+
+ASSERT $r_2026 eq "MMXXVI" && from_roman($r_2026) == 2026, "2.6 Roman 2026";
+ASSERT $r_1999 eq "MCMXCIX" && from_roman($r_1999) == 1999, "2.6 Roman 1999";
+
+# ------------------------------------------------------------------------------
+# Recipe 2.7 & 2.8: Random Numbers & Repeatable Seeds
+# ------------------------------------------------------------------------------
+say "\n[2.7 & 2.8] Seeded Pseudo-Random Sequences:";
+srand(12345);
+my $r1 = rand(100);
+my $r2 = rand(100);
+
+srand(12345);
+my $r1_again = rand(100);
+my $r2_again = rand(100);
+
+say "  Seeded draw 1: " ~ sprintf("%.6f", $r1) ~ " (replayed: " ~ sprintf("%.6f", $r1_again) ~ ")";
+
+ASSERT approx_equal($r1, $r1_again) && approx_equal($r2, $r2_again), "2.8 srand produces repeatable sequence";
+ASSERT 0.0 <= $r1 && $r1 < 100.0, "2.7 rand(100) stays within [0, 100)";
+
+# ------------------------------------------------------------------------------
+# Recipe 2.11 & 2.13: Trigonometry & Logarithms
+# ------------------------------------------------------------------------------
+say "\n[2.11 & 2.13] Trigonometry & Logarithms:";
+
+sub deg2rad($deg) {
+    return ($deg * pi) / 180.0;
+}
+
+sub log_base($base, $x) {
+    return log($x) / log($base);
+}
+
+my $sin30 = sin(deg2rad(30.0));
+my $cos60 = cos(deg2rad(60.0));
+my $angle = atan2(1.0, 1.0) * 180.0 / pi;
+
+my $ln_e    = log(e);
+my $lg_1000 = log10(1000.0);
+my $lb2_256 = log_base(2.0, 256.0);
+
+say "  sin(30 deg)=" ~ sprintf("%.4f", $sin30) ~ ", cos(60 deg)=" ~ sprintf("%.4f", $cos60) ~ ", atan2(1,1)=" ~ sprintf("%.1f", $angle) ~ " deg";
+say "  ln(e)=" ~ sprintf("%.2f", $ln_e) ~ ", log10(1000)=" ~ $lg_1000 ~ ", log2(256)=" ~ $lb2_256;
+
+ASSERT approx_equal($sin30, 0.5) && approx_equal($cos60, 0.5), "2.11 sin(30) and cos(60)";
+ASSERT approx_equal($angle, 45.0), "2.11 atan2(1, 1) is 45 degrees";
+ASSERT approx_equal($ln_e, 1.0) && approx_equal($lg_1000, 3.0) && approx_equal($lb2_256, 8.0), "2.13 natural, base-10, and base-2 logs";
+
+# ------------------------------------------------------------------------------
+# Recipe 2.14: Multiplying Matrices
+# ------------------------------------------------------------------------------
+say "\n[2.14] Matrix Multiplication:";
+
+sub mat_mul($a, $b) {
+    my $rows_a = elems($a);
+    my $cols_a = elems($a->[0]);
+    my $rows_b = elems($b);
+    my $cols_b = elems($b->[0]);
+    PRE $cols_a == $rows_b, "Inner matrix dimensions must agree";
+
+    my @result = [];
+    for 0 ..^ $rows_a -> $i {
+        my @row = [];
+        for 0 ..^ $cols_b -> $j {
+            my $sum = 0;
+            for 0 ..^ $cols_a -> $k {
+                $sum += $a->[$i]->[$k] * $b->[$k]->[$j];
+            }
+            push(@row, $sum);
+        }
+        push(@result, @row);
+    }
+    return @result;
+}
+
+my $m1 = [
+    [3, 2, 3],
+    [5, 9, 8]
+];
+my $m2 = [
+    [4, 7],
+    [9, 3],
+    [8, 1]
+];
+my @prod = mat_mul($m1, $m2);
+say "  Row 0: [" ~ join(", ", @prod[0]) ~ "]";
+say "  Row 1: [" ~ join(", ", @prod[1]) ~ "]";
+
+ASSERT @prod[0][0] == 54 && @prod[0][1] == 30, "2.14 matrix product row 0";
+ASSERT @prod[1][0] == 165 && @prod[1][1] == 70, "2.14 matrix product row 1";
+
+# ------------------------------------------------------------------------------
+# Recipe 2.17: Putting Commas in Numbers (Commifying)
+# ------------------------------------------------------------------------------
+say "\n[2.17] Commifying Large Numbers:";
+
+sub commify_num($num_str) {
+    my $s = "" ~ $num_str;
+    my $sign = "";
+    if starts_with($s, "-") || starts_with($s, "+") {
+        $sign = substr($s, 0, 1);
+        $s = substr($s, 1);
+    }
+    my @parts = split(".", $s);
+    my $int_part = @parts[0];
+    my $rev = flip($int_part);
+    my @groups = comb(3, $rev);
+    my $with_commas = flip(join(",", @groups));
+    if @parts.elems() > 1 {
+        return $sign ~ $with_commas ~ "." ~ @parts[1];
+    }
+    return $sign ~ $with_commas;
+}
+
+my $c1 = commify_num(-1234567890.45);
+my $c2 = commify_num(9876543);
+
+say "  -1234567890.45 -> " ~ $c1;
+say "  9876543        -> " ~ $c2;
+
+ASSERT $c1 eq "-1,234,567,890.45", "2.17 commify negative decimal";
+ASSERT $c2 eq "9,876,543", "2.17 commify integer";
+
+say "\nChapter 02: All numeric recipes verified successfully!";

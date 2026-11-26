@@ -1,0 +1,149 @@
+# ==============================================================================
+# End-to-End Test Suite for Raptor Todo Web App (app.rp + index.phtml)
+# ==============================================================================
+# Run with:
+#   raptor --go raptor/examples/todo/test_todo.rp
+# ==============================================================================
+
+plan(16);
+
+my $script_dir  = dirname(abspath($*PROGRAM));
+my $app_path    = $script_dir ~ "/app.rp";
+my $phtml_path  = $script_dir ~ "/index.phtml";
+my $raptor_exe  = abspath($*EXECUTABLE);
+my $bin_dir     = dirname($raptor_exe);
+my $raptorhp_exe = $bin_dir ~ "/raptorhp.exe";
+if $*OS ne "windows" {
+    $raptorhp_exe = $bin_dir ~ "/raptorhp";
+}
+
+# ------------------------------------------------------------------------------
+# Part 1: Verify app.rp Automated End-to-End CRUD Self-Test (RAPTOR_TEST_MODE=1)
+# ------------------------------------------------------------------------------
+
+setenv("RAPTOR_TEST_MODE", "1");
+my $selftest_cmd = '"' ~ $raptor_exe ~ '" --go "' ~ $app_path ~ '" --self-test';
+my $selftest_out = qx($selftest_cmd);
+
+ok(contains($selftest_out, "Todo Web App self-test PASSED"), "app.rp --self-test passes full HTTP + SQLite CRUD flow");
+
+# ------------------------------------------------------------------------------
+# Part 2: Verify index.phtml Server-Side Rendering + Form Actions + SQLite
+# ------------------------------------------------------------------------------
+
+my $tmp_db    = $script_dir ~ "/.tmp_test_todo_" ~ pid() ~ ".db";
+my $tmp_phtml = $script_dir ~ "/.tmp_test_runner_" ~ pid() ~ ".phtml";
+unlink($tmp_db);
+unlink($tmp_phtml);
+
+setenv("RAPTOR_TODO_DB", $tmp_db);
+setenv("RAPTOR_TODO_NO_SEED", "1");
+
+my $template_body = slurp($phtml_path);
+ok(length($template_body) > 500, "index.phtml template loaded");
+
+sub render_phtml_with($get_hash, $post_hash) {
+    my $preamble = "<?raptor\n"
+        ~ "my %_GET = from_json('" ~ replace(json_encode($get_hash), "'", "''") ~ "');\n"
+        ~ "my %_POST = from_json('" ~ replace(json_encode($post_hash), "'", "''") ~ "');\n"
+        ~ "my %_SERVER = { \"REQUEST_METHOD\" => \"" ~ (elems($post_hash) > 0 ? "POST" : "GET") ~ "\" };\n"
+        ~ "?>\n";
+    spurt($tmp_phtml, $preamble ~ $template_body);
+    my $cmd = '"' ~ $raptorhp_exe ~ '" "' ~ $tmp_phtml ~ '"';
+    return qx($cmd);
+}
+
+# Helper without ternary operator inside string expression
+sub render_phtml_req($method, $get_hash, $post_hash) {
+    my $g_json = replace(json_encode($get_hash), "\\", "\\\\");
+    $g_json = replace($g_json, "'", "\\'");
+    my $p_json = replace(json_encode($post_hash), "\\", "\\\\");
+    $p_json = replace($p_json, "'", "\\'");
+
+    my $preamble = "<?raptor\n"
+        ~ "our %_GET = json_decode('" ~ $g_json ~ "');\n"
+        ~ "our %_POST = json_decode('" ~ $p_json ~ "');\n"
+        ~ 'our %_SERVER = { "REQUEST_METHOD" => "' ~ $method ~ '" };' ~ "\n"
+        ~ "?>\n";
+    spurt($tmp_phtml, $preamble ~ $template_body);
+    my $cmd = '"' ~ $raptorhp_exe ~ '" "' ~ $tmp_phtml ~ '"';
+    return qx($cmd);
+}
+
+# 2.1 Initial empty render
+my $html0 = render_phtml_req("GET", {}, {});
+ok(contains($html0, "RaptorHP Todo"), "index.phtml renders application header");
+ok(contains($html0, "No tasks match your current filters"), "index.phtml shows empty state when DB is empty");
+
+# 2.2 POST action=add (including XSS & SQL single-quote payloads)
+my $html_add1 = render_phtml_req("POST", {}, {
+    "action"   => "add",
+    "title"    => "Deploy O'Brien's <script>alert(1)</script> microservice",
+    "priority" => "high",
+    "category" => "security"
+});
+ok(contains($html_add1, "Added task:"), "POST action=add shows flash confirmation");
+ok(contains($html_add1, "&lt;script&gt;alert(1)&lt;/script&gt;"), "index.phtml escapes HTML tags via html_escape");
+ok(!contains($html_add1, "<script>alert(1)</script>"), "Raw <script> payload is never emitted unescaped");
+
+my $html_add2 = render_phtml_req("POST", {}, {
+    "action"   => "add",
+    "title"    => "Write README curl examples",
+    "priority" => "low",
+    "category" => "docs"
+});
+ok(contains($html_add2, "2 active items left"), "Active item counter updates to 2 after second POST");
+
+# Inspect SQLite rows directly to get IDs
+my $db = sqlite_open($tmp_db);
+my $rows = sqlite_query($db, "SELECT id, title, completed, priority, category FROM todos ORDER BY id ASC");
+sqlite_close($db);
+
+is(elems($rows), 2, "SQLite persisted both tasks created by index.phtml");
+my $id1 = int($rows[0]<id>);
+my $id2 = int($rows[1]<id>);
+
+# 2.3 POST action=toggle marks task #1 completed
+my $html_tog = render_phtml_req("POST", {}, {
+    "action" => "toggle",
+    "id"     => str($id1)
+});
+ok(contains($html_tog, "1 active item left"), "POST action=toggle marks task completed and updates counter");
+
+# 2.4 GET filters (?status=active, ?priority=high, ?q=docs)
+my $html_act = render_phtml_req("GET", { "status" => "active" }, {});
+ok(contains($html_act, "Write README curl examples") && !contains($html_act, "microservice"), "GET ?status=active filters out completed tasks");
+
+my $html_search = render_phtml_req("GET", { "q" => "security" }, {});
+ok(contains($html_search, "#security") && !contains($html_search, "Write README curl examples"), "GET ?q=security filters by category/keyword");
+
+# 2.5 POST action=update updates title & priority
+my $html_upd = render_phtml_req("POST", {}, {
+    "action"   => "update",
+    "id"       => str($id2),
+    "title"    => "Ship polished README documentation",
+    "priority" => "medium",
+    "category" => "docs"
+});
+ok(contains($html_upd, "Ship polished README documentation"), "POST action=update modifies task title");
+
+# 2.6 POST action=clear_completed removes completed task #1, then action=delete removes task #2
+my $html_clr = render_phtml_req("POST", {}, { "action" => "clear_completed" });
+ok(contains($html_clr, "Cleared 1 completed task"), "POST action=clear_completed deletes completed rows");
+
+my $html_del = render_phtml_req("POST", {}, {
+    "action" => "delete",
+    "id"     => str($id2)
+});
+ok(contains($html_del, "Deleted task #" ~ $id2), "POST action=delete deletes single todo");
+
+my $db_final = sqlite_open($tmp_db);
+my $remaining = sqlite_query($db_final, "SELECT id FROM todos");
+sqlite_close($db_final);
+is(elems($remaining), 0, "All tasks deleted cleanly from SQLite");
+
+# Cleanup temporary test artifacts
+unlink($tmp_phtml);
+unlink($tmp_db);
+
+done_testing();

@@ -1,0 +1,48 @@
+# Perl Cookbook - Chapter 12: Packages, Libraries, and Modules (Ported to Raptor)
+# Covers package blocks, our variables, qualified names, symbol table stashes (%Pkg::), PRE/POST contracts.
+
+say "=== Chapter 12: Packages, Libraries, and Modules ===";
+
+# 12.1 Defining a Module's Interface & Package Globals (`our`)
+package Math::Geometry {
+    our $VERSION = "2.1.0";
+
+    sub circle_area($r) {
+        PRE $r >= 0, "radius must be non-negative";
+        return 3.141592653589793 * $r * $r;
+    }
+
+    sub rect_area($w, $h) {
+        return $w * $h;
+    }
+}
+
+ASSERT $Math::Geometry::VERSION eq "2.1.0", "12.1 package our variable";
+my $area = Math::Geometry::circle_area(10);
+ASSERT abs($area - 314.1592653589793) < 1e-6, "12.1 qualified package sub call";
+say "12.1 Math::Geometry v{$Math::Geometry::VERSION} circle_area(10) = {sprintf('%.4f', $area)}";
+
+# 12.5–12.7 Symbol Table Introspection (`package_symbols`, `package_get`, `package_set`)
+package Plugins {
+    our $enabled = True;
+    sub ping() { return "pong"; }
+}
+
+package_set("Plugins", "$author", "RaptorTeam");
+ASSERT package_get("Plugins", "$author") eq "RaptorTeam", "12.7 dynamic stash set/get";
+my %syms = package_symbols("Plugins");
+ASSERT defined(%syms{"ping"}) || defined(%syms{"$author"}), "12.7 package_symbols stash";
+
+# 12.13 Referring to Packages Indirectly & Generating Accessors Dynamically
+for qw(red green blue) -> $color {
+    package_set("Palette", "get_$color", sub () { return "color:$color"; });
+}
+my $green_fn = package_get("Palette", "get_green");
+ASSERT $green_fn() eq "color:green", "12.13 dynamically installed package sub";
+say "12.13 Dynamic symbol Palette::get_green() -> {$green_fn()}";
+
+# Contract violation trapped cleanly via `try`
+my $bad = try { Math::Geometry::circle_area(-5) };
+ASSERT !defined($bad) && contains($!, "PreconditionError"), "12.contract PRE check enforced";
+
+say "Chapter 12: ALL RECIPES PASSED";

@@ -511,6 +511,7 @@ func (in *Interp) forkWorker() *Interp {
 	w := *in
 	w.ds = dataStack{}
 	w.GatherStack = nil
+	w.actionValStack = nil
 	w.CurrentEnv = in.GlobalEnv
 	return &w
 }

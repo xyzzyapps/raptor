@@ -1,0 +1,56 @@
+# Perl Cookbook - Chapter 16: Process Management and Communication (Ported to Raptor)
+# Covers environment variables, capturing subprocess output, concurrent worker Promises, and Channel IPC pipelines.
+
+say "=== Chapter 16: Process Management and IPC ===";
+
+# 16.1 Gathering Output from a Program (`qx` / backticks) & Checking Exit Status
+setenv("RAPTOR_CB16_TOKEN", "ipc_verified_42");
+ASSERT getenv("RAPTOR_CB16_TOKEN") eq "ipc_verified_42", "16.1 setenv/getenv";
+unsetenv("RAPTOR_CB16_TOKEN");
+ASSERT getenv("RAPTOR_CB16_TOKEN") eq "", "16.1 unsetenv";
+
+my $echo_out = trim(qx("echo raptor_subproc_ok"));
+ASSERT contains($echo_out, "raptor_subproc_ok"), "16.1 qx subprocess output";
+say "16.1 Subprocess output: '$echo_out' (pid={pid()})";
+
+# 16.10–16.12 Communicating Between Concurrent Tasks via Channels & Promises
+my $jobs = Channel.new(16);
+my $results = Channel.new(16);
+
+# Spawn 3 concurrent worker fibers
+my @workers;
+for 1 .. 3 -> $wid {
+    push(@workers, start {
+        my $processed = 0;
+        while True {
+            my $item = try { $jobs.receive() };
+            last if !defined($item);
+            $results.send($item * $item);
+            $processed++;
+        }
+        return $processed;
+    });
+}
+
+# Producer sends 1..8 and closes job channel
+for 1 .. 8 -> $n {
+    $jobs.send($n);
+}
+$jobs.close();
+
+# Await all workers and collect squared results
+my @counts = await(@workers);
+$results.close();
+
+my @squares;
+for 1 .. 8 -> $i {
+    push(@squares, $results.receive());
+}
+ASSERT sum(@counts) == 8 && sum(@squares) == 204, "16.12 concurrent channel pipeline (1^2..8^2 = 204)";
+say "16.12 Worker task counts={join(',', @counts)} sum_of_squares={sum(@squares)}";
+
+# Data-parallel multi-core `pmap`
+my @par_cubes = pmap(sub ($x) { return $x * $x * $x; }, 1 .. 10);
+ASSERT sum(@par_cubes) == 3025, "16.pmap parallel cubes sum";
+
+say "Chapter 16: ALL RECIPES PASSED";

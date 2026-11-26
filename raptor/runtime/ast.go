@@ -36,11 +36,12 @@ const (
 
 // Param represents a typed formal parameter in a sub or closure signature.
 type Param struct {
-	Name         string // e.g. "$x", "@arr", "%hash"
-	Type         string // e.g. "Int", "Str", "Num", "Array", "Hash", "Callable", "Any"
+	Name         string  // e.g. "$x", "@arr", "%hash"
+	Type         string  // e.g. "Int", "Str", "Num", "Array", "Hash", "Callable", "Any"
 	IsOptional   bool
-	IsSlurpy     bool   // "*@tail", "*%named"
-	Where        Expr   // optional where constraint: { $_ > 0 }
+	IsSlurpy     bool    // "*@tail", "*%named"
+	Default      Expr    // optional default value: $x = 10
+	Where        Expr    // optional where constraint: { $_ > 0 }
 	DestructArr  []Param // e.g. [$head, *@tail]
 	DestructHash []Param // e.g. :{:$name, :$age}
 }
@@ -142,13 +143,16 @@ type WhileStmt struct {
 func (w *WhileStmt) node() {}
 func (w *WhileStmt) stmt() {}
 
-// ForStmt represents a 'for' list iteration loop.
+// ForStmt represents a 'for' or 'foreach' list iteration loop.
 type ForStmt struct {
 	Iterable     Expr
-	VarName      string // e.g. "$x" from pointy block
+	VarName      string     // e.g. "$x" from single-var pointy block or Perl5 for my $x (@list)
+	VarNames     []string   // e.g. ["$k", "$v"] from multi-var pointy block -> $k, $v
 	Body         *BlockStmt
 	VarSlotKind  SlotKind
 	VarSlot      int
+	VarSlotKinds []SlotKind
+	VarSlots     []int
 	UsesTopic    bool
 	NeedsLoopEnv bool
 }
@@ -164,6 +168,7 @@ type LoopStmt struct {
 	Body         *BlockStmt
 	NeedsLoopEnv bool
 	NeedsBodyEnv bool
+	fusedPlan    *fusedLoopPlan
 }
 
 func (l *LoopStmt) node() {}
@@ -598,6 +603,37 @@ type StubExpr struct {
 func (s *StubExpr) node() {}
 func (s *StubExpr) expr() {}
 func (s *StubExpr) stmt() {}
+
+// IncDecExpr represents prefix/postfix ++ and -- operations.
+type IncDecExpr struct {
+	Target Expr
+	Op     string // "++" or "--"
+	Post   bool   // true for $x++, false for ++$x
+}
+
+func (i *IncDecExpr) node() {}
+func (i *IncDecExpr) expr() {}
+
+// TryExpr represents a try { ... } [catch { ... }] error-trapping block.
+type TryExpr struct {
+	Body  *BlockStmt
+	Catch *BlockStmt
+}
+
+func (t *TryExpr) node() {}
+func (t *TryExpr) expr() {}
+func (t *TryExpr) stmt() {}
+
+// ListAssignStmt represents list destructuring: my ($a, $b) = ... or ($a, $b) = ($b, $a).
+type ListAssignStmt struct {
+	Scope   string // "my", "our", or ""
+	Targets []Expr
+	Value   Expr
+}
+
+func (l *ListAssignStmt) node() {}
+func (l *ListAssignStmt) stmt() {}
+func (l *ListAssignStmt) expr() {}
 
 
 

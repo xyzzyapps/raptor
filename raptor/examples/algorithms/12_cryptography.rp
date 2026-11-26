@@ -1,0 +1,126 @@
+# Mastering Algorithms with Perl - Chapter 12: Cryptography
+# Covers Caesar & Vigenere ciphers, PRNG XOR stream cipher, Diffie-Hellman key exchange,
+# Textbook RSA key generation / encryption / decryption, and SHA-256 / HMAC-SHA256 authentication.
+
+say "=== Chapter 12: Cryptography ===";
+
+# 1. Caesar Shift & Vigenere Polyalphabetic Cipher
+sub caesar($text, $shift) {
+    my $out = "";
+    my $s = (($shift % 26) + 26) % 26;
+    for comb(uc($text)) -> $ch {
+        my $c = ord($ch);
+        if $c >= 65 && $c <= 90 {
+            $out ~= chr(65 + (($c - 65 + $s) % 26));
+        } else {
+            $out ~= $ch;
+        }
+    }
+    return $out;
+}
+
+sub vigenere($text, $key, $decrypt = False) {
+    my $out = "";
+    my $k = uc($key);
+    my $klen = chars($k);
+    my $ki = 0;
+    for comb(uc($text)) -> $ch {
+        my $c = ord($ch);
+        if $c >= 65 && $c <= 90 {
+            my $shift = ord(substr($k, $ki % $klen, 1)) - 65;
+            $shift = (26 - $shift) % 26 if $decrypt;
+            $out ~= chr(65 + (($c - 65 + $shift) % 26));
+            $ki++;
+        } else {
+            $out ~= $ch;
+        }
+    }
+    return $out;
+}
+
+my $caes = caesar("VENI VIDI VICI", 3);
+ASSERT $caes eq "YHQL YLGL YLFL" && caesar($caes, -3) eq "VENI VIDI VICI", "Caesar roundtrip";
+
+my $vig_ct = vigenere("ATTACKATDAWN", "LEMON", False);
+ASSERT $vig_ct eq "LXFOPVEFRNHR" && vigenere($vig_ct, "LEMON", True) eq "ATTACKATDAWN", "Vigenere classic vector";
+say "[1] Vigenere('ATTACKATDAWN', 'LEMON') = $vig_ct";
+
+# 2. Symmetric XOR Stream Cipher (LCG Keystream)
+sub xor_stream_crypt(@bytes, $seed) {
+    my $state = $seed +& 0x7FFFFFFF;
+    my @out;
+    for @bytes -> $b {
+        $state = ($state * 1103515245 + 12345) +& 0x7FFFFFFF;
+        my $ks_byte = ($state +> 16) +& 0xFF;
+        push(@out, $b +^ $ks_byte);
+    }
+    return @out;
+}
+
+my $secret_msg = "Raptor zero-overhead stream payload";
+my @pt_bytes = codes($secret_msg);
+my @ct_bytes = xor_stream_crypt(@pt_bytes, 20261126);
+my @rt_bytes = xor_stream_crypt(@ct_bytes, 20261126);
+my $recovered = join("", map(sub ($c) { return chr($c); }, @rt_bytes));
+ASSERT $recovered eq $secret_msg && @ct_bytes[0] != @pt_bytes[0], "XOR stream cipher roundtrip";
+say "[2] XOR Stream Cipher encrypted & recovered {elems(@pt_bytes)} bytes";
+
+# 3. Diffie-Hellman Key Exchange (Safe Prime p = 2147483647, g = 7)
+sub mod_pow($base, $exp, $mod) {
+    my $res = 1;
+    my $b = $base % $mod;
+    my $e = $exp;
+    while $e > 0 {
+        $res = ($res * $b) % $mod if ($e +& 1) == 1;
+        $b = ($b * $b) % $mod;
+        $e = $e +> 1;
+    }
+    return $res;
+}
+
+my $dh_p = 2147483647;
+my $dh_g = 7;
+my $alice_priv = 1234567;
+my $bob_priv   = 7654321;
+my $alice_pub  = mod_pow($dh_g, $alice_priv, $dh_p);
+my $bob_pub    = mod_pow($dh_g, $bob_priv,   $dh_p);
+my $alice_sec  = mod_pow($bob_pub,   $alice_priv, $dh_p);
+my $bob_sec    = mod_pow($alice_pub, $bob_priv,   $dh_p);
+ASSERT $alice_sec == $bob_sec && $alice_sec > 0, "Diffie-Hellman shared secret agreement";
+say "[3] Diffie-Hellman agreed shared secret = $alice_sec";
+
+# 4. Textbook RSA Key Generation, Encryption, Decryption & Signature Verification
+sub egcd($a, $b) {
+    return [$a, 1, 0] if $b == 0;
+    my ($g, $x1, $y1) = egcd($b, $a % $b);
+    return [$g, $y1, $x1 - ($a div $b) * $y1];
+}
+
+sub rsa_keygen($p, $q, $e) {
+    my $n   = $p * $q;
+    my $phi = ($p - 1) * ($q - 1);
+    my ($g, $x, $y) = egcd($e, $phi);
+    ASSERT $g == 1, "e must be coprime to phi(n)";
+    my $d = (($x % $phi) + $phi) % $phi;
+    return { "n" => $n, "e" => $e, "d" => $d };
+}
+
+my %rsa = rsa_keygen(61, 53, 17);
+ASSERT %rsa<n> == 3233 && %rsa<d> == 2753, "RSA keygen (p=61, q=53, e=17 -> d=2753)";
+my $c_65 = mod_pow(65, %rsa<e>, %rsa<n>);
+my $m_65 = mod_pow($c_65, %rsa<d>, %rsa<n>);
+ASSERT $c_65 == 2790 && $m_65 == 65, "RSA encrypt(65)=2790, decrypt(2790)=65";
+
+my @rsa_cipher = map(sub ($b) { return mod_pow($b, %rsa<e>, %rsa<n>); }, codes("PERL"));
+my $rsa_plain  = join("", map(sub ($c) { return chr(mod_pow($c, %rsa<d>, %rsa<n>)); }, @rsa_cipher));
+ASSERT $rsa_plain eq "PERL", "RSA block message roundtrip";
+say "[4] RSA(n=3233, e=17, d=2753): 65 -> $c_65 -> $m_65, msg='$rsa_plain'";
+
+# 5. Cryptographic Hashing & HMAC-SHA256 Message Authentication
+my $digest = sha256("abc");
+ASSERT $digest eq "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "NIST SHA-256('abc') test vector";
+my $mac = hmac_sha256("transfer=1000&to=alice", "super-secret-hmac-key");
+ASSERT chars($mac) == 64 && $mac ne hmac_sha256("transfer=9000&to=alice", "super-secret-hmac-key"), "HMAC-SHA256 tamper detection";
+say "[5] SHA-256('abc') = {substr($digest, 0, 16)}..., HMAC-SHA256 verified";
+
+say "All Chapter 12 assertions passed!";

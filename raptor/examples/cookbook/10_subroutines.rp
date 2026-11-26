@@ -1,0 +1,81 @@
+# Perl Cookbook - Chapter 10: Subroutines (Ported to Raptor)
+# Covers default/slurpy/@_ params, persistent state vars, returning multiple values, pass-by-ref,
+# try/die exceptions, closures, multi-dispatch, AUTOLOAD, and before/after/around advice.
+
+say "=== Chapter 10: Subroutines ===";
+
+# 10.1 Accessing Subroutine Arguments (Named, Defaults, Slurpy *@rest, and Perl 5 @_)
+sub hypotenuse($a = 3.0, $b = 4.0) {
+    return sqrt($a * $a + $b * $b);
+}
+ASSERT hypotenuse() == 5.0 && hypotenuse(5, 12) == 13.0, "10.1 default params";
+
+sub avg_perl5 {
+    return 0 if elems(@_) == 0;
+    return sum(@_) / elems(@_);
+}
+ASSERT avg_perl5(10, 20, 30, 40) == 25.0, "10.1 @_ argument array";
+
+# 10.3 Creating Persistent Private Variables (`state`)
+sub next_id() {
+    state $seq = 100;
+    return ++$seq;
+}
+ASSERT next_id() == 101 && next_id() == 102 && next_id() == 103, "10.3 state counter";
+say "10.3 Next ID: {next_id()}";
+
+# 10.5 Passing Arrays and Hashes by Reference
+sub scale_in_place($arr_ref, $factor) {
+    for 0 ..^ elems(@$arr_ref) -> $i {
+        $arr_ref->[$i] *= $factor;
+    }
+}
+my @vec = [2, 4, 6];
+scale_in_place(\@vec, 10);
+ASSERT join(",", @vec) eq "20,40,60", "10.5 pass array by reference";
+
+# 10.8 Returning More Than One Value & Skipping Selected Return Values
+sub min_max_sum(@xs) {
+    my $mn = @xs[0];
+    my $mx = @xs[0];
+    my $sm = 0;
+    for @xs -> $v {
+        $mn = $v if $v < $mn;
+        $mx = $v if $v > $mx;
+        $sm += $v;
+    }
+    return [$mn, $mx, $sm];
+}
+my ($lo, $hi, $tot) = min_max_sum([14, 3, 27, 9, 10]);
+ASSERT $lo == 3 && $hi == 27 && $tot == 63, "10.8 list destructuring return";
+say "10.8 min=$lo max=$hi sum=$tot";
+
+# 10.12 Handling Exceptions (`die` + `try` + `$!`)
+sub safe_div($a, $b) {
+    die("DivisionByZero") if $b == 0;
+    return $a / $b;
+}
+my $ok_res = try { safe_div(20, 4) } // -1;
+my $err_res = try { safe_div(20, 0) } // -1;
+ASSERT $ok_res == 5.0 && $err_res == -1 && contains($!, "DivisionByZero"), "10.12 try/die/$!";
+
+# 10.14 Redefining / Wrapping Functions (`around` advice & closures)
+sub make_adder($delta) {
+    return sub ($x) { return $x + $delta; };
+}
+my $add7 = make_adder(7);
+ASSERT $add7(35) == 42, "10.14 lexical closure";
+
+multi sub describe(Int $x) { return "int:$x"; }
+multi sub describe(Str $s) { return "str:$s"; }
+ASSERT describe(9) eq "int:9" && describe("hi") eq "str:hi", "10.14 multi sub dispatch";
+
+# 10.15 Trapping Undefined Function Calls with AUTOLOAD
+sub AUTOLOAD(*@args) {
+    return "AUTOLOAD<$AUTOLOAD>(" ~ join(",", @args) ~ ")";
+}
+my $auto_out = phantom_method(11, 22);
+ASSERT contains($auto_out, "phantom_method") && contains($auto_out, "11,22"), "10.15 AUTOLOAD";
+say "10.15 $auto_out";
+
+say "Chapter 10: ALL RECIPES PASSED";

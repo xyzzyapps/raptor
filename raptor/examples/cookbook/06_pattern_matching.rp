@@ -1,0 +1,74 @@
+# Perl Cookbook - Chapter 6: Pattern Matching (Ported to Raptor)
+# Covers regex captures ($1, $2), subst(), match_all(), and Raku PEG grammars (:i, <( )>, <~~>, $<name>).
+
+say "=== Chapter 6: Pattern Matching ===";
+
+# 6.1 Copying and Substituting Simultaneously
+my $src = "   The   quick\tbrown   fox  ";
+my $norm = subst(trim($src), "\\s+", " ");
+ASSERT $norm eq "The quick brown fox", "6.1 normalize whitespace";
+say "6.1 Normalized: '$norm'";
+
+# 6.2 Matching Letters & Words
+my $word = "RaptorPEG";
+ASSERT ($word =~ /^[A-Za-z]+$/), "6.2 pure alphabetic check";
+my @tokens = match_all("[A-Za-z0-9_]+", "foo_1 + bar_2 * 42");
+ASSERT elems(@tokens) == 3 && @tokens[0] eq "foo_1" && @tokens[2] eq "42", "6.2 match_all words";
+
+# 6.4 Commenting / Structured Log Parsing with Captures ($1, $2, $3)
+my $log = "2026-11-26 [WARN] pid=4096 Disk usage 88%";
+my $lvl = "";
+my $pid_val = 0;
+if $log =~ /^(\d{4}-\d{2}-\d{2})\s+\[(\w+)\]\s+pid=(\d+)\s+(.*)$/ {
+    $lvl = $2;
+    $pid_val = +$3;
+    say "6.4 Log parsed: date=$1 level=$lvl pid=$pid_val msg='$4'";
+}
+ASSERT $lvl eq "WARN" && $pid_val == 4096, "6.4 regex captures";
+
+# 6.7 Reading Records with a Pattern Separator & Finding Nth Occurrence
+my $csv = "alpha,100;beta,200;gamma,300";
+my @recs = split(";", $csv);
+ASSERT elems(@recs) == 3, "6.7 record split";
+
+# 6.11 Matching Nested/Balanced Delimiters via Raku PEG <~~> Self-Recursion
+grammar NestedExpr {
+    token TOP { ^ <balanced> $ }
+    token balanced { '(' [ <-[()]>+ | <~~> ]* ')' }
+}
+my $bm = NestedExpr.parse("((x + 1) * (y - (z / 2)))");
+ASSERT defined($bm) && "$bm" eq "((x + 1) * (y - (z / 2)))", "6.11 recursive balanced parens";
+ASSERT !defined(NestedExpr.parse("((unclosed)")), "6.11 reject unbalanced";
+say "6.11 Balanced expression matched: $bm";
+
+# 6.16 Detecting Duplicate Words via Dynamic Backreferences ($0) & :i
+grammar DupWord {
+    token TOP :i { ^ (<ident>) \s+ $0 $ }
+}
+ASSERT defined(DupWord.parse("the THE")), "6.16 case-insensitive duplicate word";
+ASSERT !defined(DupWord.parse("the cat")), "6.16 non-duplicate rejected";
+
+# 6.19 Validating Email / Key-Value Headers via Declarative PEG Grammar + <( )>
+grammar HeaderLine {
+    rule TOP { ^ $<key>=<ident> ':' <( \N+ )> $ }
+}
+my $hm = HeaderLine.parse("Content_Type: application/json");
+ASSERT defined($hm) && "$<key>" eq "Content_Type" && "$hm" eq "application/json", "6.19 <( )> span & $<key>";
+say "6.19 Header key='$<key>' span='$hm'";
+
+# 6.13 Approximate / Fuzzy Matching (Hamming / 1-edit tolerance)
+sub approx_match($pat, $cand, $max_dist = 1) {
+    return False if abs(chars($pat) - chars($cand)) > $max_dist;
+    my @a = comb($pat);
+    my @b = comb($cand);
+    my $n = min(elems(@a), elems(@b));
+    my $d = abs(elems(@a) - elems(@b));
+    for 0 ..^ $n -> $i {
+        $d++ if @a[$i] ne @b[$i];
+    }
+    return $d <= $max_dist;
+}
+ASSERT approx_match("perl", "peel", 1), "6.13 1-char substitution";
+ASSERT !approx_match("perl", "raku", 1), "6.13 >1 distance";
+
+say "Chapter 6: ALL RECIPES PASSED";

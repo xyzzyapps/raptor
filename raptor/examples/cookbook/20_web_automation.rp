@@ -1,0 +1,135 @@
+# Perl Cookbook - Chapter 20: Web Automation (Ported to Raptor)
+# Covers fetching web pages, extracting links, converting HTML to plain text,
+# breadth-first link crawling/checking, and parsing Common/Combined access logs.
+
+say "=== Chapter 20: Web Automation ===";
+
+# ------------------------------------------------------------------------------
+# 20.3 & 20.5 Extracting URLs & Converting HTML to Plain Text
+# ------------------------------------------------------------------------------
+sub extract_links($html) {
+    my @urls;
+    for match_all('href="([^"]+)"', $html) -> $hit {
+        if $hit =~ /href="([^"]+)"/ {
+            push(@urls, $1);
+        }
+    }
+    return @urls;
+}
+
+sub html_to_text($html) {
+    my $txt = subst($html, '<script[^>]*>.*?</script>', '', 'gis');
+    $txt = subst($txt, '<style[^>]*>.*?</style>', '', 'gis');
+    $txt = subst($txt, '<br\s*/?>', "\n", 'gi');
+    $txt = subst($txt, '</p>', "\n", 'gi');
+    $txt = subst($txt, '<[^>]+>', '', 'g');
+    $txt = replace($txt, '&amp;', '&');
+    $txt = replace($txt, '&lt;', '<');
+    $txt = replace($txt, '&gt;', '>');
+    $txt = replace($txt, '&quot;', '"');
+    return trim(subst($txt, '[ \t]+', ' ', 'g'));
+}
+
+my $sample_html = '<html><head><style>body{color:#000}</style></head>'
+    ~ '<body><h1>Raptor &amp; Perl</h1><p>Visit <a href="/docs">Docs</a> or <a href="/bench">Benchmarks</a>.</p></body></html>';
+
+my @links = extract_links($sample_html);
+ASSERT elems(@links) == 2 && @links[0] eq "/docs" && @links[1] eq "/bench", "20.3 extracted href links";
+
+my $plain = html_to_text($sample_html);
+ASSERT contains($plain, "Raptor & Perl") && contains($plain, "Visit Docs or Benchmarks."), "20.5 HTML stripped to text";
+say "20.5 Plain text: '$plain'";
+
+# ------------------------------------------------------------------------------
+# 20.7 Finding Stale/Valid Links with an Automated Local Site Crawler
+# ------------------------------------------------------------------------------
+my %site_pages = {
+    "/"      => '<a href="/about">About</a> <a href="/docs">Docs</a> <a href="/dead">Broken</a>',
+    "/about" => '<h1>About Raptor</h1><a href="/team">Team</a>',
+    "/docs"  => '<h1>Documentation</h1><a href="/">Home</a>',
+    "/team"  => '<h1>Core Team</h1>'
+};
+
+my $mock_site = sub ($req) {
+    my $p = $req<path>;
+    if exists(%site_pages, $p) {
+        return { "status" => 200, "headers" => { "Content-Type" => "text/html" }, "body" => %site_pages{$p} };
+    }
+    return { "status" => 404, "body" => "Not Found" };
+};
+
+my $srv = Nil;
+my $port = 0;
+for 19870 .. 19890 -> $cand {
+    my $s = try { http_server_listen($cand, $mock_site) };
+    if defined($s) {
+        $srv = $s;
+        $port = $cand;
+        last;
+    }
+}
+ASSERT defined($srv), "20.7 bound mock site for crawler";
+
+my $base = "http://127.0.0.1:$port";
+my @queue = ["/"];
+my %visited;
+my @ok_pages;
+my @broken_links;
+
+while elems(@queue) > 0 {
+    my $path = shift(@queue);
+    next if %visited{$path};
+    %visited{$path} = True;
+
+    my $r = http_get($base ~ $path);
+    if $r<status> == 200 {
+        push(@ok_pages, $path);
+        for extract_links($r<body>) -> $href {
+            push(@queue, $href) unless %visited{$href};
+        }
+    } else {
+        push(@broken_links, $path);
+    }
+}
+http_server_close($srv);
+
+ASSERT elems(@ok_pages) == 4 && elems(@broken_links) == 1 && @broken_links[0] eq "/dead", "20.7 BFS link checker";
+say "20.7 Crawled {elems(@ok_pages)} valid pages ({join(', ', sort(@ok_pages))}), flagged broken: {join(', ', @broken_links)}";
+
+# ------------------------------------------------------------------------------
+# 20.12 Parsing Web Server Common Log Format (CLF) Records
+# ------------------------------------------------------------------------------
+grammar CLFLog {
+    token TOP    { ^ <ip> ' ' \S+ ' ' <user> ' [' <ts> '] "' <method> ' ' <path> ' ' <proto> '" ' <status> ' ' <bytes> $ }
+    token ip     { <[0..9.]>+ }
+    token user   { \S+ }
+    token ts     { <-[\]]>+ }
+    token method { <[A..Z]>+ }
+    token path   { \S+ }
+    token proto  { <-["]>+ }
+    token status { \d+ }
+    token bytes  { \d+ || '-' }
+}
+
+my @access_logs = [
+    '10.0.0.1 - alice [26/Nov/2026:12:00:01 +0000] "GET /docs HTTP/1.1" 200 4096',
+    '10.0.0.2 - - [26/Nov/2026:12:00:02 +0000] "GET /dead HTTP/1.1" 404 128',
+    '10.0.0.1 - alice [26/Nov/2026:12:00:05 +0000] "POST /api/todos HTTP/1.1" 201 512'
+];
+
+my $total_bytes = 0;
+my %by_ip;
+my $errors_4xx = 0;
+
+for @access_logs -> $line {
+    my $m = CLFLog.parse($line);
+    ASSERT defined($m), "20.12 CLF line parsed";
+    %by_ip{"$m<ip>"}++;
+    $errors_4xx++ if int($m<status>) >= 400;
+    $total_bytes += int($m<bytes>) if "$m<bytes>" ne "-";
+}
+
+ASSERT %by_ip{"10.0.0.1"} == 2 && $errors_4xx == 1 && $total_bytes == 4736, "20.12 log summary metrics";
+say "20.12 Log summary: 10.0.0.1 hits={%by_ip{'10.0.0.1'}}, 4xx={$errors_4xx}, bytes={$total_bytes}";
+
+say "Chapter 20: ALL RECIPES PASSED";

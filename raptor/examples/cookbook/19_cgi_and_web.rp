@@ -1,0 +1,120 @@
+# Perl Cookbook - Chapter 19: CGI and Web Programming (Ported to Raptor)
+# Covers URL form encoding/decoding, XSS escaping, HTTP cookie & wire parsing,
+# HTTP response formatting, and live form POST handling.
+
+say "=== Chapter 19: CGI and Web Programming ===";
+
+# ------------------------------------------------------------------------------
+# 19.1 & 19.2 Parsing `application/x-www-form-urlencoded` Query Strings & Forms
+# ------------------------------------------------------------------------------
+sub parse_form_urlencoded($raw) {
+    my %params;
+    return %params if !defined($raw) || trim($raw) eq "";
+    for split("&", $raw) -> $pair {
+        next if $pair eq "";
+        my @kv = split("=", $pair);
+        my $k = uri_decode(replace(@kv[0], "+", " "));
+        my $v = elems(@kv) > 1 ?? uri_decode(replace(@kv[1], "+", " ")) !! "";
+        %params{$k} = $v;
+    }
+    return %params;
+}
+
+sub build_form_urlencoded(%params) {
+    my @pairs;
+    for sort(keys(%params)) -> $k {
+        push(@pairs, uri_encode($k) ~ "=" ~ uri_encode(str(%params{$k})));
+    }
+    return join("&", @pairs);
+}
+
+my $qs = "name=Larry+Wall&lang=Raptor+%26+Perl&level=5";
+my %form = parse_form_urlencoded($qs);
+ASSERT %form<name> eq "Larry Wall" && %form<lang> eq "Raptor & Perl" && %form<level> eq "5", "19.1 form decode";
+
+my $reencoded = build_form_urlencoded(%form);
+my %roundtrip = parse_form_urlencoded($reencoded);
+ASSERT %roundtrip<lang> eq "Raptor & Perl", "19.1 form encode/decode roundtrip";
+say "19.1 Form decoded: name='{$form<name>}' lang='{$form<lang>}'";
+
+# ------------------------------------------------------------------------------
+# 19.4 Preventing Cross-Site Scripting (XSS) with `html_escape`
+# ------------------------------------------------------------------------------
+my $untrusted = '<img src=x onerror="alert(\'xss\')"> & "quotes"';
+my $safe_html = html_escape($untrusted);
+ASSERT !contains($safe_html, "<img") && contains($safe_html, "&lt;img") && contains($safe_html, "&amp;"), "19.4 XSS escaped";
+say "19.4 Escaped HTML: $safe_html";
+
+# ------------------------------------------------------------------------------
+# 19.10 Reading and Setting HTTP Cookies & Raw Wire Request/Response Formatting
+# ------------------------------------------------------------------------------
+sub parse_cookies($cookie_hdr) {
+    my %jar;
+    return %jar if !defined($cookie_hdr) || trim($cookie_hdr) eq "";
+    for split(";", $cookie_hdr) -> $part {
+        my $item = trim($part);
+        next if $item eq "";
+        my @kv = split("=", $item);
+        if elems(@kv) >= 2 {
+            %jar{trim(@kv[0])} = uri_decode(trim(@kv[1]));
+        }
+    }
+    return %jar;
+}
+
+my $raw_http = "POST /submit HTTP/1.1\r\n"
+    ~ "Host: localhost:8080\r\n"
+    ~ "Cookie: session_id=abc123xyz; theme=dark\r\n"
+    ~ "Content-Type: application/x-www-form-urlencoded\r\n"
+    ~ "\r\n"
+    ~ "comment=" ~ uri_encode("Hello <Raptor> Web!");
+
+my $parsed_req = http_parse_request($raw_http);
+ASSERT $parsed_req<method> eq "POST" && $parsed_req<path> eq "/submit", "19.10 http_parse_request";
+my %cookies = parse_cookies($parsed_req<headers><Cookie>);
+ASSERT %cookies<session_id> eq "abc123xyz" && %cookies<theme> eq "dark", "19.10 cookie jar parsed";
+
+my $wire_resp = http_format_response(302, {
+    "Location"   => "/thanks",
+    "Set-Cookie" => "flash=Saved; Path=/; HttpOnly"
+}, "Redirecting...");
+ASSERT contains($wire_resp, "302") && contains($wire_resp, "Location: /thanks"), "19.8 HTTP 302 redirect response";
+say "19.10 Parsed session cookie='{$cookies<session_id>}' and formatted 302 redirect";
+
+# ------------------------------------------------------------------------------
+# 19.11 Sticky Widgets & Live Form Endpoint Verification
+# ------------------------------------------------------------------------------
+my $web_app = sub ($req) {
+    if $req<method> eq "POST" && $req<path> eq "/feedback" {
+        my %in = parse_form_urlencoded($req<body>);
+        my $user = html_escape(%in<user> // "Anonymous");
+        my $msg  = html_escape(%in<msg>  // "");
+        return {
+            "status"  => 200,
+            "headers" => { "Content-Type" => "text/html; charset=utf-8" },
+            "body"    => "<div class='card'><b>" ~ $user ~ "</b>: " ~ $msg ~ "</div>"
+        };
+    }
+    return { "status" => 404, "body" => "Not Found" };
+};
+
+my $srv = Nil;
+my $port = 0;
+for 19840 .. 19860 -> $cand {
+    my $s = try { http_server_listen($cand, $web_app) };
+    if defined($s) {
+        $srv = $s;
+        $port = $cand;
+        last;
+    }
+}
+ASSERT defined($srv), "19.11 bound CGI/Web endpoint";
+
+my $post_body = build_form_urlencoded({ "user" => "Ada", "msg" => "<b>Fast!</b>" });
+my $res = http_post("http://127.0.0.1:$port/feedback", $post_body);
+http_server_close($srv);
+
+ASSERT $res<status> == 200 && contains($res<body>, "<b>Ada</b>: &lt;b&gt;Fast!&lt;/b&gt;"), "19.11 live form POST + XSS escape";
+say "19.11 Live POST rendered: {$res<body>}";
+
+say "Chapter 19: ALL RECIPES PASSED";

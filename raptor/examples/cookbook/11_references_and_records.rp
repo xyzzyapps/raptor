@@ -1,0 +1,91 @@
+# Perl Cookbook - Chapter 11: References and Records (Ported to Raptor)
+# Covers scalar/array/hash/closure references, HoA, AoH, record constructors, binary tree nodes, JSON persistence.
+
+say "=== Chapter 11: References and Records ===";
+
+# 11.1–11.4 Taking References to Scalars, Arrays, Hashes, and Functions
+my $count = 10;
+my $sref = \$count;
+$$sref += 5;
+ASSERT $count == 15, "11.1 scalar ref mutation";
+
+my %dispatch = {
+    "inc" => sub ($n) { return $n + 1; },
+    "dbl" => sub ($n) { return $n * 2; }
+};
+ASSERT %dispatch<dbl>(21) == 42, "11.4 dispatch table of closures";
+
+# 11.2 Making Hashes of Arrays (HoA)
+my %teams = {
+    "backend"  => ["Alice", "Bob"],
+    "frontend" => ["Carol"]
+};
+push(%teams<frontend>, "Dave");
+ASSERT elems(%teams<frontend>) == 2 && %teams<frontend>[1] eq "Dave", "11.2 HoA push";
+
+# 11.9 Constructing Records (Procedural Structs as Hashes)
+sub new_employee($name, $role, $salary) {
+    return {
+        "name"   => $name,
+        "role"   => $role,
+        "salary" => $salary
+    };
+}
+my @staff = [
+    new_employee("Ada", "Architect", 185000),
+    new_employee("Grace", "Compiler Lead", 195000)
+];
+ASSERT @staff[1]<name> eq "Grace" && @staff[0]<salary> == 185000, "11.9 AoH records";
+
+# 11.12 Copying Data Structures (Deep Clone)
+sub dclone($v) {
+    if type($v) eq "Array" {
+        my @cp;
+        for @$v -> $el { push(@cp, dclone($el)); }
+        return @cp;
+    }
+    if type($v) eq "Hash" {
+        my %cp;
+        for keys($v) -> $k { %cp{$k} = dclone($v{$k}); }
+        return %cp;
+    }
+    return $v;
+}
+my $cloned = dclone(@staff);
+$cloned[0]<salary> = 200000;
+ASSERT @staff[0]<salary> == 185000 && $cloned[0]<salary> == 200000, "11.12 deep clone isolation";
+
+# 11.13–11.14 Storing & Restoring Data Structures via JSON
+my $serialized = json_encode(@staff);
+my $restored = json_decode($serialized);
+ASSERT $restored[1]<role> eq "Compiler Lead", "11.13 JSON roundtrip";
+say "11.13 Serialized staff JSON: $serialized";
+
+# 11.15 Program: Binary Search Tree using Hash References
+sub bst_insert($node, $val) {
+    if !defined($node) {
+        return { "val" => $val, "left" => Nil, "right" => Nil };
+    }
+    if $val < $node<val> {
+        $node<left> = bst_insert($node<left>, $val);
+    } elsif $val > $node<val> {
+        $node<right> = bst_insert($node<right>, $val);
+    }
+    return $node;
+}
+sub bst_inorder($node, $acc) {
+    return if !defined($node);
+    bst_inorder($node<left>, $acc);
+    push($acc, $node<val>);
+    bst_inorder($node<right>, $acc);
+}
+my $root = Nil;
+for [50, 30, 70, 20, 40, 60, 80] -> $x {
+    $root = bst_insert($root, $x);
+}
+my @ordered;
+bst_inorder($root, @ordered);
+ASSERT join(",", @ordered) eq "20,30,40,50,60,70,80", "11.15 BST in-order";
+say "11.15 BST in-order: {join(' ', @ordered)}";
+
+say "Chapter 11: ALL RECIPES PASSED";

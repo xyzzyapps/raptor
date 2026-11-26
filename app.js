@@ -934,7 +934,7 @@ say "Config: ", $fallback, " | State: ", $label;
   {
     title: "3. Topic variable \$_ and Unicode math",
     desc: `
-      <p>C<$_> is the default topic: C<for>, C<given>, and bare C<say> use it. Unicode operators C<× ÷ √> and names C<∑ ∏> are real identifiers.</p>
+      <p><code>$_</code> is the default topic: <code>for</code>, <code>given</code>, and bare <code>say</code> use it. Unicode operators <code>× ÷ √</code> and names <code>∑ ∏</code> are real identifiers.</p>
     `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
@@ -1071,21 +1071,28 @@ say $msg;
   },
 
   {
-    title: "9. Lists, hashes, and backends",
+    title: "9. Lists, hashes, SIMD & backends",
     desc: `
-      <p>Everyday list/hash ops. Backends (not switchable inside the browser): <code>--go</code> interpreter, <code>--moar</code> CompUnit v7, <code>raptor serve</code> for this WASM tour.</p>
+      <p>Everyday list/hash ops, Raku/Perl 5 word lists (<code>qw(...)</code>, <code>&lt;a b c&gt;</code>), exclusive ranges (<code>0..^N</code>, <code>^N</code>), <code>++</code>/<code>--</code>, destructuring, and columnar SIMD/radix builtins (<code>simd_sum</code>, <code>simd_dot</code>, <code>psum</code>, <code>psort</code>).</p>
+      <p>Backends: <code>--go</code> (Superinstruction + AVX2 VM), <code>--cc</code> (Goose-style 16 MB Bump-Arena Native C11 + AVX2 compiler), <code>--moar</code> (CompUnit v7), and <code>--wasm</code> (this browser tour).</p>
     `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
-    code: `my @xs = [3, 1, 2];
-push(@xs, 4);
-say "elems ", @xs.elems(), " sorted ", @xs.sort();
+    code: `my @xs = [30, 10, 20];
+push(@xs, 40);
+say "elems=", @xs.elems(), " sorted=", @xs.sort(), " simd_sum=", simd_sum(@xs);
 
-my %h = { "a" => 1, "b" => 2 };
-say "keys ", keys(%h);
-say "json ", to_json(%h);
+my ($first, $second, @rest) = @xs.sort();
+say "destructured: first=$first second=$second rest=", @rest;
 
-say "this tour is the WASM backend (cmd/wasm)";
+my %freq;
+for qw(perl raku raptor perl raptor raptor) -> $w {
+    %freq{$w}++;
+}
+say "freq: ", to_json(%freq);
+
+my $err_check = try { die("boom"); } catch { "caught: $!" };
+say $err_check;
 `
   },
 
@@ -1278,9 +1285,9 @@ say MathUtil::nope(7);
   },
 
   {
-    title: "16. Grammars (gcre)",
+    title: "16. Grammars & AST Actions (gcre)",
     desc: `
-      <p>Declarative NQP / QRegex <code>grammar</code> blocks compiled by <strong>gcre</strong>: grammar inheritance (<code>is</code>), protoregexes (<code>proto</code> / <code>:sym&lt;...&gt;</code>), LTM (<code>|</code>) vs sequential (<code>||</code>) alternation, <code>is optable</code> precedence, separated lists (<code>%</code>), and goal matching (<code>~</code>). Raptor itself is parsed by <strong>gcre</strong> with <code>&lt;HOST_stmt&gt;</code> calling the Pratt parser.</p>
+      <p>Declarative Raku PEG + NQP <code>grammar</code> blocks compiled by <strong>gcre</strong>: inheritance (<code>is</code>), protoregexes (<code>proto</code> / <code>:sym&lt;...&gt;</code>), LTM (<code>|</code>) vs sequential (<code>||</code>), <code>is optable</code> Pratt precedence, adverbs (<code>:i</code>, <code>:m</code>, <code>:s</code>), conjunction (<code>&amp;</code>), capture markers (<code>&lt;( ... )&gt;</code>), cuts (<code>::</code>), self-recursion (<code>&lt;~~&gt;</code>), and <code>%actions</code> AST tables with <code>make()</code>.</p>
     `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
@@ -1299,14 +1306,24 @@ say MathUtil::nope(7);
 grammar MiniCalc is ExprBase {
     rule TOP { ^ <stmt>+ % ';' ';'? $ }
     proto rule stmt { * }
-    rule stmt:sym<let> { <sym> <lhs=ident> '=' <rhs=EXPR> }
+    rule stmt:sym<let> { :i <sym> <lhs=ident> '=' <rhs=EXPR> }
 }
 
-my $m = MiniCalc.parse("let total = 2 + 3 * 2 ** 3;");
+my $m = MiniCalc.parse("LET total = 2 + 3 * 2 ** 3;");
 say "matched rule: ", $m{"stmt"}{"rule"};
 say "lhs variable: ", $m{"stmt"}{"lhs"}{"str"};
 say "outer EXPR op: ", $m{"stmt"}{"rhs"}{"sym"}{"str"};
 say "\\$/ full match: ", $/{"str"};
+
+# Action table with make() reducing matches directly to values:
+grammar Adder {
+    token num { \\d+ }
+    rule TOP  { ^ <a=num> '+' <b=num> $ }
+}
+my $sum_m = Adder.parse("19 + 23", {
+    "TOP" => sub ($x) { make(int($x{"a"}{"str"}) + int($x{"b"}{"str"})); }
+});
+say "Adder AST .made = ", $sum_m{"made"};
 `
   },
 
@@ -1389,29 +1406,83 @@ say "=== Literate Programming Pipeline Verified ===";
   },
 
   {
-    title: "20. JSON, HTTP surface, and \$_ pipelines",
-    disabled: true,
+    title: "20. Raku / Perl 5 Subset & Cookbook Idioms",
     desc: `
-      <p>JSON is built in. Format HTTP responses. Pipe values through C<$_>.</p>
+      <p>Raptor supports the procedural intersection of Raku and Perl 5 out of the box (20 chapters of the <em>Perl Cookbook</em> ported in <code>examples/cookbook/</code>):</p>
+      <ul>
+        <li>Word lists (<code>qw(...)</code>, <code>&lt;alpha beta&gt;</code>), exclusive ranges (<code>0..^N</code>, <code>^N</code>), and pre/post <code>++</code> / <code>--</code>.</li>
+        <li>Exception handling &amp; dynamic code via <code>try { ... } catch { ... }</code> setting <code>$!</code>, plus <code>eval($code)</code>.</li>
+        <li>String &amp; binary processing: <code>subst</code>, <code>flip</code>, <code>index</code> / <code>rindex</code>, and binary <code>pack</code> / <code>unpack</code>.</li>
+      </ul>
     `,
     defaultTab: "tabConsole",
     defaultView: "consoleView",
-    code: `my %payload = { "lang" => "Raptor", "ok" => True };
-my $js = to_json(%payload);
-say $js;
-my %back = from_json($js);
-say %back{"lang"};
+    code: `# 1. Word lists, exclusive ranges (^N), and auto-vivifying ++
+my @langs = <perl raku raptor c11>;
+for ^@langs.elems() -> $i {
+    say "[$i] ", uc(@langs[$i]);
+}
 
-my $http = http_format_response(200, {:Server => "Raptor/1.0"}, $js);
-say $http;
+# 2. String substitution, reversal & binary pack/unpack
+my $line = "Error 404: page_not_found";
+my $clean = subst($line, "[0-9]+", "200");
+say "subst -> ", $clean, " (at index ", index($clean, "200"), ")";
+say "flip  -> ", flip("stressed");
 
-$_ = %back{"lang"};
-say "topic still ", $_;
+my $pkt = pack("n N", 8080, 3735928559);
+my @fields = unpack("n N", $pkt);
+say "unpacked port=", @fields[0], " magic=", sprintf("0x%X", @fields[1]);
+
+# 3. try { ... } + $! and dynamic eval($code)
+my $safe = try {
+    die("disk quota exceeded");
+};
+if $! ne "" {
+    say "Recovered error: ", $!;
+}
+say "eval('21 * 2') = ", eval("21 * 2");
 `
   },
 
   {
-    title: "21. HTML5 Canvas 2D Graphics Engine",
+    title: "21. Algorithms, Data Structures & SIMD",
+    desc: `
+      <p>All 14 chapters of <em>Mastering Algorithms with Perl</em> run natively in Raptor (<code>examples/algorithms/</code>), accelerated by packed unboxed arrays, 256-bit AVX2 SIMD reductions (<code>simd_sum</code>, <code>simd_dot</code>, <code>simd_add</code>), and parallel radix/merge sorting (<code>psort</code>).</p>
+      <p>On desktop, <code>raptor --cc script.rp</code> compiles numeric &amp; array pipelines directly to standalone C11 + AVX2 machine code via GCC, Clang, or <code>zig cc</code>.</p>
+    `,
+    defaultTab: "tabConsole",
+    defaultView: "consoleView",
+    code: `# 1. Binary Search on a Sorted Columnar Array
+sub binary_search(@arr, $target) {
+    my $lo = 0;
+    my $hi = @arr.elems() - 1;
+    while $lo <= $hi {
+        my $mid = int(($lo + $hi) / 2);
+        my $v = @arr[$mid];
+        if $v == $target { return $mid; }
+        if $v < $target  { $lo = $mid + 1; }
+        else             { $hi = $mid - 1; }
+    }
+    return -1;
+}
+
+my @raw = [42, 7, 19, 88, 3, 25, 64, 12];
+my @sorted = psort(@raw);
+say "psort: ", @sorted;
+say "index of 25: ", binary_search(@sorted, 25);
+
+# 2. Columnar Vector Math (AVX2 on x86-64 / --cc, unrolled in WASM)
+my @u = [1.0, 2.0, 3.0, 4.0];
+my @v = [10.0, 20.0, 30.0, 40.0];
+say "simd_sum(@sorted) = ", simd_sum(@sorted);
+say "simd_dot(@u, @v)  = ", simd_dot(@u, @v);
+say "simd_add          = ", simd_add([1, 2, 3, 4], [10, 20, 30, 40]);
+say "SIMD backend      = ", simd_info();
+`
+  },
+
+  {
+    title: "22. HTML5 Canvas 2D Graphics Engine",
     desc: `
       <p>Raptor communicates directly with HTML5 2D Canvas contexts via procedural drawing primitives.</p>
       <p>The entire radar HUD, coordinate grid, and geometric math are evaluated in <strong>pure Raptor code</strong>.</p>
@@ -1499,7 +1570,7 @@ say "Canvas 2D HUD generated with pure Raptor vector primitives and trigonometry
   },
 
   {
-    title: "22. WebGL 3D Hardware Graphics",
+    title: "23. WebGL 3D Hardware Graphics",
     desc: `
       <p>Raptor compiles GLSL shaders, defines 3D geometry buffers, and computes 4x4 trigonometric transformation matrices directly in Raptor source code.</p>
       <p>Click <strong>Run</strong> to compile shaders, upload the 3D cube to GPU memory, and start continuous hardware-accelerated 3D rotation!</p>
@@ -1653,7 +1724,7 @@ say " - Continuous 60fps hardware rotation loop active!";
   },
 
   {
-    title: "23. WebAudio Node Graph & Timeline",
+    title: "24. WebAudio Node Graph & Timeline",
     desc: `
       <p>This lesson builds a real <strong>Web Audio</strong> graph in Raptor: oscillators, ADSR gains, a low-pass filter, an LFO into <code>frequency</code>, a compressor, and a delay send.</p>
       <p>Notes are scheduled on <code>AudioContext.currentTime</code> — no <code>setTimeout</code>. The melody is the same C4–E4–G4–B4–C5 major-7th arpeggio.</p>
@@ -1736,7 +1807,7 @@ say "scheduled C4 E4 G4 B4 C5 on the AudioContext timeline";
   },
 
   {
-    title: "24. WebGPU tiny LLM",
+    title: "25. WebGPU tiny LLM",
     disabled: true,
     desc: `
       <p>Raptor loads a <strong>tiny character-level language model</strong> (n-gram mix + a linear layer) and runs next-token prediction from the script.</p>
